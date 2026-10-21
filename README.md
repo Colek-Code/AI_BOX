@@ -13,6 +13,15 @@ AI BOX 成品项目的开源固件工程。
 
 ## 获取工程
 
+网页下载：在仓库主页选择 **Code → Download ZIP**，解压到较短的英文路径。
+仓库发布时需启用 **Settings → General → Archives → Include Git LFS objects in archives**，
+并实际检查下载包中的库文件；仅确认 LFS 上传成功不代表 ZIP 已包含大文件。
+若 `.a` 文件只有约 130 字节，打开后以 `version https://git-lfs.github.com/spec/v1` 开头，
+它仍是指针，不能用于链接。请重新获取完整 ZIP，或使用下面的 Git 克隆方式；
+普通 ZIP 不包含 `.git`，不能在其解压目录直接用 `git lfs pull` 修复。
+
+Git 克隆方式：
+
 先安装 Git 和 Git LFS，再获取源码及大文件：
 
 ```powershell
@@ -74,12 +83,16 @@ SDK 库、编译工具和烧录入口仍随工程保留；若使用需要独立�
 
 ## 快速开始
 
-1. 安装杰理 Windows 开发工具链。
+1. 安装杰理 Windows 开发工具链及 Python 3.10 或更新版本，确保终端中的 `python --version` 可用。
 2. 在 [board_config.h](apps/D_Code/config/board_config.h) 中选择板型。
 3. 在 [app_config.h](apps/D_Code/config/app_config.h) 中选择界面和功能。
 4. 按 [D_Code 使用说明](apps/D_Code/README.md) 完成配置、编译和烧录。
 
 `ac791n_D_Code` 编译并烧录时擦除 VM；`ac791n_D_Code_keep_vm` 保留 VM。
+
+默认小乐唤醒构建还需工具链中的 `llvm-ar.exe`、`llvm-nm.exe`、`llvm-bcrename.exe` 和 `clang.exe`。
+百度 BRTC 是默认关闭的可选集成；当前公开基线不含 `libbrtc.a`，启用前需自行取得对应 SDK 库，
+不能只修改功能开关。默认 Qwen 配置不依赖这份 BRTC 库。
 
 OTA 打包入口为 [D_code_OTA.bat](apps/D_Code/D_code_OTA.bat)，
 步骤见 [OTA 升级包](apps/D_Code/README.md#ota-升级包)。

@@ -1,9 +1,6 @@
 # AI_BOX
 
 AI BOX 成品项目的开源固件工程。
-初始源码基线来自 [AC791N 开源工程](https://gitcode.com/yunthinker/fw-AC791N_SDK)
-的 `6e32a97f8952ffc8568258b3f94b1bda8ca2dc20` 版本，在本仓库独立维护。
-当前导入保留该基线的硬件配置；成品板适配以本仓库后续配置和验证为准。
 
 基于杰理 AC791N SDK 的模块化固件工程，集成触控桌面、Qwen 语音对话、
 万年历、番茄钟、本地闹钟、相机预览和 HTTPS 双备份 OTA。

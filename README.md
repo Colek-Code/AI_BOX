@@ -68,15 +68,6 @@ git lfs pull
 - [历法数据来源与许可](apps/D_Code/modules/applications/product_ui/features/time/calendar_data/NOTICE.md)
 - [开发板与 SDK 文档](https://doc.yunthinker.com/#/docs/AC791N/%E5%BC%80%E5%8F%91%E6%9D%BF%E4%BB%8B%E7%BB%8D/1)
 
-## 社区
-
-技术交流QQ群：593243414
-
-## 许可与致谢
-
-项目许可证见 [LICENSE](LICENSE)。第三方代码、字体和二进制库遵循各自的许可证与授权条件。
-
-感谢杰理 SDK 及 [AC791N 开源工程](https://gitcode.com/yunthinker/fw-AC791N_SDK) 提供的基础支持。
 
 ## 芯片与下载支持
 

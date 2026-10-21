@@ -21,15 +21,11 @@ GC9307/HYN 配置：**16 MB Flash、8 MB SDRAM、320 × 240 显示分辨率**。
 
 Windows 下使用杰理工具链，默认安装路径为 `C:\JL\pi32`。
 
-同时安装 Python 3.10 或更新版本并加入 PATH，先在终端确认 `python --version`。
-默认启用的小乐唤醒会调用 `tools/prepare_xiaole_library.py`，需要工具链 `bin` 目录中的
-`llvm-ar.exe`、`llvm-nm.exe`、`llvm-bcrename.exe` 和 `clang.exe`；它在构建目录生成适配库，
-不会修改随仓库提供的厂商库。
+安装 Python 3.10 或更新版本并加入 PATH，确认 `python --version` 可用。
+工具链 `bin` 目录需包含 `clang.exe`、`llvm-ar.exe`、`llvm-nm.exe` 和 `llvm-bcrename.exe`。
 
-从 GitHub 下载 ZIP 时，确认 SDK 的 `.a` 文件是真实库而非 Git LFS 指针；获取方法见
-[仓库首页](../../README.md#获取工程)。联网和云端功能需要填写自己的凭据。
-`D_FEATURE_BRTC` 默认关闭，公开基线不包含 `modules/integrations/baidu_rtc/sdk/lib/libbrtc.a`；
-启用该可选功能前必须另行取得匹配的 SDK 库，默认 Qwen 模式不受此项影响。
+工程下载方式见 [仓库首页](../../README.md#下载)。联网和云端功能需要填写自己的凭据。
+可选的百度 BRTC 功能默认关闭；如需启用，请先补齐对应 SDK 的 `libbrtc.a`。
 
 | IDE 任务／Make 目标 | 行为 |
 | --- | --- |

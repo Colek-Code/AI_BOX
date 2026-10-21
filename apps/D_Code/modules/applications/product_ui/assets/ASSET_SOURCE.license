@@ -1,0 +1,23 @@
+Product UI retained third-party icon sources
+
+Scope: source/material_symbols/*.svg. Current generated icons use the original
+SVG masters recorded under interface_icons and control_center_icons instead.
+
+Source: Google Material Symbols
+Repository: https://github.com/google/material-design-icons
+Pinned commit: 819d78680a849ceef4c78f863d8753e3160b7c89
+Style: Material Symbols Rounded, weight 500
+Conversion: selected SVG files rasterized offline to LVGL alpha-only A4 data.
+
+Copyright Google LLC
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    https://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.

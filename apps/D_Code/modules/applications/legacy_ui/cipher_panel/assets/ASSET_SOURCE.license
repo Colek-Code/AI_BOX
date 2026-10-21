@@ -1,0 +1,4 @@
+Generated embedded wallpaper resource.
+
+The first implementation uses a programmatically generated abstract gradient texture to avoid unclear third-party licensing and to keep Flash/RAM usage controlled.
+Replacement assets can be converted to the same LVGL RGB565 C-array interface in main_page_assets.c.

@@ -1,0 +1,252 @@
+{
+  "schema_version": 1,
+  "native_icon_sizes": [
+    12,
+    14,
+    16,
+    18
+  ],
+  "policy": {
+    "missing_resource": "error",
+    "fallback_icon": null,
+    "forbidden_fallback_icon": "settings"
+  },
+  "tools": {
+    "pillow": "12.1.0",
+    "lv_font_conv": "1.5.3",
+    "resvg_py": "0.3.1"
+  },
+  "rgb565": {
+    "source_kind": "svg-catalog-v1",
+    "width": 320,
+    "height": 240,
+    "thumbnail_width": 80,
+    "thumbnail_height": 60,
+    "format": "RGB565",
+    "dither": "bayer4x4-v1",
+    "wallpapers": [
+      {
+        "id": 0,
+        "slug": "deep_sea",
+        "name": "深海蓝",
+        "source": "source/wallpapers/deep_sea.svg",
+        "sha256": "fdc82082439ed74e9ef95018855622d7cee4130b0b91adf90dc0c2a98d529dd6",
+        "main": "generated/product_ui_wallpaper_normal.inc",
+        "thumbnail": "generated/product_ui_wallpaper_deep_sea_thumb.inc"
+      },
+      {
+        "id": 1,
+        "slug": "aurora",
+        "name": "极光青",
+        "source": "source/wallpapers/aurora.svg",
+        "sha256": "cdf3f4fdcf7405fad09e50b1e1b5a8facf8c69878c7eae5d4ab0ec55a3f86b61",
+        "main": "generated/product_ui_wallpaper_aurora.inc",
+        "thumbnail": "generated/product_ui_wallpaper_aurora_thumb.inc"
+      },
+      {
+        "id": 2,
+        "slug": "twilight",
+        "name": "暮光紫",
+        "source": "source/wallpapers/twilight.svg",
+        "sha256": "140d91f6f0a6514c4f218095537be1d44ffe8c0c3ba6e084054ba8ab0d797153",
+        "main": "generated/product_ui_wallpaper_twilight.inc",
+        "thumbnail": "generated/product_ui_wallpaper_twilight_thumb.inc"
+      }
+    ],
+    "palette": {
+      "surface_media": "252D3A",
+      "surface_quick": "252D3A",
+      "surface_slider": "252D3A",
+      "surface_pressed": "384252",
+      "on_surface": "F2F5F7",
+      "on_surface_variant": "B6BFCD",
+      "primary": "78B8F2",
+      "on_primary": "102536",
+      "slider_fill": "E9EDF0",
+      "slider_icon": "31404A",
+      "control_border": "818B9A"
+    }
+  },
+  "home_color_icons": {
+    "canvas_size": 60,
+    "optical_size": 56,
+    "corner_radius": 12,
+    "alpha_threshold": 128,
+    "source_edge_inset": {},
+    "content_bounds": {
+      "empty_slot_frost.png": [
+        0,
+        0,
+        256,
+        256
+      ]
+    },
+    "description": "Home app color tiles (ui_pack/home); encoded by build_product_ui_color_icons.py",
+    "source_dir": "source/ui_pack/home",
+    "source_sha256": {
+      "alarm.png": "a4f64012358b647917adf4e9db5dbda6675130a76945ce9e32b65786ec01a73e",
+      "calculator.png": "1b712b8650fd1f9400d7a1cd93831d4c3ba3168441522297470ba6b7d1b8edb7",
+      "calendar.png": "c7b05df93e42062692eeb2021b72f6ad7541e1491b447c5654e8bf73a8983ef9",
+      "empty_slot_frost.png": "3f4fee975e4b422da6000905fb38274e228c6bfae9c5fad3dab8fcb1f425e152",
+      "gallery.png": "74c8d6da4f2ab72b55f2ece017784a249c869f99a18092c328ee0e191f2a2651",
+      "music.png": "54ed2c4f11f185e1feb9dcabb5ade0ae1f78c5b7326da97d284e355178c7032e",
+      "schedule.png": "e54b45b593dbcc08f27353508297962c00b4e2bc7eb06668d1410a070c3903a8",
+      "settings.png": "418c30c740672d3c40637ce3a0deec341091d172e670d585cdbb63efe13f8794",
+      "ai_chat.png": "e122e7221d215a2a09ef2a16b2762c51b27d0635f250fd9ba5a4aef235a71dc7",
+      "camera.png": "582a7b71bd6fbaa289cdbb7c2666ed85f76cbfb2455b56218ad29059c6a3bffc",
+      "pomodoro.png": "2d993f8a7c80163b9c60ea25ce21f253c8dc576e7e1a1356649df36305f0088d"
+    },
+    "derived_sources": {
+      "music.png": {
+        "svg": "source/ui_pack/home/music.svg",
+        "sha256": "dbfcf2f095d89c2cd090c02c37825bbd0e2abd29f2c8e60836d948c5bb9bf839",
+        "origin": "original-vector",
+        "contour": "source"
+      },
+      "calendar.png": {
+        "svg": "source/ui_pack/home/calendar.svg",
+        "sha256": "6881c0d40600a05c270757a89f4dadc32b804f37e6c646f7ea8c202fb5c169ba",
+        "origin": "original-vector",
+        "contour": "source"
+      },
+      "calculator.png": {
+        "svg": "source/ui_pack/home/calculator.svg",
+        "sha256": "f0c16449b28a650377fa10fcb418edc72cef5904fba27f8cf94d220aced785bd",
+        "origin": "original-vector",
+        "contour": "source"
+      },
+      "alarm.png": {
+        "svg": "source/ui_pack/home/alarm.svg",
+        "sha256": "ba3722fcf6112e1273d02a8114dff107ba670e05ea12d4dd557d8c0ef3d4b342",
+        "origin": "original-vector",
+        "contour": "source"
+      },
+      "schedule.png": {
+        "svg": "source/ui_pack/home/schedule.svg",
+        "sha256": "7e25a8fa83dadece568365862e9a8be8e977c2f2e4cc3d05fda82fd029c79207",
+        "origin": "original-vector",
+        "contour": "source"
+      },
+      "empty_slot_frost.png": {
+        "svg": "source/ui_pack/home/empty_slot_frost.svg",
+        "sha256": "93dc66be05697108152f2cc6e8a8f86905cc582a58b56ef4e25fcd90d3476f2d",
+        "origin": "original-vector",
+        "contour": "source"
+      },
+      "ai_chat.png": {
+        "svg": "source/ui_pack/home/ai_chat.svg",
+        "sha256": "6d1eabf1d422bf28648815e273c62069cbe6c90a098950ee3c43714cdbc1c997",
+        "origin": "original-vector",
+        "contour": "source"
+      },
+      "camera.png": {
+        "svg": "source/ui_pack/home/camera.svg",
+        "sha256": "cf8f24069dd42b63a7ce4f24d119a15bb90b6ef5ada71bd6af787c3bf6fab32a",
+        "origin": "original-vector",
+        "contour": "source"
+      },
+      "settings.png": {
+        "svg": "source/ui_pack/home/settings.svg",
+        "sha256": "db27e05456380f77b35a5b248b4f06d9c60d11542aadb8a82f36c028d2e769bf",
+        "origin": "original-vector",
+        "contour": "source"
+      },
+      "gallery.png": {
+        "svg": "source/ui_pack/home/gallery.svg",
+        "sha256": "3eef49067a096df23eb49d33a49d2cc72a16c892a2c4cec50df99011f6f3b92c",
+        "origin": "original-vector",
+        "contour": "source"
+      },
+      "pomodoro.png": {
+        "svg": "source/ui_pack/home/pomodoro.svg",
+        "sha256": "a1269374b2f743f728af4d5789d6bb236463f8bca00ef240656297a35e9c2d21"
+      }
+    }
+  },
+  "material_symbols": {
+    "repository": "https://github.com/google/material-design-icons",
+    "commit": "819d78680a849ceef4c78f863d8753e3160b7c89",
+    "license": "Apache-2.0",
+    "style": "Material Symbols Rounded",
+    "weight": 500,
+    "source_sha256": {
+      "alarm_wght500fill1_24px.svg": "f610ae9301b7b20558f85a8d3082b1030e1c0fdc7fc373377ef28191bf0a75cc",
+      "bluetooth_wght500_24px.svg": "9d5267d3fc752735dbc8b18574b8ecb9f9e5eaccd9e85847bf8c0b71dc981870",
+      "calculate_wght500fill1_24px.svg": "5109bd2eef045c26549c904f05395d7fa03ddb44a63a1e63c8d1a097b4c23f41",
+      "calendar_month_wght500fill1_24px.svg": "c37796c5abe889ae0b80cfcdfd259ff0e1abd11924adca73682eeb04c64bf513",
+      "event_note_wght500fill1_24px.svg": "51d69c25388a4019f451cbd1e4bb8d213cac36b2aa90a36fa79deb898c732167",
+      "light_mode_wght500fill1_24px.svg": "dad618914585f1ef4649ba818059933e0fc36da0d3924800a442b2a5d3a62975",
+      "music_note_wght500fill1_24px.svg": "eda4ed10ea76a268f49c972f5919b935df354a2fc53002253a5073bde239e8c5",
+      "photo_library_wght500fill1_24px.svg": "f70f9272841b9cdad864bf45f94436520ff07b913ff7cf1fdde74dd184f997bd",
+      "screen_rotation_wght500_24px.svg": "83d88cb94ef2c6bd6d3eef0211c9c35fdcda50c64c783da4cfb70811255c1841",
+      "settings_wght500fill1_24px.svg": "702088f78d42d002a035de8babf440e901f0c3efdd671fffc9fa21fe4d7bacb4",
+      "timer_wght500fill1_24px.svg": "694a718bab299d80e431a379398f02ea6784038144aab008afca1d57d0a84c34",
+      "volume_up_wght500fill1_24px.svg": "c14aecbc43e0a843130b16d611ad69be33f2795d3eb0770623740161c5f4cc81",
+      "wifi_wght500_24px.svg": "e089fa22fbd23c1bbca413b9dce447eecac3f0b17a5925924474d2e8f1205d0e",
+      "chat_bubble_wght500fill1_24px.svg": "c6dc6a8d3c94a75da4b4c518dccafdb15ec033cc0b4ec2078e73fa5b047f3049",
+      "photo_camera_wght500fill1_24px.svg": "72212f8420c66a30e43090b7dd0bd3e9612ce09ec74f51442f1f5b28aec94dd3"
+    }
+  },
+  "interface_icons": {
+    "description": "Original monochrome application glyphs; shared functions reuse control_center masters",
+    "source_dir": "source/interface",
+    "origin": "original-vector",
+    "source_sha256": {
+      "ai_chat.svg": "6842fec32820560893dc31534888c6cae01114d67ac6c50eb6198fe0e3a0a316",
+      "bluetooth.svg": "67e5fcbddea7abf6aed6d30d1e7efd3409d0dbda29bed214a236704bc048bf81",
+      "calculator.svg": "8839abe56cf728ba287fcb437a7f1497340aee5a54fbc57acc81b2c67a523751",
+      "calendar.svg": "7a7b19d2c314777acc6d6e50b636eac9eaf97afa3e743ac3ba6359e64d1affda",
+      "camera.svg": "3e3a3667928b0bb2e261f78137c5903da18818ccf176217370ca551055a73513",
+      "gallery.svg": "764835929649221152ff4fd70dffc581e64eecdb216241f2495db1caa9a6ffda",
+      "schedule.svg": "7c75c62509efb98560ee83bda5854c85da250a3de2d7234fd69491ce8890b2b8",
+      "timer.svg": "0b3434b937080af5a0038dc622df138d45c5a6deca35bc3604b472ee584285b8"
+    }
+  },
+  "control_center_icons": {
+    "description": "Independent SVG masters for Product UI control center glyphs",
+    "source_dir": "source/control_center",
+    "source_sha256": {
+      "alarm.svg": "6145a573686be691e83fb077bc6f563d0c1695a09096b225503f0233c669b68c",
+      "brightness.svg": "8a8e9cbbcea2795a20d2cdc2f3bf698dafc44489077d244b4c56e793f8492011",
+      "focus.svg": "3fb4dff69e5d6e70afad284c4c828fdd945da12d6f3f382f4f6d5d2bb74b681f",
+      "media.svg": "eaef70e329d58a35298bf4a88e9f8377110dff4128c2ccc7ca73323d3d692c39",
+      "next.svg": "d92dd6c5d6a49280f7a0d3d82ded6d43442e842806d1ff3a0d75822c9efbc092",
+      "pause.svg": "48dbac635eeed96dcbc842be8d46de1aaabf731eb3539f82ff4755e5065e7445",
+      "play.svg": "c77f0f9139deaff95f6ce7e2986e03f2a197f5ee555f2e3bfc3f588205a02af7",
+      "previous.svg": "e1fa54059fa0717af2130cdfa9ad2e093c0c00f280a93c80ea8a340c544f30ab",
+      "rotation.svg": "fe28ff51287f0a5a065a67c260f3fbdc74b65c92fe9e06fd8309eb1cd417f04a",
+      "settings.svg": "803959caa54a822fbaca038f9220d639e62f27653900e8aa969c520cb56e00e0",
+      "volume.svg": "7f17fbd95bb848158fefe1864d4f404f82800c45596d3faecd03273fa325bfca",
+      "wifi.svg": "8256d2c99b2eefae7efa35b854afec5303f0b365ed459c33de591c279f601785"
+    }
+  },
+  "noto_sans_sc": {
+    "upstream_family": "Noto Sans CJK SC",
+    "product_name": "Noto Sans SC",
+    "version": "2.004",
+    "style": "Regular",
+    "weight": 400,
+    "repository": "https://github.com/notofonts/noto-cjk",
+    "commit": "523d033d6cb47f4a80c58a35753646f5c3608a78",
+    "source_path": "Sans/OTF/SimplifiedChinese/NotoSansCJKsc-Regular.otf",
+    "source_url": "https://raw.githubusercontent.com/notofonts/noto-cjk/523d033d6cb47f4a80c58a35753646f5c3608a78/Sans/OTF/SimplifiedChinese/NotoSansCJKsc-Regular.otf",
+    "local_path": "fonts/source/NotoSansCJKsc-Regular.otf",
+    "source_size": 16437364,
+    "source_git_blob_sha1": "dc15562470b4f842321894787a0d066879ccff8b",
+    "license": "OFL-1.1",
+    "license_path": "LICENSE",
+    "license_url": "https://github.com/notofonts/noto-cjk/blob/523d033d6cb47f4a80c58a35753646f5c3608a78/LICENSE",
+    "license_git_blob_sha1": "d952d62c065f3f35fb83a173496e90b21525aef3",
+    "inventory": "fonts/strings.inventory",
+    "inventory_scan_root": "..",
+    "sizes": [
+      10,
+      12,
+      14,
+      18
+    ],
+    "bpp": 4,
+    "ascii_range": "0x20-0x7e",
+    "network_fetch": false
+  }
+}

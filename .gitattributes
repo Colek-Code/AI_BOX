@@ -1,0 +1,14 @@
+# Prebuilt libs over GitCode soft limits
+cpu/wl82/liba/libmatter.a filter=lfs diff=lfs merge=lfs -text
+cpu/wl82/liba/*.a filter=lfs diff=lfs merge=lfs -text
+cpu/wl82/liba/rtl*.a filter=lfs diff=lfs merge=lfs -text
+cpu/wl82/liba/libaicwifi.a filter=lfs diff=lfs merge=lfs -text
+cpu/wl82/liba/libwebsockets.a filter=lfs diff=lfs merge=lfs -text
+# Fonts
+apps/D_Code/modules/product_ui/assets/fonts/source/*.otf filter=lfs diff=lfs merge=lfs -text
+*.otf filter=lfs diff=lfs merge=lfs -text
+# tools 大文件（*.bc / sdk.elf.o 等 >10MiB）走 LFS
+cpu/wl82/tools/*.bc filter=lfs diff=lfs merge=lfs -text
+cpu/wl82/tools/sdk.elf.o filter=lfs diff=lfs merge=lfs -text
+cpu/wl82/tools/jl_isd_extend.bin filter=lfs diff=lfs merge=lfs -text
+cpu/wl82/tools/symbol_tbl.txt filter=lfs diff=lfs merge=lfs -text

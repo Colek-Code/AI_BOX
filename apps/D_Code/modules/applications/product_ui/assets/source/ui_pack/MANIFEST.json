@@ -1,0 +1,30 @@
+{
+  "version": 6,
+  "style": "home Imagine color tiles only",
+  "screen": "320x240 landscape product_ui",
+  "home_icons": {
+    "files": [
+      "music",
+      "calendar",
+      "calculator",
+      "gallery",
+      "alarm",
+      "timer",
+      "schedule",
+      "ai_chat",
+      "camera",
+      "settings"
+    ],
+    "empty": "empty_slot_frost.png"
+  },
+  "control": {
+    "status": "removed",
+    "note": "CC glyphs from source/control_center SVG masters (A4 monochrome)"
+  },
+  "removed": [
+    "control/",
+    "pipeline/generate_frost_plates.py",
+    "frost_* plates",
+    "media_*/quick_* color buttons"
+  ]
+}

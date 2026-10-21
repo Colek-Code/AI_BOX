@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 64 64">
+  <defs>
+    <linearGradient id="background" x2=".25" y2="1"><stop stop-color="#f0f2f5"/><stop offset="1" stop-color="#b0b8c3"/></linearGradient>
+    <linearGradient id="body" x2="0" y2="1"><stop stop-color="#434d5b"/><stop offset="1" stop-color="#202833"/></linearGradient>
+    <linearGradient id="rim" x2=".6" y2="1"><stop stop-color="#aebcca"/><stop offset="1" stop-color="#64778d"/></linearGradient>
+    <radialGradient id="lens" cx=".35" cy=".25" r=".8"><stop stop-color="#355a72"/><stop offset=".5" stop-color="#173044"/><stop offset="1" stop-color="#0e1824"/></radialGradient>
+    <path id="camera" d="M16 21h6l3-5h14l3 5h6a6 6 0 0 1 6 6v17a6 6 0 0 1-6 6H16a6 6 0 0 1-6-6V27a6 6 0 0 1 6-6Z"/>
+  </defs>
+  <path fill="url(#background)" d="M22 0h20c7.1 0 10.7 0 13.8 1.6a15.2 15.2 0 0 1 6.6 6.6C64 11.3 64 14.9 64 22v20c0 7.1 0 10.7-1.6 13.8a15.2 15.2 0 0 1-6.6 6.6C52.7 64 49.1 64 42 64H22c-7.1 0-10.7 0-13.8-1.6a15.2 15.2 0 0 1-6.6-6.6C0 52.7 0 49.1 0 42V22C0 14.9 0 11.3 1.6 8.2a15.2 15.2 0 0 1 6.6-6.6C11.3 0 14.9 0 22 0Z"/>
+  <use href="#camera" fill="#647181" opacity=".18" transform="translate(0 1.1)"/>
+  <use href="#camera" fill="url(#body)"/>
+  <circle cx="32" cy="34.5" r="11.5" fill="url(#rim)"/>
+  <circle cx="32" cy="34.5" r="9.1" fill="#111f2e"/>
+  <circle cx="32" cy="34.5" r="7.4" fill="url(#lens)"/>
+  <ellipse cx="29.6" cy="31.6" rx="3.2" ry="2.2" fill="#91c4d1" opacity=".38" transform="rotate(-35 29.6 31.6)"/>
+  <circle cx="46.5" cy="26" r="1.55" fill="#f9cf6c"/>
+  <path d="M28 19h8" stroke="#dce3eb" stroke-width="1" stroke-linecap="round" opacity=".35"/>
+</svg>

@@ -1,0 +1,12 @@
+CompileFlags:
+  Remove:
+    - "-target"
+    - "-mcpu=*"
+    - "-mfprev1"
+    - "-mllvm"
+    - "-pi32v2-large-program=*"
+    - "-flto"
+    - "-integrated-as"
+    - "-fprefer-gnu-section"
+    - "-femulated-tls"
+    - "-fallow-pointer-null"

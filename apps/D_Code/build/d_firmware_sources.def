@@ -1,0 +1,264 @@
+/*
+ * D_Code firmware source list.
+ *
+ * This file deliberately has no include guard: the build resolver includes it
+ * after defining D_SOURCE().  Adding an ordinary D_Code module therefore needs
+ * only one C-style entry here; the Makefile remains an internal implementation.
+ */
+#ifndef D_SOURCE
+#error "d_firmware_sources.def 只能由内部构建解析器包含"
+#endif
+
+/* Application skeleton and framework. */
+D_SOURCE("app/app_main.c")
+D_SOURCE("app/d_service_startup.c")
+D_SOURCE("app/d_ui_startup.c")
+D_SOURCE("config/d_config_report.c")
+D_SOURCE("board/wl82/d_board.c")
+D_SOURCE("framework/d_lvgl.c")
+D_SOURCE("framework/d_ui_font.c")
+D_SOURCE("framework/d_page_manager.c")
+D_SOURCE("framework/d_ui_module.c")
+D_SOURCE("platform/screen/transition/d_page_transition.c")
+D_SOURCE("framework/d_event_bus.c")
+D_SOURCE("platform/storage/d_storage.c")
+D_SOURCE("platform/screen/power/d_screen_power.c")
+D_SOURCE("platform/pwm/d_pwm.c")
+D_SOURCE("platform/screen/lcd/d_lcd_compat.c")
+
+#ifdef D_TCP_CLIENT_TEST
+D_SOURCE("modules/diagnostics/network/tcp_client/d_tcp_client.c")
+#endif
+
+/* Optional services. */
+#if D_LOCAL_PROMPT_ENABLE
+D_SOURCE("modules/services/audio/d_local_prompt.c")
+D_SOURCE("modules/services/audio/d_local_prompt_decoder.c")
+#endif
+#if D_FEATURE_QWEN || D_FEATURE_XIAOLE_WAKEUP || D_FEATURE_BRTC || \
+    D_FEATURE_RTC_AUDIO || D_FEATURE_LOCAL_MUSIC || \
+    (D_UI_TARGET == D_UI_PRODUCT) || (D_UI_TARGET == D_UI_CIPHER_PANEL)
+D_SOURCE("modules/services/audio/d_device_volume.c")
+#endif
+
+#if D_FEATURE_KEY_SERVICE
+D_SOURCE("modules/services/key/d_key_service.c")
+#endif
+
+#if D_FEATURE_POWER_CONTROL
+D_SOURCE("modules/services/power/power_ctrl.c")
+#endif
+
+#if D_FEATURE_WIFI
+D_SOURCE("modules/services/wifi/wifi_service.c")
+#endif
+
+#if D_FEATURE_BLE_PROVISION
+D_SOURCE("modules/services/ble_provisioning/d_ble_net_cfg.c")
+D_SOURCE("modules/services/ble_provisioning/d_ble_provision_json.c")
+D_SOURCE("modules/services/ble_provisioning/ble_service.c")
+#endif
+
+#ifdef CONFIG_MBEDTLS_ENABLE
+D_SOURCE("framework/d_crypto.c")
+#endif
+
+#if D_DEVICE_CLOUD_ENABLE
+D_SOURCE("modules/services/provisioning/device_credentials.c")
+D_SOURCE("modules/services/provisioning/provision_service.c")
+D_SOURCE("modules/services/websocket/ws_service.c")
+#endif
+
+#if D_FEATURE_AI_CHAT
+D_SOURCE("modules/applications/ai_chat/ai_service.c")
+D_SOURCE("modules/applications/ai_chat/ai_presenter.c")
+D_SOURCE("modules/applications/ai_chat/ai_view.c")
+D_SOURCE("modules/applications/ai_chat/d_chat_ui.c")
+D_SOURCE("modules/applications/ai_chat/d_face_engine.c")
+#endif
+
+#if D_CAMERA_PREVIEW_ENABLE
+D_SOURCE("platform/screen/profiles/gc9307_hyn/lvgl/lv_port_disp_gc9307_region.c")
+D_SOURCE("modules/services/camera/camera_preview_state.c")
+D_SOURCE("modules/services/camera/camera_frame.c")
+D_SOURCE("modules/services/camera/camera_preview.c")
+D_SOURCE("modules/applications/product_ui/features/camera/product_ui_camera_controller.c")
+D_SOURCE("modules/applications/product_ui/features/camera/product_ui_camera_page.c")
+#elif D_FEATURE_CAMERA
+D_SOURCE("modules/applications/camera/d_camera_page.c")
+#endif
+
+#if D_FEATURE_GALLERY
+D_SOURCE("modules/applications/legacy_ui/gallery/d_gallery_page.c")
+#endif
+
+#if D_FEATURE_LOCAL_MUSIC
+D_SOURCE("modules/services/local_music/music_service.c")
+#endif
+
+#if D_FEATURE_RTC_AUDIO
+D_SOURCE("modules/diagnostics/audio/rtc_loopback/rtc_audio_service.c")
+#endif
+
+#if D_FEATURE_BRTC
+D_SOURCE("modules/integrations/baidu_rtc/brtc_service.c")
+D_SOURCE("modules/integrations/baidu_rtc/sdk/platform/app_sdk_audiorecorder.c")
+D_SOURCE("modules/integrations/baidu_rtc/sdk/platform/app_sdk_localdata_audio_play.c")
+#endif
+
+#if D_FEATURE_QWEN
+D_SOURCE("modules/services/audio/d_audio_stop_ticket.c")
+D_SOURCE("modules/integrations/qwen/qwen_session_policy.c")
+D_SOURCE("modules/integrations/qwen/qwen_audio.c")
+D_SOURCE("modules/integrations/qwen/qwen_cmd.c")
+D_SOURCE("modules/integrations/qwen/qwen_service.c")
+D_SOURCE("modules/integrations/qwen/qwen_hal.c")
+D_SOURCE("modules/integrations/qwen/qwen_net.c")
+D_SOURCE("modules/integrations/qwen/qwen_wss.c")
+#endif
+
+#if D_FEATURE_XIAOLE_WAKEUP
+D_SOURCE("modules/integrations/xiaole_wakeup/xiaole_wakeup.c")
+D_SOURCE("modules/integrations/xiaole_wakeup/xiaole_sdk_release.c")
+#endif
+
+#if D_FEATURE_OTA
+D_SOURCE("modules/services/ota/ota_service.c")
+D_SOURCE("modules/services/ota/ota_protocol.c")
+D_SOURCE("modules/services/ota/ota_https.c")
+D_SOURCE("modules/services/ota/ota_port_wl82.c")
+D_SOURCE("modules/services/ota/ota_sdk_wl82.c")
+D_SOURCE("modules/applications/product_ui/adapters/gc9307/product_ui_ota_gc9307.c")
+D_SOURCE("modules/applications/product_ui/features/settings/product_ui_settings_ota_page.c")
+D_SOURCE("modules/applications/product_ui/features/settings/product_ui_ota_notice.c")
+#endif
+
+/* Exactly one root UI. */
+#if (D_UI_TARGET == D_UI_CIPHER_PANEL) || (D_UI_TARGET == D_UI_PRODUCT)
+D_SOURCE("modules/applications/qwen_subtitle/qwen_subtitle_text.c")
+D_SOURCE("modules/applications/qwen_subtitle/qwen_subtitle_sentence.c")
+D_SOURCE("modules/applications/qwen_subtitle/qwen_subtitle_emoji_font_16.c")
+#endif
+#if D_UI_TARGET == D_UI_CIPHER_PANEL
+D_SOURCE("modules/applications/legacy_ui/cipher_panel/cipher_panel_demo.c")
+D_SOURCE("modules/applications/legacy_ui/cipher_panel/aichat/cipher_panel_aichat.c")
+D_SOURCE("modules/applications/legacy_ui/cipher_panel/pages/cipher_panel_pages.c")
+D_SOURCE("modules/applications/legacy_ui/cipher_panel/wifi/cipher_panel_wifi_page.c")
+D_SOURCE("modules/applications/legacy_ui/cipher_panel/wifi/cipher_panel_wifi_input.c")
+D_SOURCE("modules/applications/legacy_ui/cipher_panel/assets/cipher_clock_font_54.c")
+D_SOURCE("modules/applications/legacy_ui/cipher_panel/assets/main_page_assets.c")
+D_SOURCE("modules/applications/legacy_ui/cipher_panel/assets/main_page_lvgl_logo.c")
+#elif D_UI_TARGET == D_UI_LAUNCHER_DEMO
+D_SOURCE("modules/diagnostics/display/launcher_demo/launcher_demo.c")
+#elif D_UI_TARGET == D_UI_LIGHT_SPOT_DEMO
+D_SOURCE("modules/diagnostics/display/light_spot_demo/light_spot_demo.c")
+#endif
+
+/* Board-owned drivers and LVGL ports. */
+#if D_BOARD_TARGET == D_BOARD_COPY_GC9307_HYN
+D_SOURCE("platform/screen/profiles/gc9307_hyn/d_display_gc9307.c")
+D_SOURCE("platform/screen/profiles/gc9307_hyn/d_screen_gc9307_hyn.c")
+D_SOURCE("platform/screen/profiles/gc9307_hyn/d_touch_gesture.c")
+D_SOURCE("platform/screen/profiles/gc9307_hyn/d_touch_hyn.c")
+D_SOURCE("platform/screen/profiles/gc9307_hyn/lcd_gc9307.c")
+D_SOURCE("platform/screen/profiles/gc9307_hyn/lvgl/lv_port_disp_gc9307.c")
+D_SOURCE("platform/screen/profiles/gc9307_hyn/lvgl/lv_port_disp_gc9307_trace.c")
+D_SOURCE("platform/screen/profiles/gc9307_hyn/lvgl/lv_port_disp_gc9307_transition.c")
+D_SOURCE("platform/screen/profiles/gc9307_hyn/lvgl/lv_port_indev_gc9307.c")
+#else
+D_SOURCE("platform/screen/profiles/emi_ili948x_gt911_ft6236/d_display_emi.c")
+D_SOURCE("platform/screen/profiles/emi_ili948x_gt911_ft6236/d_touch.c")
+D_SOURCE("platform/screen/profiles/emi_ili948x_gt911_ft6236/lcd_ili9481.c")
+D_SOURCE("platform/screen/profiles/emi_ili948x_gt911_ft6236/lcd_ili9488.c")
+D_SOURCE("platform/screen/profiles/emi_ili948x_gt911_ft6236/lvgl/lv_port_disp_emi.c")
+D_SOURCE("platform/screen/profiles/emi_ili948x_gt911_ft6236/lvgl/lv_port_indev_emi.c")
+#endif
+
+#if D_UI_TARGET == D_UI_TABLET_SHELL
+D_SOURCE("modules/diagnostics/display/tablet_shell/tablet_shell.c")
+D_SOURCE("modules/diagnostics/display/tablet_shell/tablet_shell_panel.c")
+#elif D_UI_TARGET == D_UI_SCREEN_TEST
+D_SOURCE("modules/diagnostics/display/screen_test/screen_test_page.c")
+#elif D_UI_TARGET == D_UI_PRODUCT
+/* Product UI core, services and pinned assets. */
+D_SOURCE("modules/applications/product_ui/product_ui.c")
+D_SOURCE("modules/applications/product_ui/features/ai_chat/product_ui_ai_chat_controller.c")
+D_SOURCE("modules/applications/product_ui/features/ai_chat/product_ui_ai_chat_view.c")
+D_SOURCE("modules/applications/product_ui/features/ai_chat/product_ui_ai_chat_page.c")
+D_SOURCE("modules/applications/product_ui/shell/app_registry/product_ui_app_registry.c")
+D_SOURCE("modules/applications/product_ui/shared/text/product_ui_text.c")
+D_SOURCE("modules/applications/product_ui/runtime/status/product_ui_status_model.c")
+D_SOURCE("modules/applications/product_ui/runtime/service_registry/product_ui_service_registry.c")
+D_SOURCE("modules/applications/product_ui/features/time/product_ui_time_domain.c")
+D_SOURCE("modules/applications/product_ui/features/time/product_ui_time_domain_calendar.c")
+D_SOURCE("modules/applications/product_ui/features/time/product_ui_clock_model.c")
+D_SOURCE("modules/applications/product_ui/features/time/product_ui_clock.c")
+D_SOURCE("modules/applications/product_ui/features/time/product_ui_alarm_rules.c")
+D_SOURCE("modules/applications/product_ui/features/time/product_ui_alarm_model.c")
+D_SOURCE("modules/applications/product_ui/features/time/product_ui_alarm_codec.c")
+D_SOURCE("modules/applications/product_ui/features/time/product_ui_alarm_service.c")
+D_SOURCE("modules/applications/product_ui/adapters/gc9307/product_ui_alarm_gc9307.c")
+D_SOURCE("modules/applications/product_ui/adapters/gc9307/product_ui_alarm_audio.c")
+D_SOURCE("modules/applications/product_ui/features/time/product_ui_calendar_lunar.c")
+D_SOURCE("modules/applications/product_ui/features/time/product_ui_calendar_model.c")
+D_SOURCE("modules/applications/product_ui/features/media/product_ui_media_storage.c")
+D_SOURCE("modules/applications/product_ui/features/media/product_ui_media_control.c")
+D_SOURCE("modules/applications/product_ui/features/settings/product_ui_settings_service.c")
+D_SOURCE("modules/applications/product_ui/runtime/preferences/product_ui_appearance.c")
+D_SOURCE("modules/applications/product_ui/adapters/gc9307/product_ui_appearance_gc9307.c")
+D_SOURCE("modules/applications/product_ui/adapters/power/product_ui_appearance_power.c")
+D_SOURCE("modules/applications/product_ui/adapters/power/product_ui_pomodoro_power.c")
+D_SOURCE("modules/applications/product_ui/runtime/connectivity/product_ui_connection_service.c")
+D_SOURCE("modules/applications/product_ui/runtime/connectivity/product_ui_connection_read_policy.c")
+D_SOURCE("modules/applications/product_ui/adapters/gc9307/product_ui_settings_gc9307.c")
+D_SOURCE("modules/applications/product_ui/adapters/gc9307/product_ui_connection_gc9307.c")
+D_SOURCE("modules/applications/product_ui/adapters/gc9307/product_ui_status_gc9307.c")
+D_SOURCE("modules/applications/product_ui/adapters/gc9307/product_ui_clock_gc9307.c")
+D_SOURCE("modules/applications/product_ui/adapters/gc9307/product_ui_pomodoro_gc9307.c")
+D_SOURCE("modules/applications/product_ui/features/time/product_ui_pomodoro_model.c")
+D_SOURCE("modules/applications/product_ui/features/time/product_ui_pomodoro_codec.c")
+D_SOURCE("modules/applications/product_ui/features/time/product_ui_pomodoro_service.c")
+D_SOURCE("modules/applications/product_ui/shared/theme/product_ui_theme.c")
+D_SOURCE("modules/applications/product_ui/shared/motion/product_ui_motion.c")
+D_SOURCE("modules/applications/product_ui/assets/generated/product_ui_font_noto_sans_sc_10.c")
+D_SOURCE("modules/applications/product_ui/assets/generated/product_ui_font_noto_sans_sc_12.c")
+D_SOURCE("modules/applications/product_ui/assets/generated/product_ui_font_noto_sans_sc_14.c")
+D_SOURCE("modules/applications/product_ui/assets/generated/product_ui_font_noto_sans_sc_18.c")
+D_SOURCE("modules/applications/product_ui/shared/widgets/product_ui_frame.c")
+D_SOURCE("modules/applications/product_ui/shared/widgets/product_ui_controls.c")
+D_SOURCE("modules/applications/product_ui/shared/widgets/product_ui_app_slot.c")
+D_SOURCE("modules/applications/product_ui/shared/widgets/product_ui_row_model.c")
+D_SOURCE("modules/applications/product_ui/shared/widgets/product_ui_virtual_list.c")
+D_SOURCE("modules/applications/product_ui/shared/widgets/product_ui_feedback.c")
+D_SOURCE("modules/applications/product_ui/shell/control_center/product_ui_control_widgets.c")
+D_SOURCE("modules/applications/product_ui/shell/control_center/product_ui_overlay.c")
+D_SOURCE("modules/applications/product_ui/shell/control_center/product_ui_overlay_content.c")
+D_SOURCE("modules/applications/product_ui/features/settings/product_ui_settings_controls.c")
+D_SOURCE("modules/applications/product_ui/shell/home/product_ui_home.c")
+D_SOURCE("modules/applications/product_ui/features/settings/product_ui_settings_page.c")
+D_SOURCE("modules/applications/product_ui/features/calculator/product_ui_calculator_engine.c")
+D_SOURCE("modules/applications/product_ui/features/calculator/product_ui_calculator_model.c")
+D_SOURCE("modules/applications/product_ui/features/calculator/product_ui_calculator_page.c")
+D_SOURCE("modules/applications/product_ui/features/time/product_ui_pomodoro_notice.c")
+D_SOURCE("modules/applications/product_ui/features/time/product_ui_pomodoro_view.c")
+D_SOURCE("modules/applications/product_ui/features/time/product_ui_pomodoro_page.c")
+D_SOURCE("modules/applications/product_ui/features/time/product_ui_calendar_page.c")
+D_SOURCE("modules/applications/product_ui/features/time/product_ui_calendar_view.c")
+D_SOURCE("modules/applications/product_ui/features/time/product_ui_alarm_page.c")
+D_SOURCE("modules/applications/product_ui/features/time/product_ui_time_controls.c")
+D_SOURCE("modules/applications/product_ui/features/time/product_ui_alarm_view.c")
+D_SOURCE("modules/applications/product_ui/features/time/product_ui_alarm_notice.c")
+D_SOURCE("modules/applications/product_ui/features/time/product_ui_schedule_page.c")
+D_SOURCE("modules/applications/product_ui/features/media/product_ui_music_page.c")
+D_SOURCE("modules/applications/product_ui/features/media/product_ui_gallery_page.c")
+D_SOURCE("modules/applications/product_ui/features/settings/product_ui_settings_details_common.c")
+D_SOURCE("modules/applications/product_ui/features/settings/product_ui_settings_connectivity_pages.c")
+D_SOURCE("modules/applications/product_ui/features/settings/product_ui_settings_device_pages.c")
+D_SOURCE("modules/applications/product_ui/features/settings/product_ui_settings_wallpaper_page.c")
+D_SOURCE("modules/applications/product_ui/features/settings/product_ui_settings_time_page.c")
+D_SOURCE("modules/applications/product_ui/debug/product_ui_perf.c")
+D_SOURCE("modules/applications/product_ui/debug/product_ui_visual_capture.c")
+D_SOURCE("modules/applications/product_ui/assets/product_ui_icons.c")
+D_SOURCE("modules/applications/product_ui/assets/product_ui_color_icons.c")
+D_SOURCE("modules/applications/product_ui/assets/product_ui_wallpapers.c")
+#endif

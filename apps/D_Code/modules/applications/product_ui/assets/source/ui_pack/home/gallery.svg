@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 64 64">
+  <defs>
+    <linearGradient id="paper" x2="0" y2="1"><stop stop-color="#fff"/><stop offset="1" stop-color="#f0f2f6"/></linearGradient>
+    <ellipse id="petal" cx="32" cy="21" rx="8.1" ry="13.4"/>
+  </defs>
+  <path fill="url(#paper)" d="M22 0h20c7.1 0 10.7 0 13.8 1.6a15.2 15.2 0 0 1 6.6 6.6C64 11.3 64 14.9 64 22v20c0 7.1 0 10.7-1.6 13.8a15.2 15.2 0 0 1-6.6 6.6C52.7 64 49.1 64 42 64H22c-7.1 0-10.7 0-13.8-1.6a15.2 15.2 0 0 1-6.6-6.6C0 52.7 0 49.1 0 42V22C0 14.9 0 11.3 1.6 8.2a15.2 15.2 0 0 1 6.6-6.6C11.3 0 14.9 0 22 0Z"/>
+  <g fill-opacity=".86">
+    <use href="#petal" fill="#ffb92e" transform="rotate(0 32 32)"/>
+    <use href="#petal" fill="#d5cf38" transform="rotate(45 32 32)"/>
+    <use href="#petal" fill="#5dc976" transform="rotate(90 32 32)"/>
+    <use href="#petal" fill="#58bed5" transform="rotate(135 32 32)"/>
+    <use href="#petal" fill="#6a90dd" transform="rotate(180 32 32)"/>
+    <use href="#petal" fill="#ad82cf" transform="rotate(225 32 32)"/>
+    <use href="#petal" fill="#e77db3" transform="rotate(270 32 32)"/>
+    <use href="#petal" fill="#f58b5e" transform="rotate(315 32 32)"/>
+  </g>
+  <circle cx="32" cy="32" r="3.7" fill="#fff" opacity=".28"/>
+</svg>

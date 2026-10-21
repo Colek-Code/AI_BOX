@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="320" height="240" viewBox="0 0 320 240">
+  <defs>
+    <linearGradient id="night" x2=".7" y2="1"><stop stop-color="#061C23"/><stop offset="1" stop-color="#12382F"/></linearGradient>
+    <linearGradient id="green" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#126264"/><stop offset=".55" stop-color="#226A5C"/><stop offset="1" stop-color="#12383E"/></linearGradient>
+    <linearGradient id="fold" x1="0" y1="0" x2=".6" y2="1"><stop stop-color="#0B2B39"/><stop offset="1" stop-color="#143E37"/></linearGradient>
+  </defs>
+  <rect width="320" height="240" fill="url(#night)"/>
+  <path d="M-20-20H278C230 12 191 39 168 89 142 147 97 203-25 240Z" fill="url(#green)"/>
+  <path d="M278-20C230 12 191 39 168 89 142 147 97 203-25 240" fill="none" stroke="#82C1B0" stroke-opacity=".15" stroke-width="1.2"/>
+  <path d="M-20 135C36 116 74 118 118 143 166 170 241 207 340 186V260H-20Z" fill="url(#fold)"/>
+  <path d="M-20 135C36 116 74 118 118 143 166 170 241 207 340 186" fill="none" stroke="#74AFA7" stroke-opacity=".10" stroke-width="1"/>
+</svg>

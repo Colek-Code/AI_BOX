@@ -393,7 +393,7 @@ def check_paths_and_dead_surfaces(*, check_index: bool = True) -> None:
         "modules/applications/product_ui/shell/app_registry/product_ui_app_registry.c",
         "modules/applications/product_ui/runtime/service_registry/product_ui_service_registry.c",
         "modules/diagnostics/network/tcp_client/d_tcp_client.c",
-        "modules/integrations/xiaole_wakeup/sdk/liblx_aec_limit.a",
+        "modules/integrations/xiaole_wakeup/sdk/liblx_aec.a",
     )
     missing = [path for path in required if not (D_CODE / path).is_file()]
     if missing:

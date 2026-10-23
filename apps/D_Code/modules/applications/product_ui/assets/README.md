@@ -29,11 +29,6 @@ dirs where applicable, and fails if checked-in outputs are stale.
 **Not live sources (do not commit rebuild products):**
 
 - `reference/icons/*.png` — local A4 previews from icon pipeline
-- `source/product_ui_wallpaper_placeholder.png` — historical source, no longer consumed
-- Blur intermediates / `product_ui_wallpaper_blur.inc` — **removed**: opaque CC
-  sheet made runtime blur invisible; pipeline no longer publishes blur RGB565
-- Design reference images and internal acceptance records are maintained in the
-  development workspace and are not inputs to the public firmware build.
 
 ## RGB565 Wallpaper
 
@@ -50,8 +45,8 @@ python -X utf8 apps\D_Code\modules\applications\product_ui\assets\pipeline\build
 
 ## Color icons (home only)
 
-Home app tiles from `source/ui_pack/home/` → ARGB8888. Control center no longer
-uses `ui_pack/control/` frost/media/quick PNGs (removed).
+Home app tiles from `source/ui_pack/home/` use ARGB8888. Control-center icons
+use the monochrome A4 sources listed above.
 
 ```powershell
 python -X utf8 apps\D_Code\modules\applications\product_ui\assets\pipeline\build_product_ui_color_icons.py --check

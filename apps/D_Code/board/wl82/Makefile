@@ -536,11 +536,8 @@ D_AGENT_LIBS += \
 	../../../../apps/D_Code/modules/integrations/qwen/sdk/third_party/tinycrypt/libtinycrypt.a
 endif
 ifeq ($(D_BUILD_FEATURE_XIAOLE_WAKEUP),1)
-D_XIAOLE_VENDOR_LIB := ../../../../apps/D_Code/modules/integrations/xiaole_wakeup/sdk/liblx_aec_limit.a
-D_XIAOLE_SAFE_LIB := $(BUILD_DIR)/xiaole/liblx_aec_safe.a
-D_XIAOLE_PREPARE := ../../tools/prepare_xiaole_library.py
-D_AGENT_LIBS += $(D_XIAOLE_SAFE_LIB)
-D_LINK_ADAPTER_INPUTS := $(D_XIAOLE_SAFE_LIB)
+D_AGENT_LIBS += ../../../../apps/D_Code/modules/integrations/xiaole_wakeup/sdk/liblx_aec.a
+D_LINK_ADAPTER_INPUTS := ../../../../apps/D_Code/modules/integrations/xiaole_wakeup/sdk/liblx_aec.a
 endif
 
 D_AUDIO_LIBS :=
@@ -700,15 +697,9 @@ else
 LINK_AT ?= 1
 endif
 
-include $(MAKEFILE_DIR)../../tools/python.mk
+D_PYTHON ?= python
 OTA_CONFIG_OUTPUT ?= $(ROOT_PREFIX)/apps/D_Code/build/out/product_ui_ota/release/isd_config.ini
 OTA_DOWNLOAD_OUTPUT ?= $(dir $(OTA_CONFIG_OUTPUT))download.bat
-
-ifeq ($(D_BUILD_FEATURE_XIAOLE_WAKEUP),1)
-$(D_XIAOLE_SAFE_LIB): $(D_XIAOLE_VENDOR_LIB) $(D_XIAOLE_PREPARE)
-	$(info +XIAOLE-SAFE-LINK)
-	$(QUITE) $(D_PYTHON) $(D_XIAOLE_PREPARE) --library $(D_XIAOLE_VENDOR_LIB) --output $@ --tool-dir $(TOOL_DIR)
-endif
 
 .PHONY: help firmware_elf ota_config all clean link_prepare pre_build FORCE_APP_BUILD_STAMP
 

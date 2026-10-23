@@ -21,10 +21,6 @@ GC9307/HYN 配置：**16 MB Flash、8 MB SDRAM、320 × 240 显示分辨率**。
 
 Windows 下使用杰理工具链，默认安装路径为 `C:\JL\pi32`。
 
-安装 Python 3.10 或更新版本。构建入口会自动识别 Windows 的 `py` 启动器或
-`python3`／`python`，也可通过 `D_PYTHON` 指定解释器；路径含空格时需加引号。
-工具链 `bin` 目录需包含 `clang.exe`、`llvm-ar.exe`、`llvm-nm.exe` 和 `llvm-bcrename.exe`。
-
 工程下载方式见 [仓库首页](../../README.md#下载)。联网和云端功能需要填写自己的凭据。
 可选的百度 BRTC 功能默认关闭；如需启用，请先补齐对应 SDK 的 `libbrtc.a`。
 

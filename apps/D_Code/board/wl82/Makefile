@@ -700,7 +700,7 @@ else
 LINK_AT ?= 1
 endif
 
-D_PYTHON ?= python
+include $(MAKEFILE_DIR)../../tools/python.mk
 OTA_CONFIG_OUTPUT ?= $(ROOT_PREFIX)/apps/D_Code/build/out/product_ui_ota/release/isd_config.ini
 OTA_DOWNLOAD_OUTPUT ?= $(dir $(OTA_CONFIG_OUTPUT))download.bat
 

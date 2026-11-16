@@ -1,3 +1,8 @@
+/**
+ * @file lcd_ili9481.c
+ * @brief 适配 ILI9481 的既有 EMI 命令及回调，不承担逻辑屏幕翻转策略。
+ */
+
 #include "config/app_config.h"
 #include "system/includes.h"
 #include "platform/screen/lcd/d_lcd_compat.h"
@@ -31,12 +36,19 @@ static const InitCode ili9481_init_seq[] = {
     {0x2A, 4, {0X00, 0x00, 0x01, 0x3F}},
     {0x2B, 4, {0X00, 0x00, 0x01, 0xDF}},
     {0x3A, 1, {0x55}}, // RGB565
-    {0x11, 0}, // Sleep out
+    {0x11, 0}, // 退出休眠
     {REGFLAG_DELAY, 200},
-    {0x29, 0}, // Display on
+    {0x29, 0}, // 开启显示
 };
 
-// 设置绘图区域
+/**
+ * @brief 按面板物理坐标提交绘制窗口。
+ * @param[in] xs 起始列。
+ * @param[in] xe 结束列。
+ * @param[in] ys 起始行。
+ * @param[in] ye 结束行。
+ * @note 内部调用方保证矩形有序及范围正确；接口不单独返回命令写错误。
+ */
 static void ili9481_set_draw_area(u16 xs, u16 xe, u16 ys, u16 ye)
 {
     WriteCOM(0x2A);
@@ -52,7 +64,11 @@ static void ili9481_set_draw_area(u16 xs, u16 xe, u16 ys, u16 ye)
     WriteDAT_8(ye);
 }
 
-// 设置扫描方向
+/**
+ * @brief 按既有 0°/180° 命令设置面板扫描方向并恢复整屏窗口。
+ * @param[in] dir 内部使用的 ROTATE_DEGREE_0 或 ROTATE_DEGREE_180，不是产品运行方向角。
+ * @note 未识别的值不会发送方向数据；不用于 GC9307 的运行方向功能，不更改初始化常量。
+ */
 static void ili9481_set_direction(u8 dir)
 {
     WriteCOM(0x36);
@@ -67,18 +83,30 @@ static void ili9481_set_direction(u8 dir)
                           ILI9481_LCD_HEIGHT - 1);
 }
 
-// 清屏函数
+/**
+ * @brief 设置整屏窗口并用共用静态颜色块提交清屏像素。
+ * @param[in] color 低 16 位为 RGB565 颜色。
+ * @note 兼容 void 入口不提供独立完成或错误票据。
+ */
 static void ili9481_clear_screen(u32 color)
 {
     // 设置全屏区域
     ili9481_set_draw_area(0, ILI9481_LCD_WIDTH - 1, 0,
                           ILI9481_LCD_HEIGHT - 1);
-    WriteCOM(0x2c); // Memory write
+    WriteCOM(0x2c); // 写像素存储
     d_lcd_write_solid_pixels((u16)color,
                              ILI9481_LCD_WIDTH * ILI9481_LCD_HEIGHT);
 }
 
-// 填充矩形区域
+/**
+ * @brief 按已给物理矩形计算 RGB565 字节数并提交数据。
+ * @param[in] xs 起始列。
+ * @param[in] xe 结束列。
+ * @param[in] ys 起始行。
+ * @param[in] ye 结束行。
+ * @param[in] img 足量的有效像素缓冲。
+ * @note 内部调用方保证矩形有序、边界及缓冲容量；本静态函数不自行校验。
+ */
 static void ili9481_fill_rect(u16 xs, u16 xe, u16 ys, u16 ye, u8 *img)
 {
     u32 len = (xe + 1 - xs) * (ye + 1 - ys) * 2;
@@ -88,7 +116,9 @@ static void ili9481_fill_rect(u16 xs, u16 xe, u16 ys, u16 ye, u8 *img)
     WriteDAT_DMA(img, len);
 }
 
-// 复位函数
+/**
+ * @brief 沿原电平与延时序列复位面板并预置命令/片选引脚。
+ */
 static void ili9481_reset(void)
 {
     lcd_rst_pinstate(1);
@@ -103,7 +133,12 @@ static void ili9481_reset(void)
     lcd_delay(100);
 }
 
-// 执行初始化序列
+/**
+ * @brief 顺序执行原初始化表，特殊延时项仅按既有时长休眠。
+ * @param[in] code 至少 cnt 项的有效静态初始化表。
+ * @param[in] cnt 要执行的表项数量。
+ * @note 不检查表内参数长度；内部固定表负责满足数据容量，不修改任何寄存器值。
+ */
 static void ili9481_init_code(const InitCode *code, u8 cnt)
 {
     u8 i, j;
@@ -123,7 +158,10 @@ static void ili9481_init_code(const InitCode *code, u8 cnt)
 // 前向声明
 static void ili9481_fill(u8 *map, u32 size);
 
-// 初始化函数
+/**
+ * @brief 复位并执行初始化表，注册既有 TE 推屏回调。
+ * @return 当前固定为 0，表示初始化调用序列结束，兼容 void 命令没有逐项硬件确认。
+ */
 static int ili9481_init(void)
 {
     lcd_d("ILI9481 init start\n");
@@ -146,7 +184,12 @@ static int ili9481_init(void)
     return 0;
 }
 
-// 推送数据到屏幕（TE 同步）
+/**
+ * @brief 在 TE 推屏回调中等待前次接口操作，再提交当前像素块。
+ * @param[in] map SDK 回调提供的有效像素缓冲。
+ * @param[in] size 有效字节数。
+ * @note 通过既有非阻塞 EMI 链路工作，不接管像素缓冲所有权。
+ */
 static void ili9481_fill(u8 *map, u32 size)
 {
     extern void lcd_interface_non_block_wait(void);
@@ -155,7 +198,12 @@ static void ili9481_fill(u8 *map, u32 size)
     WriteDAT_DMA(map, size);
 }
 
-// 推送数据到屏幕（用于 LVGL）
+/**
+ * @brief 恢复整屏窗口后提交像素块。
+ * @param[in] map 有效 RGB565 字节缓冲。
+ * @param[in] size 待提交字节数。
+ * @note 这是已有面板驱动行为；本函数不新增区域校验或独立 DMA 完成接口。
+ */
 static void ili9481_draw(u8 *map, u32 size)
 {
     ili9481_set_draw_area(0, ILI9481_LCD_WIDTH - 1, 0,
@@ -164,7 +212,12 @@ static void ili9481_draw(u8 *map, u32 size)
     WriteDAT_DMA(map, size);
 }
 
-// 摄像头数据推屏（用于图像合成引擎，无需等待）
+/**
+ * @brief 供原图像合成链路向当前窗口提交像素块。
+ * @param[in] map SDK 合成链路持有的像素缓冲。
+ * @param[in] size 有效字节数。
+ * @note 此入口不额外等待 EMI 完成，不因 void 返回而转移或释放源缓冲。
+ */
 static void ili9481_draw_to_dev(u8 *map, u32 size)
 {
     WriteCOM(0x2c);

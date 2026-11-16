@@ -1,7 +1,4 @@
-/**
- * @file product_ui_controls.c
- * @brief Reusable app, list, and state components.
- */
+/** @file product_ui_controls.c @brief 共用列表行、有限文字缓存及输入重置辅助，不拥有业务服务状态。 */
 
 #include "config/app_config.h"
 
@@ -21,8 +18,86 @@
 #define PRODUCT_UI_LIST_GAP             5
 #define PRODUCT_UI_ICON_SCALE_BASE    256U
 
-/* Repeated rows share immutable geometry. Per-item colors, text and heights
- * stay local so rebinding keeps the same behavior without copying constants. */
+/**
+ * @brief 在真实 RESET 回调中，仅对仍按下的指针输入设置等待物理松手。
+ */
+void product_ui_control_wait_release(lv_event_t *event)
+{
+    lv_indev_t *input;
+
+    if (event == NULL || lv_event_get_code(event) != LV_EVENT_INDEV_RESET) {
+        return;
+    }
+    /* RESET 的输入设备位于 param，lv_event_get_indev 不处理 RESET。 */
+    input = lv_event_get_param(event);
+    if (input != NULL && lv_indev_get_type(input) == LV_INDEV_TYPE_POINTER &&
+        lv_indev_get_state(input) == LV_INDEV_STATE_PRESSED) {
+        lv_indev_wait_release(input);
+    }
+}
+
+/**
+ * @brief 使用公开文本及自尺寸检查判断当前 DOT 格式化是否已可用。
+ * @param[in] label 有效标签对象。
+ * @param[in] text 期望呈现的完整文字。
+ * @return 已有可用文字且格式满足检查为 1，文本为空或仍异常溢出为 0。
+ * @note 沿用 LVGL 对三字符以内不缩略的规则，不读取其私有字段。
+ */
+static uint8_t product_ui_label_format_ready(lv_obj_t *label, const char *text)
+{
+    const char *shown = lv_label_get_text(label);
+    const unsigned char *cursor = (const unsigned char *)text;
+    unsigned characters = 0U;
+    int32_t height;
+    if (shown == NULL) return 0U;
+    if (lv_label_get_long_mode(label) != LV_LABEL_LONG_DOT || strcmp(shown, text) != 0) return 1U;
+    /* LVGL 对不超过三个字符的文字即使区域很窄也保持原样。 */
+    while (*cursor != 0U && characters <= 3U) {
+        if ((*cursor & 0xc0U) != 0x80U) ++characters;
+        ++cursor;
+    }
+    if (characters <= 3U) return 1U;
+    /* 公开自尺寸使用 LVGL 自身布局／缓存；全文仍多行溢出时，
+     * 即使文字非空也可能是 DOT 存储失败，保留轮询恢复，不读取私有字段。 */
+    height = lv_obj_get_self_height(label);
+    return height <= lv_obj_get_content_height(label) ||
+        height <= lv_font_get_line_height(lv_obj_get_style_text_font(label, LV_PART_MAIN));
+}
+
+/**
+ * @brief 以请求全文比较的缓存更新标签，并为文字或 DOT 格式化失败保留重试。
+ */
+int product_ui_label_sync(lv_obj_t *label, const char *text,
+                          product_ui_label_cache_t *cache)
+{
+    size_t length;
+    const char *shown;
+    if (label == NULL || text == NULL) return -1;
+    if (cache == NULL) {
+        shown = lv_label_get_text(label);
+        if (shown != NULL && strcmp(shown, text) == 0 &&
+            product_ui_label_format_ready(label, text)) return 0;
+        lv_label_set_text(label, text);
+        return product_ui_label_format_ready(label, text) ? 1 : -1;
+    }
+    if (cache->label != label) {
+        cache->label = label;
+        cache->valid = 0U;
+    }
+    if (cache->valid && strcmp(cache->requested, text) == 0 && product_ui_label_format_ready(label, text)) return 0;
+    lv_label_set_text(label, text);
+    cache->valid = 0U;
+    if (!product_ui_label_format_ready(label, text)) return -1;
+    length = strlen(text);
+    if (length < sizeof(cache->requested)) {
+        memcpy(cache->requested, text, length + 1U);
+        cache->valid = 1U;
+    }
+    return 1;
+}
+
+/* 复用行共享不可变几何；各条目颜色、文字及高度仍局部保存，
+ * 重绑维持相同交互而不重复拷贝几何常量。 */
 enum {
     GEOMETRY_WIDTH, GEOMETRY_HEIGHT, GEOMETRY_RADIUS, GEOMETRY_BG_OPA,
     GEOMETRY_PAD_LEFT, GEOMETRY_PAD_RIGHT, GEOMETRY_PAD_TOP, GEOMETRY_PAD_BOTTOM,
@@ -72,8 +147,27 @@ static LV_STYLE_CONST_INIT(s_list_badge_style, (void *)s_list_badge_geometry);
 static LV_STYLE_CONST_INIT(s_list_text_style, (void *)s_list_text_geometry);
 static LV_STYLE_CONST_INIT(s_list_label_style, (void *)s_list_label_geometry);
 static LV_STYLE_CONST_INIT(s_image_padding_style, (void *)s_image_padding_geometry);
+static const lv_style_const_prop_t s_inset_row_geometry[] = {
+    GEOMETRY_VALUE(RADIUS, PRODUCT_UI_RADIUS_LG),
+    GEOMETRY_VALUE(PAD_LEFT, PRODUCT_UI_SPACE_MD), GEOMETRY_VALUE(PAD_RIGHT, PRODUCT_UI_SPACE_MD),
+    GEOMETRY_VALUE(PAD_COLUMN, PRODUCT_UI_SPACE_SM), LV_STYLE_CONST_PROPS_END
+};
+static const lv_style_const_prop_t s_inset_badge_geometry[] = {
+    GEOMETRY_VALUE(WIDTH, 28), GEOMETRY_VALUE(HEIGHT, 28), LV_STYLE_CONST_PROPS_END
+};
+static const lv_style_prop_t s_inset_disabled_property = LV_STYLE_OPA;
+static const lv_style_const_prop_t s_inset_disabled_geometry[] = {
+    {&s_inset_disabled_property, {.num = LV_OPA_50}}, LV_STYLE_CONST_PROPS_END
+};
+static LV_STYLE_CONST_INIT(s_inset_row_style, (void *)s_inset_row_geometry);
+static LV_STYLE_CONST_INIT(s_inset_badge_style, (void *)s_inset_badge_geometry);
+static LV_STYLE_CONST_INIT(s_inset_disabled_style, (void *)s_inset_disabled_geometry);
 #undef GEOMETRY_VALUE
 
+/**
+ * @brief 清除默认样式及滚动标志，空对象忽略。
+ * @param[in,out] obj 借用对象。
+ */
 static void product_ui_component_clean(lv_obj_t *obj)
 {
     if (obj == NULL) {
@@ -83,6 +177,13 @@ static void product_ui_component_clean(lv_obj_t *obj)
     lv_obj_clear_flag(obj, LV_OBJ_FLAG_SCROLLABLE);
 }
 
+/**
+ * @brief 创建主题标签并复制本次文字。
+ * @param[in,out] parent 标签父对象。
+ * @param[in] text 本次复制的文字。
+ * @param[in] style 主题样式标记。
+ * @return 成功返回父树拥有的标签，失败返回 NULL。
+ */
 static lv_obj_t *product_ui_component_label(lv_obj_t *parent, const char *text,
                                             product_ui_style_e style)
 {
@@ -97,7 +198,14 @@ static lv_obj_t *product_ui_component_label(lv_obj_t *parent, const char *text,
     return label;
 }
 
-/* A4 glyphs are generated at their display size; no runtime transform. */
+/**
+ * @brief 绑定不可变生成图像，固定画布尺寸并清除缩放及旋转。
+ * @param[in,out] img 借用图像对象。
+ * @param[in] source 覆盖对象寿命的只读生成图像描述及像素。
+ * @param[in] box_w 正画布宽度。
+ * @param[in] box_h 正画布高度。
+ * @note 只在描述指针改变时设置 source；不能用于描述指针不变但像素动态变化的图像刷新。
+ */
 static void product_ui_image_bind(lv_obj_t *img, const lv_image_dsc_t *source,
                                   int32_t box_w, int32_t box_h)
 {
@@ -105,13 +213,20 @@ static void product_ui_image_bind(lv_obj_t *img, const lv_image_dsc_t *source,
         return;
     }
     lv_obj_set_size(img, box_w, box_h);
-    lv_image_set_src(img, source);
+    if (lv_image_get_src(img) != source) {
+        lv_image_set_src(img, source);
+    }
     lv_image_set_scale(img, LV_SCALE_NONE);
     lv_image_set_rotation(img, 0);
     lv_image_set_align(img, LV_IMAGE_ALIGN_CENTER);
-    lv_obj_add_style(img, &s_image_padding_style, 0);
 }
 
+/**
+ * @brief 以生成的原生光学尺寸绑定方形 A4 图标。
+ * @param[in,out] icon 借用图标对象。
+ * @param[in] source 静态生成描述。
+ * @param[in] optical_size 原生方形尺寸，零不操作。
+ */
 static void product_ui_component_fit_icon(lv_obj_t *icon,
                                           const lv_image_dsc_t *source,
                                           uint16_t optical_size)
@@ -123,6 +238,13 @@ static void product_ui_component_fit_icon(lv_obj_t *icon,
                           (int32_t)optical_size);
 }
 
+/**
+ * @brief 查询指定尺寸生成图标并创建可重着色的图像子对象。
+ * @param[in,out] parent 图像父对象。
+ * @param[in] item 有效条目规格，提供图标编号。
+ * @param[in] optical_size 已生成的原生尺寸。
+ * @return 成功返回父树拥有的图像，资源缺失或创建失败为 NULL。
+ */
 static lv_obj_t *product_ui_component_icon(lv_obj_t *parent,
                                            const product_ui_list_item_t *item,
                                            uint16_t optical_size)
@@ -139,19 +261,26 @@ static lv_obj_t *product_ui_component_icon(lv_obj_t *parent,
         return NULL;
     }
     product_ui_component_fit_icon(icon, source, optical_size);
+    lv_obj_add_style(icon, &s_image_padding_style, 0);
     lv_obj_set_style_image_recolor(icon, lv_color_white(), 0);
     lv_obj_set_style_image_recolor_opa(icon, LV_OPA_COVER, 0);
     lv_obj_center(icon);
     return icon;
 }
 
-/* Child order of product_ui_list_row_create — keep rebind in lockstep. */
+/* 与列表行创建的固定子对象顺序一致，重绑必须同步遵守。 */
 enum {
     PRODUCT_UI_LIST_ROW_CHILD_BADGE = 0,
     PRODUCT_UI_LIST_ROW_CHILD_TEXT = 1,
     PRODUCT_UI_LIST_ROW_CHILD_TRAILING = 2,
 };
 
+/**
+ * @brief 创建主题色徽标与白色 A4 图标，图标失败时删除局部徽标。
+ * @param[in,out] row 列表行父对象。
+ * @param[in] item 有效条目图标与强调色。
+ * @return 成功返回行拥有的徽标容器，失败为 NULL。
+ */
 static lv_obj_t *product_ui_list_icon_create(lv_obj_t *row,
                                              const product_ui_list_item_t *item)
 {
@@ -178,6 +307,10 @@ static lv_obj_t *product_ui_list_icon_create(lv_obj_t *row,
     return badge;
 }
 
+/**
+ * @brief 隐藏、不可点击或禁用时终止点击事件继续分发。
+ * @param[in] event 行或按钮的 CLICKED 事件。
+ */
 static void product_ui_component_action_guard(lv_event_t *event)
 {
     lv_obj_t *object = lv_event_get_current_target(event);
@@ -188,6 +321,13 @@ static void product_ui_component_action_guard(lv_event_t *event)
     }
 }
 
+/**
+ * @brief 先附着点击门禁再附着业务回调，并按使能／回调存在性设置点击能力。
+ * @param[in,out] obj 有效交互对象。
+ * @param[in] is_enabled 非零允许当前操作。
+ * @param[in] event_cb 可为空的持久动作回调。
+ * @param[in] user_data 业务回调借用上下文，须覆盖对象寿命。
+ */
 static void product_ui_component_bind_action(lv_obj_t *obj, uint8_t is_enabled,
                                              product_ui_action_cb_t event_cb,
                                              void *user_data)
@@ -208,6 +348,14 @@ static void product_ui_component_bind_action(lv_obj_t *obj, uint8_t is_enabled,
     lv_obj_add_flag(obj, LV_OBJ_FLAG_CLICKABLE);
 }
 
+/**
+ * @brief 创建随行伸展的标题及可隐藏副标题，采用固定单行字体高度和 DOT 模式。
+ * @param[in,out] row 列表行父对象。
+ * @param[in] item 有效条目标题。
+ * @param[in] subtitle 可为空的副标题文字。
+ * @param[in] height 行总高度，用于扣除文字区上下间距。
+ * @return 成功返回行拥有的文字容器，任一子标签失败删除局部容器并返回 NULL。
+ */
 static lv_obj_t *product_ui_list_text_create(lv_obj_t *row,
                                              const product_ui_list_item_t *item,
                                              const char *subtitle, uint16_t height)
@@ -248,6 +396,11 @@ static lv_obj_t *product_ui_list_text_create(lv_obj_t *row,
     return text_box;
 }
 
+/**
+ * @brief 检查必要条目／标题及当前行交互、尾部、回调和状态文字组合。
+ * @param[in] spec 候选行规格。
+ * @return 符合共用语义规则为非零，否则为零。
+ */
 static int product_ui_list_spec_valid(const product_ui_row_spec_t *spec)
 {
     if ((spec == NULL) || (spec->item == NULL) ||
@@ -259,6 +412,11 @@ static int product_ui_list_spec_valid(const product_ui_row_spec_t *spec)
         spec->action_cb != NULL, spec->status_text != NULL);
 }
 
+/**
+ * @brief 创建行尾空状态标签并应用次要文字色。
+ * @param[in,out] parent 行尾父容器。
+ * @return 成功返回父树拥有的标签，失败为 NULL。
+ */
 static lv_obj_t *product_ui_list_trailing_text_create(lv_obj_t *parent)
 {
     lv_obj_t *label = product_ui_component_label(parent, "", PRODUCT_UI_STYLE_CAPTION);
@@ -268,6 +426,11 @@ static lv_obj_t *product_ui_list_trailing_text_create(lv_obj_t *parent)
     return label;
 }
 
+/**
+ * @brief 创建可在文字／开关角色间复用的行尾容器，开关不单独接管输入。
+ * @param[in,out] row 列表行父对象。
+ * @return 成功返回行拥有的容器，子对象失败删除容器并返回 NULL。
+ */
 static lv_obj_t *product_ui_list_switch_holder_create(lv_obj_t *row)
 {
     lv_obj_t *holder = lv_obj_create(row);
@@ -283,12 +446,20 @@ static lv_obj_t *product_ui_list_switch_holder_create(lv_obj_t *row)
         return NULL;
     }
     lv_obj_set_size(toggle, 32, 18);
+    lv_obj_set_style_bg_color(toggle, product_ui_color(PRODUCT_UI_COLOR_ACCENT), LV_PART_INDICATOR | LV_STATE_CHECKED);
     lv_obj_clear_flag(toggle, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_EVENT_BUBBLE | LV_OBJ_FLAG_GESTURE_BUBBLE);
     lv_obj_center(label);
     lv_obj_center(toggle);
     return holder;
 }
 
+/**
+ * @brief 按尾部角色绑定隐藏、开关、箭头或有界状态文字，必要时事务式扩展为开关容器。
+ * @param[in,out] trailing 当前行尾对象；成功扩展时旧文字对象会被替换删除。
+ * @param[in] spec 有效行尾角色、值及可选缓存。
+ * @return 成功为 0，必要子对象、扩展分配或文字格式化失败为 -1。
+ * @note 扩展分配失败保留旧文字对象；测量请求全文而不是 DOT 已缩略缓冲。
+ */
 static int product_ui_list_trailing_bind(
     lv_obj_t *trailing, const product_ui_row_spec_t *spec)
 {
@@ -298,14 +469,16 @@ static int product_ui_list_trailing_bind(
     const char *text;
     uint16_t row_height = spec->is_single_line ? PRODUCT_UI_ROW_SINGLE_H : PRODUCT_UI_ROW_DOUBLE_H;
 
-    /* Plain text needs no wrapper or hidden switch. Promote transactionally
-     * only when the row later changes role, retaining text on allocation failure. */
+    /* 普通文字不分配额外容器或隐藏开关；角色后来需要开关时才扩展，
+     * 扩展分配失败保留旧文字对象。 */
     if (lv_obj_check_type(trailing, &lv_label_class) && spec->trailing == PRODUCT_UI_ROW_TRAILING_SWITCH) {
         lv_obj_t *holder = product_ui_list_switch_holder_create(lv_obj_get_parent(trailing));
         if (holder == NULL) return -1;
         lv_obj_move_to_index(holder, lv_obj_get_index(trailing));
         lv_obj_delete(trailing);
         trailing = holder;
+        if (spec->text_cache != NULL) memset(&spec->text_cache->trailing, 0,
+                                             sizeof(spec->text_cache->trailing));
     }
     if (lv_obj_check_type(trailing, &lv_label_class)) {
         label = trailing;
@@ -340,20 +513,25 @@ static int product_ui_list_trailing_bind(
     }
     lv_obj_clear_flag(label, LV_OBJ_FLAG_HIDDEN);
     text = spec->trailing == PRODUCT_UI_ROW_TRAILING_CHEVRON ? LV_SYMBOL_RIGHT : spec->status_text;
-    /* DOT may shorten the label buffer, so measure the requested text. */
+    /* DOT 可能缩短标签内部缓冲，因此测量请求全文。 */
     lv_text_get_size(&text_size, text,
                      product_ui_font(PRODUCT_UI_FONT_CAPTION), 0, 0,
                      PRODUCT_UI_LIST_ROW_W, LV_TEXT_FLAG_NONE);
     lv_obj_set_width(trailing, LV_CLAMP(20, text_size.x, 84));
     if (label != trailing) lv_obj_set_width(label, LV_PCT(100));
     lv_obj_set_height(label, product_ui_font(PRODUCT_UI_FONT_CAPTION)->line_height);
-    lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
-    if (strcmp(lv_label_get_text(label), text) != 0) {
-        lv_label_set_text(label, text);
-    }
-    return 0;
+    if (lv_label_get_long_mode(label) != LV_LABEL_LONG_DOT)
+        lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
+    return product_ui_label_sync(label, text, spec->text_cache != NULL ?
+        &spec->text_cache->trailing : NULL) < 0 ? -1 : 0;
 }
 
+/**
+ * @brief 按规格创建行尾文字或开关容器并完成初次绑定。
+ * @param[in,out] row 列表行父对象。
+ * @param[in] spec 有效行规格。
+ * @return 成功为 0，创建／绑定失败删除局部对象并返回 -1。
+ */
 static int product_ui_list_trailing_create(
     lv_obj_t *row, const product_ui_row_spec_t *spec)
 {
@@ -367,6 +545,9 @@ static int product_ui_list_trailing_create(
     return 0;
 }
 
+/**
+ * @brief 只把现有行尾更新为状态文字，不重建整行及动作绑定。
+ */
 int product_ui_list_row_status_update(lv_obj_t *row, const char *text)
 {
     lv_obj_t *holder;
@@ -386,6 +567,54 @@ int product_ui_list_row_status_update(lv_obj_t *row, const char *text)
     return product_ui_list_trailing_bind(holder, &spec);
 }
 
+/**
+ * @brief 比较精确本地样式值，只有颜色变化时才改本地属性。
+ * @param[in,out] object 有效对象。
+ * @param[in] property 颜色类样式属性。
+ * @param[in] color 期望颜色。
+ * @note 不比较按压或过渡解析后的颜色，避免无变化重复写入。
+ */
+static void product_ui_row_color_sync(lv_obj_t *object, lv_style_prop_t property,
+                                      lv_color_t color)
+{
+    lv_style_value_t previous;
+    lv_style_value_t next = {.color = color};
+    /* 比较本地精确值，不使用按压／过渡后的解析颜色。 */
+    if (lv_obj_get_local_style_prop(object, property, &previous, 0) == LV_STYLE_RES_FOUND &&
+        lv_color_eq(previous.color, color)) return;
+    lv_obj_set_local_style_prop(object, property, next, 0);
+}
+
+/**
+ * @brief 按普通／内嵌行外观更新共享几何、徽标底色及图标色。
+ * @param[in,out] row 本模块布局的列表行。
+ * @param[in] spec 含条目强调色及外观角色的规格。
+ */
+static void product_ui_list_row_appearance(lv_obj_t *row, const product_ui_row_spec_t *spec)
+{
+    lv_obj_t *badge = lv_obj_get_child(row, PRODUCT_UI_LIST_ROW_CHILD_BADGE);
+    lv_obj_t *icon = badge != NULL ? lv_obj_get_child(badge, 0) : NULL;
+    lv_color_t accent = product_ui_color(spec->item->accent);
+    lv_color_t badge_color = accent;
+    lv_color_t icon_color = lv_color_white();
+    if (badge == NULL || icon == NULL) return;
+    lv_obj_remove_style(row, &s_inset_row_style, 0);
+    lv_obj_remove_style(row, &s_inset_disabled_style, LV_STATE_DISABLED);
+    lv_obj_remove_style(badge, &s_inset_badge_style, 0);
+    if (spec->appearance == PRODUCT_UI_ROW_APPEARANCE_INSET) {
+        lv_obj_add_style(row, &s_inset_row_style, 0);
+        lv_obj_add_style(row, &s_inset_disabled_style, LV_STATE_DISABLED);
+        lv_obj_add_style(badge, &s_inset_badge_style, 0);
+        badge_color = lv_color_mix(accent, product_ui_color(PRODUCT_UI_COLOR_SURFACE), LV_OPA_10);
+        icon_color = accent;
+    }
+    product_ui_row_color_sync(badge, LV_STYLE_BG_COLOR, badge_color);
+    product_ui_row_color_sync(icon, LV_STYLE_IMAGE_RECOLOR, icon_color);
+}
+
+/**
+ * @brief 复用当前行对象，更新图标、文字、尾部及可操作性。
+ */
 int product_ui_list_row_rebind(lv_obj_t *row,
                                const product_ui_row_spec_t *spec)
 {
@@ -413,15 +642,11 @@ int product_ui_list_row_rebind(lv_obj_t *row,
     if ((icon == NULL) || (title == NULL) || (subtitle == NULL)) {
         return -1;
     }
-    lv_obj_set_style_bg_color(badge, product_ui_color(spec->item->accent), 0);
-    lv_image_set_src(icon, source);
+    /* 保留后续图标绑定调用，使已有的尺寸／源绑定流程一致。 */
+    if (lv_image_get_src(icon) != source) {
+        lv_image_set_src(icon, source);
+    }
     product_ui_component_fit_icon(icon, source, PRODUCT_UI_LIST_GLYPH_SIZE);
-    if (strcmp(lv_label_get_text(title), spec->item->title) != 0) {
-        lv_label_set_text(title, spec->item->title);
-    }
-    if (strcmp(lv_label_get_text(subtitle), spec->subtitle != NULL ? spec->subtitle : "") != 0) {
-        lv_label_set_text(subtitle, spec->subtitle != NULL ? spec->subtitle : "");
-    }
     lv_obj_set_height(row, spec->is_single_line ? PRODUCT_UI_ROW_SINGLE_H : PRODUCT_UI_ROW_DOUBLE_H);
     lv_obj_set_height(text_box, lv_obj_get_style_height(row, 0) - 2 * PRODUCT_UI_LIST_PAD_V);
     if (spec->is_single_line || (spec->subtitle == NULL) || (spec->subtitle[0] == '\0')) {
@@ -429,9 +654,12 @@ int product_ui_list_row_rebind(lv_obj_t *row,
     } else {
         lv_obj_clear_flag(subtitle, LV_OBJ_FLAG_HIDDEN);
     }
-    if (product_ui_list_trailing_bind(trailing, spec) != 0) {
-        return -1;
-    }
+    product_ui_list_row_appearance(row, spec);
+    if (product_ui_label_sync(title, spec->item->title, spec->text_cache != NULL ?
+        &spec->text_cache->title : NULL) < 0 ||
+        product_ui_label_sync(subtitle, spec->subtitle != NULL ? spec->subtitle : "",
+        spec->text_cache != NULL ? &spec->text_cache->subtitle : NULL) < 0 ||
+        product_ui_list_trailing_bind(trailing, spec) != 0) return -1;
 
     lv_obj_remove_style(row,
                         product_ui_style(PRODUCT_UI_STYLE_PRESSED),
@@ -458,6 +686,9 @@ int product_ui_list_row_rebind(lv_obj_t *row,
     return 0;
 }
 
+/**
+ * @brief 验证规格后创建图标、文字及尾部，绑定共用动作门禁。
+ */
 lv_obj_t *product_ui_list_row_create(lv_obj_t *parent,
                                      const product_ui_row_spec_t *spec)
 {
@@ -488,7 +719,7 @@ lv_obj_t *product_ui_list_row_create(lv_obj_t *parent,
                                           height);
     if ((icon == NULL) || (text_box == NULL) ||
         (product_ui_list_trailing_create(row, spec) != 0)) {
-        /* Avoid half-built rows lingering in the parent flex list. */
+        /* 不把半成品行留在父级 flex 列表。 */
         lv_obj_delete(row);
         return NULL;
     }
@@ -502,9 +733,13 @@ lv_obj_t *product_ui_list_row_create(lv_obj_t *parent,
         spec->interaction == PRODUCT_UI_ROW_INTERACTION_NONE ?
         NULL : spec->action_cb,
         spec->user_data);
+    product_ui_list_row_appearance(row, spec);
     return row;
 }
 
+/**
+ * @brief 创建指定宽度的主题分组标题。
+ */
 lv_obj_t *product_ui_section_create(lv_obj_t *parent, const char *title)
 {
     lv_obj_t *label;
@@ -519,6 +754,9 @@ lv_obj_t *product_ui_section_create(lv_obj_t *parent, const char *title)
     return label;
 }
 
+/**
+ * @brief 创建居中的主题空状态说明标签。
+ */
 lv_obj_t *product_ui_empty_state_create(lv_obj_t *parent, const char *message)
 {
     lv_obj_t *label;

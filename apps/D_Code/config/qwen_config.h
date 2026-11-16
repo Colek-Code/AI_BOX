@@ -1,12 +1,14 @@
 /**
  * @file qwen_config.h
- * @brief Qwen multimodal-agent and XiaoLe wakeup parameters.
+ * @brief 配置 Qwen 多模态会话及小乐唤醒的公开选项，私有接入实现由静态库管理。
  */
 
 #ifndef D_QWEN_CONFIG_H
 #define D_QWEN_CONFIG_H
 
 #if D_FEATURE_QWEN
+/* SDK WebSocket 的 INFO 日志包含接入 URL；保留警告及错误诊断。 */
+#define D_QWEN_PRIVATE_ACCESS_LOGS 1
 
 /* HAL 诊断仅在显式设为 1 时启用；正式会话默认关闭。 */
 #ifndef D_QWEN_HAL_ACCEPT_TEST_ENABLE
@@ -18,52 +20,46 @@
 
 #define D_QWEN_AUTH_MODE_FULL_MANAGED       1U
 #define D_QWEN_AUTH_MODE_SEMI_MANAGED       2U
-#define D_QWEN_AUTH_MODE                    D_QWEN_AUTH_MODE_FULL_MANAGED
-#define D_QWEN_WORKSPACE_ID                 "your_qwen_workspace_id"
-#define D_QWEN_APP_ID                       ""
-#define D_QWEN_APP_SECRET                   ""
+#define D_QWEN_AUTH_MODE                    D_QWEN_AUTH_MODE_SEMI_MANAGED
+// 半托管每次只使用一种激活码来源，读取失败时不回退到其他来源。
+#define D_QWEN_ACTIVATION_SOURCE_UI         1U // 在设备界面输入激活码。
+#define D_QWEN_ACTIVATION_SOURCE_FACTORY    2U // 使用原厂厂测工具写入 VM 的激活码。
+#define D_QWEN_ACTIVATION_SOURCE_STATIC     3U // 使用编译期固定码，仅供单台样机测试。
+#define D_QWEN_ACTIVATION_SOURCE_PROGRAMMER 4U // 使用强制下载工具写入 Flash 尾部的认证码。
+#define D_QWEN_ACTIVATION_SOURCE            D_QWEN_ACTIVATION_SOURCE_PROGRAMMER // 当前选择烧录器来源。
+#define D_QWEN_FACTORY_TEST_BUILD           0
 
-#if (D_QWEN_AUTH_MODE == D_QWEN_AUTH_MODE_FULL_MANAGED)
-#define D_QWEN_API_KEY                      ""
+#if D_QWEN_FACTORY_TEST_BUILD != 0 && D_QWEN_FACTORY_TEST_BUILD != 1
+#error "D_QWEN_FACTORY_TEST_BUILD must be 0 or 1"
+#endif
+#if D_QWEN_ACTIVATION_SOURCE < 1U || D_QWEN_ACTIVATION_SOURCE > 4U
+#error "D_QWEN_ACTIVATION_SOURCE must be UI, FACTORY, STATIC or PROGRAMMER"
+#endif
+#if D_QWEN_FACTORY_TEST_BUILD && ((D_QWEN_AUTH_MODE != D_QWEN_AUTH_MODE_SEMI_MANAGED) || \
+    (D_QWEN_ACTIVATION_SOURCE != D_QWEN_ACTIVATION_SOURCE_FACTORY))
+#error "Qwen factory image requires semi-managed FACTORY source"
+#endif
+#if D_QWEN_FACTORY_TEST_BUILD
+#define PRODUCT_TEST_ENABLE
 #endif
 
-#define D_QWEN_HTTP_BASE_URL_FULL_MANAGED   "https://bailian.multimodalagent.aliyuncs.com"
-#define D_QWEN_HTTP_HOST_FULL_MANAGED       "bailian.multimodalagent.aliyuncs.com"
-#define D_QWEN_HTTP_PORT_FULL_MANAGED       "443"
-#define D_QWEN_REGISTER_API_FULL_MANAGED    "/api/device/v1/register"
-#define D_QWEN_TOKEN_API_FULL_MANAGED       "/api/token/v1/getToken"
 
-#define D_QWEN_HTTP_BASE_URL_SEMI_MANAGED   "https://your_cloud_host.example.com"
-#define D_QWEN_HTTP_HOST_SEMI_MANAGED       "your_cloud_host.example.com"
-#define D_QWEN_HTTP_PORT_SEMI_MANAGED       "443"
-#define D_QWEN_REGISTER_API_SEMI_MANAGED    "/device/open/aliyun/rtos/register"
-#define D_QWEN_TOKEN_API_SEMI_MANAGED       "/device/open/aliyun/rtos/getToken"
+
 
 #define D_QWEN_HTTP_TLS_VERIFY_OPTIONAL     0U
 #define D_QWEN_HTTP_TLS_VERIFY_REQUIRED     1U
-/* Product defaults verify the server. OPTIONAL is only an explicit diagnostic
- * choice and also requires the opt-in below; never use it for a release. */
+/* 产品默认校验服务端证书。OPTIONAL 仅用于明确选择的诊断，
+ * 还须启用下方许可开关；发布版本不得使用。 */
 #define D_QWEN_HTTP_TLS_VERIFY_MODE_FULL_MANAGED D_QWEN_HTTP_TLS_VERIFY_REQUIRED
 #define D_QWEN_HTTP_TLS_VERIFY_MODE_SEMI_MANAGED D_QWEN_HTTP_TLS_VERIFY_REQUIRED
 #define D_QWEN_HTTP_ALLOW_UNVERIFIED_DIAGNOSTIC 0
-#include "config/certs/digicert_global_root_g2.h"
-/* Trust anchor for the configured semi-managed backend. When changing the
- * backend, supply its CA here; the hostname is still checked independently. */
-#define D_QWEN_HTTP_CA_PEM_SEMI_MANAGED     D_DIGICERT_GLOBAL_ROOT_G2_PEM
+#include "config/certs/ota_isrg_roots.h"
+/* 共用公开 ISRG 根证书，不受 OTA 是否启用影响。 */
+#define D_QWEN_HTTP_CA_PEM_SEMI_MANAGED     D_OTA_ISRG_ROOTS_PEM
 
 #if (D_QWEN_AUTH_MODE == D_QWEN_AUTH_MODE_FULL_MANAGED)
-#define D_QWEN_HTTP_BASE_URL                D_QWEN_HTTP_BASE_URL_FULL_MANAGED
-#define D_QWEN_HTTP_HOST                    D_QWEN_HTTP_HOST_FULL_MANAGED
-#define D_QWEN_HTTP_PORT                    D_QWEN_HTTP_PORT_FULL_MANAGED
-#define D_QWEN_REGISTER_API                 D_QWEN_REGISTER_API_FULL_MANAGED
-#define D_QWEN_TOKEN_API                    D_QWEN_TOKEN_API_FULL_MANAGED
 #define D_QWEN_HTTP_TLS_VERIFY_MODE         D_QWEN_HTTP_TLS_VERIFY_MODE_FULL_MANAGED
 #else
-#define D_QWEN_HTTP_BASE_URL                D_QWEN_HTTP_BASE_URL_SEMI_MANAGED
-#define D_QWEN_HTTP_HOST                    D_QWEN_HTTP_HOST_SEMI_MANAGED
-#define D_QWEN_HTTP_PORT                    D_QWEN_HTTP_PORT_SEMI_MANAGED
-#define D_QWEN_REGISTER_API                 D_QWEN_REGISTER_API_SEMI_MANAGED
-#define D_QWEN_TOKEN_API                    D_QWEN_TOKEN_API_SEMI_MANAGED
 #define D_QWEN_HTTP_TLS_VERIFY_MODE         D_QWEN_HTTP_TLS_VERIFY_MODE_SEMI_MANAGED
 #define D_QWEN_HTTP_CA_PEM                  D_QWEN_HTTP_CA_PEM_SEMI_MANAGED
 #endif
@@ -77,13 +73,25 @@
 #error "Unverified HTTPS requires an explicit diagnostic opt-in"
 #endif
 
-#define D_QWEN_DEVICE_NAME                  "AC791N_DEV"
-#define D_QWEN_DEVICE_NAME_USE_BT_MAC       0
+#define D_QWEN_DEVICE_NAME                  "AC791N_DEVICE" // 固定设备号，多台设备分别填写。
+#define D_QWEN_DEVICE_NAME_USE_FACTORY      1 // 1: factory name; legacy single code retains old naming.
+#if D_QWEN_DEVICE_NAME_USE_FACTORY != 0 && D_QWEN_DEVICE_NAME_USE_FACTORY != 1
+#error "D_QWEN_DEVICE_NAME_USE_FACTORY must be 0 or 1"
+#endif
+#define D_QWEN_DEVICE_NAME_USE_BT_MAC       1 // 0：使用固定设备号；1：根据本机 MAC 生成。
+#if D_QWEN_DEVICE_NAME_USE_BT_MAC != 0 && D_QWEN_DEVICE_NAME_USE_BT_MAC != 1
+#error "D_QWEN_DEVICE_NAME_USE_BT_MAC must be 0 or 1"
+#endif
+#define D_QWEN_WSS_DIAG_ENABLE             1 // 临时诊断回答截断：记录 WSS 指定字段；实机定位完成后关闭。
+#if D_QWEN_WSS_DIAG_ENABLE != 0 && D_QWEN_WSS_DIAG_ENABLE != 1
+#error "D_QWEN_WSS_DIAG_ENABLE must be 0 or 1"
+#endif
+
 #define D_QWEN_DIALOG_MODE_PUSH2TALK        0U
 #define D_QWEN_DIALOG_MODE_DUPLEX           1U
 #define D_QWEN_DIALOG_MODE                  D_QWEN_DIALOG_MODE_DUPLEX
 
-/* Product UI waits for a button/wakeup/key; legacy roots retain automatic start. */
+/* Product UI 等待按钮、唤醒或按键启动；旧界面仍按原策略自动开始。 */
 #define D_QWEN_SESSION_START_AUTO           0U
 #define D_QWEN_SESSION_START_EXPLICIT       1U
 #if D_UI_TARGET == D_UI_PRODUCT
@@ -164,7 +172,8 @@
 #endif
 
 #define D_QWEN_HTTP_TIMEOUT_MS              8000
-#define D_QWEN_HTTP_BUF_SIZE                (4 * 1024)
+/* 静态库 ABI 的固定容量；修改容量须由私有工程重新编库。 */
+#define D_QWEN_HTTP_BUF_SIZE                4096U
 #define D_QWEN_IDLE_TIMEOUT_MS              15000U
 #define D_QWEN_IDLE_GOODBYE_TIMEOUT_MS      8000U
 

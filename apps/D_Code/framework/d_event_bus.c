@@ -73,19 +73,33 @@ static OS_SEM             s_ring_sem;
 //                              内部函数                                            //
 //*********************************************************************************//
 
-/* 检查环形缓冲是否满 */
+/**
+ * @brief 判断保留一个空槽的异步环形队列是否已满。
+ * @return 下一写入位置等于读取位置时为 1，否则为 0。
+ * @note 调用方须持有保护队列索引的临界区。
+ */
 static inline int ring_is_full(void)
 {
     return ((s_ring_head + 1) % D_EVENT_QUEUE_SIZE) == s_ring_tail;
 }
 
-/* 检查环形缓冲是否空 */
+/**
+ * @brief 判断异步队列是否没有待取事件。
+ * @return 读写索引相同时为 1，否则为 0。
+ * @note 调用方须持有保护队列索引的临界区。
+ */
 static inline int ring_is_empty(void)
 {
     return s_ring_head == s_ring_tail;
 }
 
-/* 查找事件 ID 对应的订阅表项 */
+/**
+ * @brief 查找事件槽，并按需占用首个空闲槽。
+ * @param[in] id 待查找事件编号。
+ * @param[in] create 非零表示未找到时允许初始化空槽。
+ * @return 匹配或新建的静态槽；不允许创建或容量不足时为 NULL。
+ * @note 调用方持有订阅互斥锁；返回指针只在锁保护范围内使用。
+ */
 static event_sub_entry_t *find_event_entry(d_event_id_t id, int create)
 {
     event_sub_entry_t *free_entry = NULL;
@@ -111,7 +125,11 @@ static event_sub_entry_t *find_event_entry(d_event_id_t id, int create)
     return free_entry;
 }
 
-/* 锁内取得订阅者快照，锁外回调；取消订阅不能撤销已取得的快照。 */
+/**
+ * @brief 锁内复制订阅者快照，锁外依次执行异步事件回调。
+ * @param[in] item 分发任务栈上的事件副本，回调期间有效。
+ * @note 取消订阅不能撤销已复制的回调；回调不得保存 item 内载荷指针。
+ */
 static void dispatch_event(const event_queue_item_t *item)
 {
     d_event_t evt;
@@ -147,7 +165,11 @@ static void dispatch_event(const event_queue_item_t *item)
     }
 }
 
-/* 事件分发任务（处理异步投递的事件） */
+/**
+ * @brief 等待队列信号量，逐个复制并派发异步事件。
+ * @param[in] priv SDK 任务参数，当前未使用。
+ * @note 常驻分发任务；取队列只占用短临界区，不在临界区内执行业务回调。
+ */
 static void d_event_dispatcher_task(void *priv)
 {
     event_queue_item_t item;
@@ -182,6 +204,9 @@ static void d_event_dispatcher_task(void *priv)
 //                              公共 API                                            //
 //*********************************************************************************//
 
+/**
+ * @brief 初始化事件总线基础设施；完整接口合同见 d_event_bus.h。
+ */
 d_err_t d_event_bus_init(void)
 {
     int ret;
@@ -219,6 +244,9 @@ d_err_t d_event_bus_init(void)
     return D_OK;
 }
 
+/**
+ * @brief 登记借用的订阅回调；完整接口合同见 d_event_bus.h。
+ */
 int d_event_subscribe(d_event_id_t id, d_event_handler_t handler, void *user_data)
 {
     if (!s_initialized || !handler) return -1;
@@ -234,13 +262,6 @@ int d_event_subscribe(d_event_id_t id, d_event_handler_t handler, void *user_dat
 
     event_sub_list_t *list = &entry->list;
 
-    /* 检查是否已满 */
-    if (list->count >= D_EVENT_MAX_SUBSCRIBERS) {
-        os_mutex_post(&s_mutex);
-        LOGE(TAG, "订阅失败: 事件 0x%04x 订阅者已满(%d)", id, D_EVENT_MAX_SUBSCRIBERS);
-        return -1;
-    }
-
     /* 检查重复订阅 */
     int i;
     for (i = 0; i < list->count; i++) {
@@ -249,6 +270,13 @@ int d_event_subscribe(d_event_id_t id, d_event_handler_t handler, void *user_dat
             LOGW(TAG, "重复订阅: 事件 0x%04x", id);
             return 0;
         }
+    }
+
+    /* 重复订阅不占用新槽；只对新增订阅检查容量。 */
+    if (list->count >= D_EVENT_MAX_SUBSCRIBERS) {
+        os_mutex_post(&s_mutex);
+        LOGE(TAG, "订阅失败: 事件 0x%04x 订阅者已满(%d)", id, D_EVENT_MAX_SUBSCRIBERS);
+        return -1;
     }
 
     /* 添加订阅者 */
@@ -261,6 +289,9 @@ int d_event_subscribe(d_event_id_t id, d_event_handler_t handler, void *user_dat
     return 0;
 }
 
+/**
+ * @brief 移除订阅表项；完整接口合同见 d_event_bus.h。
+ */
 int d_event_unsubscribe(d_event_id_t id, d_event_handler_t handler)
 {
     if (!s_initialized || !handler) return -1;
@@ -299,6 +330,9 @@ int d_event_unsubscribe(d_event_id_t id, d_event_handler_t handler)
     return -1;
 }
 
+/**
+ * @brief 同步分发借用载荷；完整接口合同见 d_event_bus.h。
+ */
 void d_event_publish(d_event_id_t id, const void *data, uint16_t data_len)
 {
     d_event_t evt;
@@ -339,6 +373,9 @@ void d_event_publish(d_event_id_t id, const void *data, uint16_t data_len)
     }
 }
 
+/**
+ * @brief 尝试异步入队载荷副本；完整接口合同见 d_event_bus.h。
+ */
 void d_event_post(d_event_id_t id, const void *data, uint16_t data_len)
 {
     event_queue_item_t *item;

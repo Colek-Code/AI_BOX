@@ -1,3 +1,8 @@
+/**
+ * @file d_storage.c
+ * @brief 实现存储状态查询与 SDK 文件系统适配，不新增介质管理任务。
+ */
+
 //*********************************************************************************//
 //                              D_Code 存储设备管理                                //
 //                                                                                 //
@@ -9,6 +14,8 @@
 #include "fs/fs.h"
 #include "device/device.h"
 #include "os/os_api.h"
+#include "storage_device.h"
+#include "system/spinlock.h"
 #include <string.h>
 #include <sys/stat.h>  /* mkdir函数声明 */
 // #include <stdio.h>  // 与SDK的fs.h冲突，SDK已有printf
@@ -54,12 +61,92 @@ static d_storage_info_t storage_info_table[D_STORAGE_MAX] = {
 // 当前活动的存储设备
 static d_storage_type_t current_storage = D_STORAGE_SD0;
 
+static DEFINE_SPINLOCK(s_sd_state_lock);
+static d_storage_sd_snapshot_t s_sd_state[2];
+
+/**
+ * @brief 在 SDK 插拔通知到来时立即更新 SD 介质代次及在线事实。 完整合同见 d_storage.h。
+ */
+void d_storage_sd_notify(uint8_t id, uint8_t online)
+{
+    if (id >= 2U) return;
+    spin_lock(&s_sd_state_lock);
+    if (++s_sd_state[id].generation == 0U) ++s_sd_state[id].generation;
+    s_sd_state[id].online = online != 0U;
+    s_sd_state[id].mounted = 0U;
+    spin_unlock(&s_sd_state_lock);
+}
+
+/**
+ * @brief 查询 SD 设备在线及挂载事实，并复制带代次的值类型快照。 完整合同见 d_storage.h。
+ */
+d_err_t d_storage_sd_snapshot(uint8_t id, d_storage_sd_snapshot_t *snapshot)
+{
+    uint8_t online, mounted;
+    uint32_t generation;
+    if (id >= 2U || snapshot == NULL) return D_ERR_INVALID_ARG;
+    spin_lock(&s_sd_state_lock);
+    generation = s_sd_state[id].generation;
+    spin_unlock(&s_sd_state_lock);
+    online = (id == 0U ? TCFG_SD0_ENABLE : TCFG_SD1_ENABLE) &&
+        dev_online(id == 0U ? "sd0" : "sd1");
+    mounted = online && fmount_exist(id == 0U ? "storage/sd0" : "storage/sd1");
+    spin_lock(&s_sd_state_lock);
+    /* SDK 探测期间发生插拔时，保留更新后的通知事实，不能被旧探测结果覆盖。 */
+    if (generation == s_sd_state[id].generation) {
+        if (online != s_sd_state[id].online || !generation) {
+            if (++s_sd_state[id].generation == 0U) ++s_sd_state[id].generation;
+        }
+        s_sd_state[id].online = online;
+        s_sd_state[id].mounted = mounted;
+    }
+    *snapshot = s_sd_state[id];
+    spin_unlock(&s_sd_state_lock);
+    return D_OK;
+}
+
+/**
+ * @brief 检查 SD 代次与设备在线状态是否仍匹配。 完整合同见 d_storage.h。
+ */
+uint8_t d_storage_sd_matches(uint8_t id, uint32_t generation)
+{
+    uint8_t matches;
+    if (id >= 2U) return 0U;
+    spin_lock(&s_sd_state_lock);
+    matches = generation == s_sd_state[id].generation && s_sd_state[id].online;
+    spin_unlock(&s_sd_state_lock);
+    if (!matches || !dev_online(id == 0U ? "sd0" : "sd1")) return 0U;
+    /* SDK 设备探测不占状态锁；期间可能换卡，因此回锁后再次核对代次。 */
+    spin_lock(&s_sd_state_lock);
+    matches = generation == s_sd_state[id].generation && s_sd_state[id].online;
+    spin_unlock(&s_sd_state_lock);
+    return matches;
+}
+
+/**
+ * @brief 在工作任务中沿 SDK 串行路径准备 SD，并复核介质未变化。 完整合同见 d_storage.h。
+ */
+d_err_t d_storage_sd_prepare(uint8_t id, d_storage_sd_snapshot_t *snapshot)
+{
+    d_err_t result = d_storage_sd_snapshot(id, snapshot);
+    uint32_t generation;
+    if (result != D_OK) return result;
+    if (!snapshot->online) return D_ERR_NOT_READY;
+    generation = snapshot->generation;
+    if (!sdcard_storage_device_ready(id == 0U ? "sd0" : "sd1")) return D_ERR_IO;
+    result = d_storage_sd_snapshot(id, snapshot);
+    if (result != D_OK) return result;
+    return snapshot->mounted && generation == snapshot->generation ? D_OK : D_ERR_NOT_READY;
+}
+
 //*********************************************************************************//
 //                              内部函数                                           //
 //*********************************************************************************//
 
 /**
- * @brief 检查设备是否在线
+ * @brief 使用 SDK 设备查询检查名称对应的设备是否在线。
+ * @param[in] dev_name 借用的设备名称。
+ * @return 在线为 0；空名称或离线为 -1。
  */
 static int check_device_online(const char *dev_name)
 {
@@ -71,7 +158,9 @@ static int check_device_online(const char *dev_name)
 }
 
 /**
- * @brief 更新存储设备状态
+ * @brief 刷新静态存储表的在线及挂载状态，不主动挂载。
+ * @param[in] type 存储类型；越界时直接返回。
+ * @note Flash 继续沿用已挂载假设；未编译的 SD 或 U 盘能力被记为离线。旧状态表不提供跨线程互斥。
  */
 static void update_storage_status(d_storage_type_t type)
 {
@@ -140,6 +229,9 @@ static void update_storage_status(d_storage_type_t type)
 //                              公共 API 实现                                      //
 //*********************************************************************************//
 
+/**
+ * @brief 查询各设备状态，并按编译期开关选择默认活动存储。 完整合同见 d_storage.h。
+ */
 int d_storage_init(void)
 {
     printf("[D_STORAGE] Storage module init\r\n");
@@ -166,6 +258,9 @@ int d_storage_init(void)
     return 0;
 }
 
+/**
+ * @brief 刷新并检查当前活动存储是否被记录为已挂载。 完整合同见 d_storage.h。
+ */
 int d_storage_device_ready(void)
 {
     update_storage_status(current_storage);
@@ -176,6 +271,9 @@ int d_storage_device_ready(void)
     return -1;
 }
 
+/**
+ * @brief 刷新并查询指定 SD 是否已挂载。 完整合同见 d_storage.h。
+ */
 int d_sdcard_ready(const char *sd_name)
 {
     if (!sd_name) {
@@ -199,6 +297,9 @@ int d_sdcard_ready(const char *sd_name)
     return -1;
 }
 
+/**
+ * @brief 刷新并查询指定 U 盘是否已挂载。 完整合同见 d_storage.h。
+ */
 int d_udisk_ready(int id)
 {
     if (id < 0 || id > 1) {
@@ -214,6 +315,9 @@ int d_udisk_ready(int id)
     return -1;
 }
 
+/**
+ * @brief 同步请求 SDK 格式化给定 SD 路径。 完整合同见 d_storage.h。
+ */
 int d_sdcard_format(const char *sd_name)
 {
     if (!sd_name) {
@@ -242,6 +346,9 @@ int d_sdcard_format(const char *sd_name)
     return ret;
 }
 
+/**
+ * @brief 同步请求 SDK 格式化指定 U 盘。 完整合同见 d_storage.h。
+ */
 int d_udisk_format(int id)
 {
     if (id < 0 || id > 1) {
@@ -267,6 +374,9 @@ int d_udisk_format(int id)
     return ret;
 }
 
+/**
+ * @brief 刷新设备状态并复制其基本信息。 完整合同见 d_storage.h。
+ */
 int d_storage_get_info(d_storage_type_t type, d_storage_info_t *info)
 {
     if (type < D_STORAGE_SD0 || type >= D_STORAGE_MAX || !info) {
@@ -285,6 +395,9 @@ int d_storage_get_info(d_storage_type_t type, d_storage_info_t *info)
     return 0;
 }
 
+/**
+ * @brief 取得当前记录为已挂载的活动存储根路径，否则回退到 Flash 配置路径。 完整合同见 d_storage.h。
+ */
 const char* d_storage_get_root_path(void)
 {
     if (storage_info_table[current_storage].status == D_STORAGE_MOUNTED) {
@@ -295,16 +408,25 @@ const char* d_storage_get_root_path(void)
     return CONFIG_MUSIC_PATH_FLASH;
 }
 
+/**
+ * @brief 取得当前音乐根路径，沿用活动存储的路径选择。 完整合同见 d_storage.h。
+ */
 const char* d_storage_get_music_path(void)
 {
     return d_storage_get_root_path();
 }
 
+/**
+ * @brief 取得编译期录像输出路径。 完整合同见 d_storage.h。
+ */
 const char* d_storage_get_rec_path(void)
 {
     return CONFIG_REC_PATH_0;
 }
 
+/**
+ * @brief 按当前活动存储类型选择升级文件配置路径。 完整合同见 d_storage.h。
+ */
 const char* d_storage_get_upgrade_path(void)
 {
     if (current_storage == D_STORAGE_SD0 || current_storage == D_STORAGE_SD1) {
@@ -315,6 +437,9 @@ const char* d_storage_get_upgrade_path(void)
     return CONFIG_UPGRADE_PATH;
 }
 
+/**
+ * @brief 沿历史适配路径探测现有根目录，必要时尝试 SDK 挂载。 完整合同见 d_storage.h。
+ */
 int d_storage_mount(d_storage_type_t type)
 {
     if (type < D_STORAGE_SD0 || type >= D_STORAGE_MAX) {
@@ -361,6 +486,9 @@ int d_storage_mount(d_storage_type_t type)
     return ret;
 }
 
+/**
+ * @brief 沿历史适配路径尝试卸载非 Flash 设备。 完整合同见 d_storage.h。
+ */
 int d_storage_unmount(d_storage_type_t type)
 {
     if (type < D_STORAGE_SD0 || type >= D_STORAGE_MAX || type == D_STORAGE_FLASH) {
@@ -393,6 +521,9 @@ int d_storage_unmount(d_storage_type_t type)
     return ret;
 }
 
+/**
+ * @brief 查询历史空闲容量字段，当前尚未接入实际容量后端。 完整合同见 d_storage.h。
+ */
 unsigned long d_storage_get_free_space(d_storage_type_t type)
 {
     d_storage_info_t info;
@@ -404,6 +535,9 @@ unsigned long d_storage_get_free_space(d_storage_type_t type)
     return 0;
 }
 
+/**
+ * @brief 利用 SDK 写文件时自动建目录的行为，创建并删除目录下的 .tmp 文件。 完整合同见 d_storage.h。
+ */
 int d_storage_mkdir(const char *path)
 {
     if (!path) {
@@ -430,6 +564,9 @@ int d_storage_mkdir(const char *path)
     return -1;
 }
 
+/**
+ * @brief 尝试只读打开文件，失败后再尝试打开目录。 完整合同见 d_storage.h。
+ */
 int d_storage_exists(const char *path)
 {
     if (!path) {

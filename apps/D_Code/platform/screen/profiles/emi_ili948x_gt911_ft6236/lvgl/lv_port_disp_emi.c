@@ -1,10 +1,10 @@
 /**
  * @file lv_port_disp_emi.c
- * @brief LVGL display port for the EMI/ILI948x screen profile.
- * D++: Owned by the D_Code EMI/ILI948x/GT911/FT6236 screen profile.
+ * @brief 适配 EMI/ILI948x 的既有 LVGL 全帧显示及图像合成路径。
+ * D++: 归属 D_Code EMI/ILI948x/GT911/FT6236 显示配置。
  */
 /*********************
- *      INCLUDES
+ *      头文件
  *********************/
 #define BOOL_DEFINE_CONFLICT
 #include "framework/d_lvgl_port.h"
@@ -19,7 +19,7 @@
 #include "lcd_data_driver.h"
 
 /*********************
- *      DEFINES
+ *      配置定义
  *********************/
 #ifndef MY_DISP_HOR_RES
 #warning Please define or replace the macro MY_DISP_HOR_RES with the actual screen width, default value 320 is used for now.
@@ -32,7 +32,7 @@
 #endif
 
 /**********************
- *      TYPEDEFS
+ *      类型定义
  **********************/
 #if LV_COLOR_DEPTH==16
 #define LV_PIXEL_COLOR_T lv_color16_t
@@ -54,7 +54,7 @@ static void disp_flush_wait(lv_display_t *disp);
 static u8 *disp_rotate_landscape_to_lcd(const lv_area_t *area, uint8_t *px_map);
 
 /**********************
- *  STATIC VARIABLES
+ *  私有状态
  **********************/
 static volatile int s_disp_flush_started = 0;
 
@@ -67,7 +67,7 @@ static volatile int s_disp_flush_started = 0;
 #include "os/os_api.h"
 #include "spinlock.h"
 static OS_SEM mcu_lcd_physics_flush_sem, mcu_lcd_physics_flush_end_sem;
-static LV_PIXEL_COLOR_T buf_3_3[MY_DISP_HOR_RES * MY_DISP_VER_RES] __attribute__((aligned(32)));            /*3th screen sized buffer*/
+static LV_PIXEL_COLOR_T buf_3_3[MY_DISP_HOR_RES * MY_DISP_VER_RES] __attribute__((aligned(32)));            /* 第三份整屏缓冲。 */
 
 struct lv_fb_t {
     LV_PIXEL_COLOR_T *fb;
@@ -80,9 +80,16 @@ static spinlock_t fb_lock; //双核互斥锁
 #endif
 
 /**********************
- *   GLOBAL FUNCTIONS
+ *   公开入口
  **********************/
 #if LV_COLOR_DEPTH==16
+/**
+ * @brief 将 CPU 原生 RGB565 数据复制为 EMI 所需的高字节在前线序。
+ * @param[in] area 局部模式的有效逻辑区域；FULL 模式按整屏像素数处理。
+ * @param[in] px_map 连续有效 RGB565 像素，由内部调用方保证容量及对齐。
+ * @return 静态整屏交换缓冲的借用指针，不转移所有权。
+ * @note 不改 LVGL 原帧，不处理额外行填充；本配置默认 FULL。调用方沿已有刷新完成边界串行复用静态缓冲。
+ */
 static void *lv_color_16_swap(const lv_area_t *area, uint8_t *px_map)
 {
     /*printf("lv_color_16_swap -> %d, %d, %d, %d, 0x%x",area->x1,area->x2,area->y1,area->y2,px_map);*/
@@ -107,39 +114,34 @@ static void *lv_color_16_swap(const lv_area_t *area, uint8_t *px_map)
 }
 #endif
 
+/**
+ * @brief 注册 EMI 全帧双缓冲及既有刷新回调；通用合同见 framework/d_lvgl_port.h。
+ * @note 可选三缓冲路径保持原编译选择；本入口不报告独立的分配或物理显示完成结果。
+ */
 void lv_port_disp_init(void)
 {
-    /*-------------------------
-     * Initialize your display
-     * -----------------------*/
+    /* 初始化当前显示适配。 */
     disp_init();
 
-    /*------------------------------------
-     * Create a display and set a flush_cb
-     * -----------------------------------*/
+    /* 创建显示并装配刷新及等待回调。 */
     lv_display_t *disp = lv_display_create(MY_DISP_HOR_RES, MY_DISP_VER_RES);
     lv_display_set_flush_cb(disp, disp_flush);
     lv_display_set_flush_wait_cb(disp, disp_flush_wait);
 #if 0
-    /* Example 1
-     * One buffer for partial rendering*/
-    static LV_PIXEL_COLOR_T buf_1_1[MY_DISP_HOR_RES * 10];                          /*A buffer for 10 rows*/
+    /* 关闭的示例一：单缓冲局部渲染。 */
+    static LV_PIXEL_COLOR_T buf_1_1[MY_DISP_HOR_RES * 10];                          /* 容纳 10 行的缓冲。 */
     lv_display_set_buffers(disp, buf_1_1, NULL, sizeof(buf_1_1), LV_DISPLAY_RENDER_MODE_PARTIAL);
 #endif
 #if 0
-    /* Example 2
-     * Two buffers for partial rendering
-     * In flush_cb DMA or similar hardware should be used to update the display in the background.*/
+    /* 关闭的示例二：双缓冲局部渲染，后台刷新须遵循回调完成边界。 */
     static LV_PIXEL_COLOR_T buf_2_1[MY_DISP_HOR_RES * 10];
     static LV_PIXEL_COLOR_T buf_2_2[MY_DISP_HOR_RES * 10];
     lv_display_set_buffers(disp, buf_2_1, buf_2_2, sizeof(buf_2_1), LV_DISPLAY_RENDER_MODE_PARTIAL);
 #endif
 
-    /* Example 3
-     * Two buffers screen sized buffer for double buffering.
-     * Both LV_DISPLAY_RENDER_MODE_DIRECT and LV_DISPLAY_RENDER_MODE_FULL works, see their comments*/
-    static LV_PIXEL_COLOR_T buf_3_1[MY_DISP_HOR_RES * MY_DISP_VER_RES] __attribute__((aligned(32)));            /*A screen sized buffer*/
-    static LV_PIXEL_COLOR_T buf_3_2[MY_DISP_HOR_RES * MY_DISP_VER_RES] __attribute__((aligned(32)));            /*Another screen sized buffer*/
+    /* 现有整屏双缓冲方案；当前选择 FULL 以满足摄像头与 UI 合成。 */
+    static LV_PIXEL_COLOR_T buf_3_1[MY_DISP_HOR_RES * MY_DISP_VER_RES] __attribute__((aligned(32)));            /* 第一份整屏缓冲。 */
+    static LV_PIXEL_COLOR_T buf_3_2[MY_DISP_HOR_RES * MY_DISP_VER_RES] __attribute__((aligned(32)));            /* 第二份整屏缓冲。 */
 
 #ifdef THREE_FB_ACCELERATION
     lv_display_set_buffers(disp, buf_3_1, buf_3_2, buf_3_3, sizeof(buf_3_1), LV_DISPLAY_RENDER_MODE_FULL);
@@ -164,10 +166,15 @@ void lv_port_disp_init(void)
 }
 
 /**********************
- *   STATIC FUNCTIONS
+ *   私有实现
  **********************/
 
 #ifdef THREE_FB_ACCELERATION
+/**
+ * @brief 在可选三缓冲路径中等候交换位置，再转交已绘制缓冲。
+ * @param[in] area 非 FULL 模式时随帧复制的有效区域。
+ * @note UI 线程调用；帧指针交换在原 fb_lock 内执行，硬件发送由专属任务处理。
+ */
 static void lv_lcd_draw_trig(const lv_area_t *area)
 {
     /* 等到s_next_fb空闲同步已完成 */
@@ -187,6 +194,11 @@ static void lv_lcd_draw_trig(const lv_area_t *area)
     os_sem_post(&mcu_lcd_physics_flush_sem);
 }
 
+/**
+ * @brief 消费可选三缓冲帧，交换前后台引用并转交 EMI 显示。
+ * @param[in] p SDK 任务参数，当前未使用。
+ * @note 沿原缓冲及等待机制运行，不提供 GC9307 完成票据、方向代次或新的资源仲裁。
+ */
 void lvgl_lcd_draw_task(void *p)
 {
     LV_PIXEL_COLOR_T *pixel;
@@ -220,28 +232,39 @@ void lvgl_lcd_draw_task(void *p)
 }
 #endif
 
-/*Initialize your display and the required peripherals.*/
+/**
+ * @brief 调用兼容 LCD 用户初始化钩子，真实面板初始化已由启动层执行。
+ */
 static void disp_init(void)
 {
-    /*You code here*/
+    /* 本钩子不重复初始化面板。 */
     user_lcd_init();
 }
 bool disp_flush_enabled = true;
 
-/* Enable updating the screen (the flushing process) when disp_flush() is called by LVGL
+/**
+ * @brief 允许后续 EMI 刷新提交；通用合同见 framework/d_lvgl_port.h。
  */
 void disp_enable_update(void)
 {
     disp_flush_enabled = true;
 }
 
-/* Disable updating the screen (the flushing process) when disp_flush() is called by LVGL
+/**
+ * @brief 禁止后续 EMI 刷新提交；不停止已经提交的硬件操作。
  */
 void disp_disable_update(void)
 {
     disp_flush_enabled = false;
 }
 
+/**
+ * @brief 在既有横屏配置下将完整逻辑画面转为 EMI 物理扫描线序。
+ * @param[in] area 必须覆盖完整逻辑画面的区域。
+ * @param[in] px_map 足量的有效 RGB565 画面。
+ * @return 满足横屏、尺寸、整帧范围和缓冲条件时为 SDK 显示缓冲借用指针；否则为 NULL。
+ * @note 不是运行期 0°/180° 事务，不更改面板参数；只在原显示节奏中串行使用借用目标缓冲。
+ */
 static u8 *disp_rotate_landscape_to_lcd(const lv_area_t *area, uint8_t *px_map)
 {
 #if LV_COLOR_DEPTH==16 && D_LVGL_LOGICAL_LANDSCAPE
@@ -289,6 +312,11 @@ static u8 *disp_rotate_landscape_to_lcd(const lv_area_t *area, uint8_t *px_map)
 #endif
 }
 
+/**
+ * @brief 按原 SDK 等待链收取已提交 EMI 刷新，再向 LVGL 归还缓冲。
+ * @param[in] disp 当前 LVGL 显示对象。
+ * @note 沿既有等待 tick 策略；兼容等待结果不形成 GC9307 的独立 DMA 确认合同。
+ */
 static void disp_flush_wait(lv_display_t *disp)
 {
     if (s_disp_flush_started) {
@@ -298,10 +326,13 @@ static void disp_flush_wait(lv_display_t *disp)
     lv_display_flush_ready(disp);
 }
 
-/*Flush the content of the internal buffer the specific area on the display.
- *`px_map` contains the rendered image as raw pixel map and it should be copied to `area` on the display.
- *You can use DMA or any hardware acceleration to do this operation in the background but
- *'lv_display_flush_ready()' has to be called when it's finished.*/
+/**
+ * @brief 按当前 SDK 图像模式选择 UI 合成、直接传屏或忽略本次 LVGL 数据。
+ * @param[in] disp_drv 当前 LVGL 显示描述符，当前仅保留回调兼容参数。
+ * @param[in] area 本次有效逻辑区域。
+ * @param[in] px_map 本次 LVGL 像素数据，沿原刷新完成边界保持。
+ * @note UI_CAMERA 合成只在 compose_status 为 1 时提交 UI；纯相机模式沿原策略忽略 UI。直接 UI 路径只接受匹配面板的整帧，不新增区域能力。
+ */
 
 static void disp_flush(lv_display_t *disp_drv, const lv_area_t *area, uint8_t *px_map)
 {
@@ -331,7 +362,7 @@ static void disp_flush(lv_display_t *disp_drv, const lv_area_t *area, uint8_t *p
         /* UI_CAMERA模式(compose_status=1): UI和摄像头合成 */
         if (current_mode == UI_CAMERA && compose_status == 1) {
             /* FULL模式下，LVGL发送整屏数据，area是全屏范围 */
-            /* 需要将RGB565数据进行字节序转换（大端->小端） */
+            /* 将 CPU 原生 RGB565 转换为 EMI 所需的高字节在前线序。 */
 #if LV_COLOR_DEPTH==16
             px_map = lv_color_16_swap(area, px_map);
 #endif
@@ -344,8 +375,8 @@ static void disp_flush(lv_display_t *disp_drv, const lv_area_t *area, uint8_t *p
         } else if (current_mode == UI) {
             /* UI模式，直接推屏 */
 #if LV_COLOR_DEPTH==16
-            /* Keep disp_flush non-blocking; disp_flush_wait waits for DMA done. */
-            /* Keep LVGL native RGB565 here; rotation writes LCD byte order. */
+            /* 保留提交与等待分离；硬件等待由既有 disp_flush_wait 路径执行。 */
+            /* 此处保留 LVGL 原生 RGB565，由横屏转换写出面板线序。 */
 #endif
 #ifdef D_LCD_EMI_FLUSH_LOG_ENABLE
             if (flush_count <= 10) {

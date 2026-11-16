@@ -1,6 +1,6 @@
 /**
  * @file    rtc_audio_service.c
- * @brief   RTC 音频服务 — 最小验证实现
+ * @brief   调用共享 audio_input 实现可选本地音频环回诊断。
  *
  * 封装 SDK audio_input.c 提供的音频采集/播放能力，
  * 实现本地 MIC→OPUS→DAC 环回测试，验证音频底层可用。
@@ -46,6 +46,11 @@ static volatile int s_loopback_stop_req = 0;
 #endif
 static u8 s_loopback_buf[RTC_LOOPBACK_BUF_SIZE];
 
+/**
+ * @brief 持续把编码缓冲数据转入解码缓冲，退出时发布停止事件。
+ * @param[in] arg 任务兼容参数，本实现不使用。
+ * @note 采用静态单份缓冲，不支持多个环回任务并发使用。
+ */
 static void rtc_audio_loopback_task(void *arg)
 {
     int rlen;
@@ -74,6 +79,9 @@ static void rtc_audio_loopback_task(void *arg)
 //                              公开 API                                            //
 //*********************************************************************************//
 
+/**
+ * @brief 一次性调用共享 audio_stream_init 建立采集与播放对象；完整合同见 rtc_audio_service.h。
+ */
 d_err_t rtc_audio_service_init(void)
 {
     if (s_initialized) {
@@ -92,6 +100,9 @@ d_err_t rtc_audio_service_init(void)
     return D_OK;
 }
 
+/**
+ * @brief 提交共享音频流录音与播放启动请求；完整合同见 rtc_audio_service.h。
+ */
 d_err_t rtc_audio_start(void)
 {
     if (!s_initialized) {
@@ -104,6 +115,9 @@ d_err_t rtc_audio_start(void)
     return D_OK;
 }
 
+/**
+ * @brief 提交共享音频流停止请求；完整合同见 rtc_audio_service.h。
+ */
 d_err_t rtc_audio_stop(void)
 {
     if (!s_initialized) {
@@ -115,6 +129,9 @@ d_err_t rtc_audio_stop(void)
     return D_OK;
 }
 
+/**
+ * @brief 按先播放后录音顺序提交启动，并创建本地环回任务；完整合同见 rtc_audio_service.h。
+ */
 d_err_t rtc_audio_loopback_start(void)
 {
     int ret;
@@ -159,6 +176,9 @@ d_err_t rtc_audio_loopback_start(void)
     return D_OK;
 }
 
+/**
+ * @brief 请求环回任务退出，有限等待后提交共享音频停止；完整合同见 rtc_audio_service.h。
+ */
 void rtc_audio_loopback_stop(void)
 {
     if (!s_loopback_running) {
@@ -181,6 +201,9 @@ void rtc_audio_loopback_stop(void)
     stop_audio_stream();
 }
 
+/**
+ * @brief 读取环回任务发布的运行标志；完整合同见 rtc_audio_service.h。
+ */
 int rtc_audio_loopback_is_running(void)
 {
     return s_loopback_running;

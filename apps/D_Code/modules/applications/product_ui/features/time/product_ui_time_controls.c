@@ -1,6 +1,6 @@
 /**
  * @file product_ui_time_controls.c
- * @brief Reusable Product UI time controls; PRESS_LOST never commits a roller.
+ * @brief 共用时钟／闹钟控件，滚轮只在同代次完整松手时提交。
  * @author D_Code
  * @date 2026-09-22
  */
@@ -20,9 +20,15 @@ static const char *const s_day_options[] = {
     "01\n02\n03\n04\n05\n06\n07\n08\n09\n10\n11\n12\n13\n14\n15\n16\n17\n18\n19\n20\n21\n22\n23\n24\n25\n26\n27\n28\n29\n30\n31"
 };
 
+/**
+ * @brief 借用对应当月天数的一至末日静态选项。
+ */
 const char *product_ui_time_day_options(uint8_t count)
 { return count >= 28U && count <= 31U ? s_day_options[count - 28U] : s_day_options[3]; }
 
+/**
+ * @brief 清除默认样式、滚动及事件传播标志，为明确控件策略做准备。
+ */
 void product_ui_time_control_clean(lv_obj_t *object)
 {
     lv_obj_remove_style_all(object);
@@ -30,6 +36,9 @@ void product_ui_time_control_clean(lv_obj_t *object)
         LV_OBJ_FLAG_EVENT_BUBBLE | LV_OBJ_FLAG_PRESS_LOCK | LV_OBJ_FLAG_SCROLL_ON_FOCUS);
 }
 
+/**
+ * @brief 创建借用不可变文字的主题标签。
+ */
 lv_obj_t *product_ui_time_label(lv_obj_t *parent, const char *text, product_ui_style_e style)
 {
     lv_obj_t *label = lv_label_create(parent);
@@ -68,6 +77,10 @@ static const lv_style_const_prop_t s_roller_geometry[] = {
 };
 static LV_STYLE_CONST_INIT(s_roller_geometry_style, (void *)s_roller_geometry);
 
+/**
+ * @brief 记录首个按压目标及原点，移动超门限或资格丢失后阻止点击继续分发。
+ * @param[in] event 按钮全部事件，状态由本 UI 串行模块持有。
+ */
 static void product_ui_time_button_guard(lv_event_t *event)
 {
     lv_obj_t *object = lv_event_get_current_target(event);
@@ -89,27 +102,44 @@ static void product_ui_time_button_guard(lv_event_t *event)
     }
 }
 
+/**
+ * @brief 创建次要角色按钮，沿用同一按压校验及不可变文字合同。
+ */
 lv_obj_t *product_ui_time_button(lv_obj_t *parent, const char *text, product_ui_action_cb_t callback, void *context)
 {
-    lv_obj_t *button = lv_button_create(parent);
+    const product_ui_time_button_spec_t spec = {
+        .text = text, .role = PRODUCT_UI_BUTTON_SECONDARY, .callback = callback, .context = context,
+    };
+    return product_ui_time_button_create(parent, &spec);
+}
+
+/**
+ * @brief 先安装按钮角色，再应用默认几何并绑定手势校验和可选业务回调。
+ */
+lv_obj_t *product_ui_time_button_create(lv_obj_t *parent, const product_ui_time_button_spec_t *spec)
+{
+    lv_obj_t *button;
     lv_obj_t *label;
+    if (parent == NULL || spec == NULL || spec->text == NULL) return NULL;
+    button = lv_button_create(parent);
     if (button == NULL) return NULL;
     product_ui_time_control_clean(button);
-    /* Retain the initial target until its parent captures scrolling. The guard
-     * rejects movement instead of losing the scroll when crossing a child edge. */
+    /* 父容器接管滚动前保留初始目标；用移动校验拒绝点击，
+     * 避免跨过子对象边缘时丢掉滚动链。 */
     lv_obj_add_flag(button, LV_OBJ_FLAG_PRESS_LOCK | LV_OBJ_FLAG_SCROLL_CHAIN_VER);
-    lv_obj_add_style(button, &s_button_geometry_style, 0);
-    lv_obj_add_style(button, product_ui_style(PRODUCT_UI_STYLE_INTERACTIVE), 0);
-    lv_obj_add_style(button, product_ui_style(PRODUCT_UI_STYLE_PRESSED), LV_STATE_PRESSED);
-    lv_obj_add_style(button, product_ui_style(PRODUCT_UI_STYLE_DISABLED), LV_STATE_DISABLED);
-    label = product_ui_time_label(button, text, PRODUCT_UI_STYLE_BODY);
+    label = product_ui_time_label(button, spec->text, PRODUCT_UI_STYLE_BODY);
     if (label == NULL) { lv_obj_delete(button); return NULL; }
+    product_ui_button_style(button, spec->role);
+    lv_obj_add_style(button, &s_button_geometry_style, 0);
     lv_obj_add_style(label, &s_button_label_style, 0);
     lv_obj_add_event_cb(button, product_ui_time_button_guard, LV_EVENT_ALL, NULL);
-    if (callback != NULL) lv_obj_add_event_cb(button, callback, LV_EVENT_ALL, context);
+    if (spec->callback != NULL) lv_obj_add_event_cb(button, spec->callback, LV_EVENT_ALL, spec->context);
     return button;
 }
 
+/**
+ * @brief 撤销已装备滚轮手势并恢复按下前的原选项。
+ */
 void product_ui_time_roller_cancel(product_ui_time_roller_t *binding)
 {
     if (binding == NULL || !binding->armed) return;
@@ -120,6 +150,11 @@ void product_ui_time_roller_cancel(product_ui_time_roller_t *binding)
     }
 }
 
+/**
+ * @brief 维护滚轮原选项与代次，只有 RELEASED 校验成功才提交 changed。
+ * @param[in] event 滚轮事件，用户数据借用持久绑定。
+ * @note LVGL 在 PRESS_LOST 时也发 VALUE_CHANGED，所以值变化事件不能作为业务完成确认；对象删除只清引用。
+ */
 static void product_ui_time_roller_event(lv_event_t *event)
 {
     product_ui_time_roller_t *binding = lv_event_get_user_data(event);
@@ -150,9 +185,12 @@ static void product_ui_time_roller_event(lv_event_t *event)
         binding->object = NULL;
         binding->armed = 0U;
     }
-    /* LVGL also emits VALUE_CHANGED from PRESS_LOST. Only RELEASED commits. */
+    /* PRESS_LOST 也会引发 VALUE_CHANGED，只有有效 RELEASED 才提交。 */
 }
 
+/**
+ * @brief 创建持有完整拖动的三行滚轮并绑定页面持有的输入状态。
+ */
 lv_obj_t *product_ui_time_roller_create(lv_obj_t *parent, const char *options, product_ui_time_roller_t *binding)
 {
     lv_obj_t *roller = lv_roller_create(parent);
@@ -161,8 +199,8 @@ lv_obj_t *product_ui_time_roller_create(lv_obj_t *parent, const char *options, p
         return NULL;
     }
     product_ui_time_control_clean(roller);
-    /* A roller owns the full drag, including motion beyond its visible rows.
-     * Losing the target at the edge emits PRESS_LOST and restores the old value. */
+    /* 滚轮拥有完整拖动，包括移出可见行的移动；
+     * 边缘丢失目标会发 PRESS_LOST 并恢复旧值。 */
     lv_obj_add_flag(roller, LV_OBJ_FLAG_PRESS_LOCK);
     lv_obj_add_style(roller, product_ui_style(PRODUCT_UI_STYLE_BODY), 0);
     lv_obj_add_style(roller, &s_roller_geometry_style, 0);
@@ -176,6 +214,9 @@ lv_obj_t *product_ui_time_roller_create(lv_obj_t *parent, const char *options, p
     return roller;
 }
 
+/**
+ * @brief 绑定滚轮及当前代次，代次或对象变化时先撤销旧手势。
+ */
 void product_ui_time_roller_bind(product_ui_time_roller_t *binding, lv_obj_t *object, uint16_t selected, uint32_t generation)
 {
     if (binding == NULL || object == NULL) return;

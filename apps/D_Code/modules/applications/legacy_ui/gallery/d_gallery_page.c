@@ -70,6 +70,11 @@ static void gallery_show_image(int index);
 //                              文件扫描                                            //
 //*********************************************************************************//
 
+/**
+ * @brief 扫描零至九的 JPG／jpg 文件，复制有限照片路径表并更新数量。
+ * @return 找到的照片数。
+ * @note 不扫描 IMG_0010 及更高编号；当前存入路径固定使用大写扩展名，即使存在性检查由小写文件命中。
+ */
 static int gallery_scan_photos(void)
 {
     int count = 0;
@@ -107,7 +112,14 @@ static int gallery_scan_photos(void)
 //*********************************************************************************//
 
 /**
- * @brief YUV420 到 RGB565 转换（带缩放，无旋转）
+ * @brief 把完整平面 YUV420 用整数最近邻映射到 320×480 RGB565。
+ * @param[in] y_buf 完整源亮度平面。
+ * @param[in] u_buf 完整源 U 平面，420 采样布局。
+ * @param[in] v_buf 完整源 V 平面，420 采样布局。
+ * @param[out] rgb_buf 至少 SCR_W×SCR_H 个 u16 像素的输出。
+ * @param[in] src_w 调用方保证正的源宽度。
+ * @param[in] src_h 调用方保证正的源高度。
+ * @note 函数不单独校验源／目标容量，调用方必须提供与格式匹配的完整平面。
  */
 static void yuv420_to_rgb565_scale(u8 *y_buf, u8 *u_buf, u8 *v_buf,
                                     u16 *rgb_buf, int src_w, int src_h)
@@ -149,9 +161,14 @@ static void yuv420_to_rgb565_scale(u8 *y_buf, u8 *u_buf, u8 *v_buf,
 }
 
 /**
- * @brief YUV420 到 RGB565 转换（顺时针旋转90度 + 缩放）
- * @note  横屏(640x480) -> 竖屏(480x640) -> 屏幕(320x480)
- *        旋转后: src_w 变成高度, src_h 变成宽度
+ * @brief 把完整平面 YUV420 顺时针旋转九十度并用整数最近邻映射到 320×480 RGB565。
+ * @param[in] y_buf 完整源亮度平面。
+ * @param[in] u_buf 完整源 U 平面，420 采样布局。
+ * @param[in] v_buf 完整源 V 平面，420 采样布局。
+ * @param[out] rgb_buf 至少 SCR_W×SCR_H 个 u16 像素的输出。
+ * @param[in] src_w 调用方保证正的源宽度。
+ * @param[in] src_h 调用方保证正的源高度。
+ * @note 函数不单独校验源／目标容量，调用方必须提供与格式匹配的完整平面。
  */
 static void yuv420_to_rgb565_rotate90(u8 *y_buf, u8 *u_buf, u8 *v_buf,
                                        u16 *rgb_buf, int src_w, int src_h)
@@ -168,7 +185,7 @@ static void yuv420_to_rgb565_rotate90(u8 *y_buf, u8 *u_buf, u8 *v_buf,
 
     for (int dst_y = 0; dst_y < SCR_H; dst_y++) {
         for (int dst_x = 0; dst_x < SCR_W; dst_x++) {
-            /* 先映射到旋转后的坐标（浮点缩放更精确） */
+            /* 使用整数除法映射到旋转后的最近邻坐标。 */
             int rot_x = (dst_x * rot_w) / SCR_W;
             int rot_y = (dst_y * rot_h) / SCR_H;
 
@@ -218,7 +235,14 @@ static void yuv420_to_rgb565_rotate90(u8 *y_buf, u8 *u_buf, u8 *v_buf,
 }
 
 /**
- * @brief YUV422 到 RGB565 转换（带缩放，无旋转）
+ * @brief 把完整平面 YUV422 用整数最近邻映射到 320×480 RGB565。
+ * @param[in] y_buf 完整源亮度平面。
+ * @param[in] u_buf 完整源 U 平面，422 采样布局。
+ * @param[in] v_buf 完整源 V 平面，422 采样布局。
+ * @param[out] rgb_buf 至少 SCR_W×SCR_H 个 u16 像素的输出。
+ * @param[in] src_w 调用方保证正的源宽度。
+ * @param[in] src_h 调用方保证正的源高度。
+ * @note 函数不单独校验源／目标容量，调用方必须提供与格式匹配的完整平面。
  */
 static void yuv422_to_rgb565_scale(u8 *y_buf, u8 *u_buf, u8 *v_buf,
                                     u16 *rgb_buf, int src_w, int src_h)
@@ -259,7 +283,14 @@ static void yuv422_to_rgb565_scale(u8 *y_buf, u8 *u_buf, u8 *v_buf,
 }
 
 /**
- * @brief YUV422 到 RGB565 转换（顺时针旋转90度 + 缩放）
+ * @brief 把完整平面 YUV422 顺时针旋转九十度并用整数最近邻映射到 320×480 RGB565。
+ * @param[in] y_buf 完整源亮度平面。
+ * @param[in] u_buf 完整源 U 平面，422 采样布局。
+ * @param[in] v_buf 完整源 V 平面，422 采样布局。
+ * @param[out] rgb_buf 至少 SCR_W×SCR_H 个 u16 像素的输出。
+ * @param[in] src_w 调用方保证正的源宽度。
+ * @param[in] src_h 调用方保证正的源高度。
+ * @note 函数不单独校验源／目标容量，调用方必须提供与格式匹配的完整平面。
  */
 static void yuv422_to_rgb565_rotate90(u8 *y_buf, u8 *u_buf, u8 *v_buf,
                                        u16 *rgb_buf, int src_w, int src_h)
@@ -316,7 +347,10 @@ static void yuv422_to_rgb565_rotate90(u8 *y_buf, u8 *u_buf, u8 *v_buf,
 //*********************************************************************************//
 
 /**
- * @brief 解码JPEG图片到RGB565缓冲区
+ * @brief 同步读取有限 JPEG，按原采样格式解码到模块 YUV，再缩放／旋转到全屏 RGB565。
+ * @param[in] path 本次借用的完整照片路径。
+ * @return 成功为 0；开文件 -1、文件长度 -2、分配 -3、短读 -4、信息 -5、尺寸 -6、解码 -7。
+ * @note 临时 JPEG 缓冲在返回前释放，RGB／YUV 由页面模块持有。现有 YUV 分配只按 640×640 的420上界，保留原格式的422／444可能超容量，当前未按格式复核；444后续也沿用422转换，不能宣称全采样格式安全支持。
  */
 static int gallery_decode_jpeg(const char *path)
 {
@@ -405,7 +439,7 @@ static int gallery_decode_jpeg(const char *path)
     int pix = img_w * img_h;
     y_buf = s_gallery.yuv_buf;
     u_buf = y_buf + pix;
-    v_buf = u_buf + pix / yuv_type;  /* YUV420: /4, YUV422: /2, YUV444: /1 */
+    v_buf = u_buf + pix / yuv_type;  /* 色度平面容量：YUV420 为亮度的四分之一，422 为二分之一，444 与亮度相同。 */
 
     /* 配置解码参数 - 使用DEFAULT保持原始格式 */
     memset(&dec_req, 0, sizeof(dec_req));
@@ -449,7 +483,7 @@ static int gallery_decode_jpeg(const char *path)
         } else {
             yuv420_to_rgb565_scale(y_buf, u_buf, v_buf, (u16 *)s_gallery.rgb_buf, img_w, img_h);
         }
-    } else {  /* YUV422 or YUV444 */
+    } else {  /* 此分支沿用422转换，输入也可能是444；格式处理限制见函数合同。 */
         if (need_rotate) {
             yuv422_to_rgb565_rotate90(y_buf, u_buf, v_buf, (u16 *)s_gallery.rgb_buf, img_w, img_h);
         } else {
@@ -464,6 +498,9 @@ static int gallery_decode_jpeg(const char *path)
 //                              UI 辅助函数                                         //
 //*********************************************************************************//
 
+/**
+ * @brief 按当前照片计数更新一基索引，空表显示零／零。
+ */
 static void update_index_label(void)
 {
     if (!s_gallery.label_index) return;
@@ -477,6 +514,9 @@ static void update_index_label(void)
     lv_label_set_text(s_gallery.label_index, text);
 }
 
+/**
+ * @brief 删除旧空提示、清空现有画布并创建无照片说明，再更新索引。
+ */
 static void show_no_photo_hint(void)
 {
     if (s_gallery.no_photo_label) {
@@ -504,6 +544,9 @@ static void show_no_photo_hint(void)
     update_index_label();
 }
 
+/**
+ * @brief 删除已存在的空照片说明并清空其引用。
+ */
 static void hide_no_photo_hint(void)
 {
     if (s_gallery.no_photo_label) {
@@ -512,6 +555,11 @@ static void hide_no_photo_hint(void)
     }
 }
 
+/**
+ * @brief 同步解码指定有效下标，失败以灰背景代替，最后绑定 RGB 缓冲并更新当前索引。
+ * @param[in] index 有限照片表中的下标，越界忽略。
+ * @note 失败不把错误图片当成功解码，但当前选择仍移到目标下标。
+ */
 static void gallery_show_image(int index)
 {
     if (index < 0 || index >= s_gallery.count) {
@@ -546,6 +594,10 @@ static void gallery_show_image(int index)
 //                              删除功能                                            //
 //*********************************************************************************//
 
+/**
+ * @brief 防止重复进入后同步删除当前文件，成功重扫并显示相邻项或空状态。
+ * @note 删除失败恢复按钮及本地进行标志；当前目录及文件副作用沿用旧页面显式删除操作，不在注释整理中执行。
+ */
 static void gallery_delete_current(void)
 {
     if (s_gallery.delete_in_progress) {
@@ -596,6 +648,10 @@ static void gallery_delete_current(void)
     }
 }
 
+/**
+ * @brief 把删除按钮动作同步交给当前照片删除路径。
+ * @param[in] e 点击事件，当前未读取载荷。
+ */
 static void on_delete_btn_click(lv_event_t *e)
 {
     (void)e;
@@ -606,6 +662,11 @@ static void on_delete_btn_click(lv_event_t *e)
 //                              手势处理                                            //
 //*********************************************************************************//
 
+/**
+ * @brief 左／右切换有限照片，上滑向页面管理器请求返回首页。
+ * @param[in] gesture_type 旧页面手势编号，3 左、4 右、1 上。
+ * @return 识别并处理为 1，边界或不支持的手势为 0。
+ */
 static int gallery_gesture_handler(int gesture_type)
 {
     switch (gesture_type) {
@@ -635,6 +696,12 @@ static int gallery_gesture_handler(int gesture_type)
 //                              页面生命周期回调                                    //
 //*********************************************************************************//
 
+/**
+ * @brief 分配页面期 YUV／RGB 缓冲并创建 Canvas、删除操作及索引。
+ * @param[in,out] parent 页面管理器拥有的根容器。
+ * @return 父对象或必要缓冲分配失败为 -1，其他路径返回 0；当前未逐项报告所有 LVGL 子对象失败。
+ * @note RGB 分配失败回收先前 YUV；缓冲容量及采样格式限制见 decode 合同，不提供独立后台解码。
+ */
 static int gallery_page_create(lv_obj_t *parent)
 {
     if (parent == NULL) {
@@ -724,6 +791,9 @@ static int gallery_page_create(lv_obj_t *parent)
     return 0;
 }
 
+/**
+ * @brief 标记活跃并重新扫描照片，有照片时同步显示首项，否则呈现空提示。
+ */
 static void gallery_page_enter(void)
 {
     printf(LOG_TAG "=== Enter ===\n");
@@ -742,12 +812,19 @@ static void gallery_page_enter(void)
     }
 }
 
+/**
+ * @brief 只撤销本地活跃标志，不释放图片缓冲。
+ */
 static void gallery_page_exit(void)
 {
     s_gallery.is_active = 0;
     printf(LOG_TAG "Exit\n");
 }
 
+/**
+ * @brief 释放模块持有的 RGB 及 YUV 缓冲并清空它们的指针。
+ * @note 页面对象由管理器删除；本函数没有独立绘制／IO 并发排空，须遵守调用方页面生命周期顺序。
+ */
 static void gallery_page_destroy(void)
 {
     printf(LOG_TAG "Destroy\n");
@@ -784,6 +861,11 @@ static page_desc_t s_gallery_page_desc = {
     .is_active  = 0,
 };
 
+/**
+ * @brief 保存页面类型并注册静态旧相册描述。
+ * @param[in] page_type 模块装配分配的页面类型。
+ * @return 原样返回页面管理器注册结果。
+ */
 static int gallery_register_page(int page_type)
 {
     s_gallery.page_type = page_type;

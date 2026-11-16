@@ -1,7 +1,4 @@
-/**
- * @file product_ui_settings_details_common.c
- * @brief Private settings detail page helpers.
- */
+/** @file product_ui_settings_details_common.c @brief 隐藏设置详情页的共用框架、值行及固定格式辅助。 */
 
 #include "config/app_config.h"
 
@@ -11,6 +8,9 @@
 #include "modules/applications/product_ui/product_ui_runtime.h"
 #include "modules/applications/product_ui/runtime/service_registry/product_ui_service_registry.h"
 
+/**
+ * @brief 创建带设置返回导航的可滚动详情框架。
+ */
 lv_obj_t *product_ui_settings_detail_frame_create(lv_obj_t *parent,
                                                   const char *title,
                                                   product_ui_page_view_t *view)
@@ -41,9 +41,13 @@ lv_obj_t *product_ui_settings_detail_frame_create(lv_obj_t *parent,
     lv_obj_set_flex_align(content, LV_FLEX_ALIGN_START,
                           LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_row(content, PRODUCT_UI_SPACE_SM, 0);
+    lv_obj_set_style_pad_ver(content, PRODUCT_UI_SPACE_SM, 0);
     return content;
 }
 
+/**
+ * @brief 在详情内容区创建加载、空或错误反馈。
+ */
 int product_ui_settings_detail_feedback(lv_obj_t *content,
                                         product_ui_feedback_state_e state,
                                         const char *title,
@@ -56,6 +60,9 @@ int product_ui_settings_detail_feedback(lv_obj_t *content,
            -1 : 0;
 }
 
+/**
+ * @brief 只有 SETTINGS 服务 READY 时才读取设置快照。
+ */
 int product_ui_settings_detail_snapshot(
     product_ui_settings_snapshot_t *snapshot)
 {
@@ -68,6 +75,9 @@ int product_ui_settings_detail_snapshot(
     return product_ui_settings_service_snapshot(snapshot);
 }
 
+/**
+ * @brief 同时检查服务 READY、命令回调及指定能力／有效位。
+ */
 uint8_t product_ui_settings_detail_value_ready(
     const product_ui_settings_snapshot_t *snapshot, uint32_t capability)
 {
@@ -81,6 +91,9 @@ uint8_t product_ui_settings_detail_value_ready(
            ((snapshot->valid_mask & capability) != 0U);
 }
 
+/**
+ * @brief 创建单行只读状态值行，并按需返回行对象。
+ */
 int product_ui_settings_detail_value_row(
     lv_obj_t *content, const product_ui_settings_value_row_t *row_spec)
 {
@@ -106,6 +119,7 @@ int product_ui_settings_detail_value_row(
         .interaction = PRODUCT_UI_ROW_INTERACTION_NONE,
         .trailing = PRODUCT_UI_ROW_TRAILING_STATUS,
         .is_enabled = 1U,
+        .appearance = PRODUCT_UI_ROW_APPEARANCE_INSET,
     };
     row = product_ui_list_row_create(content, &list_spec);
     if (row_spec->row_out != NULL) {
@@ -114,6 +128,9 @@ int product_ui_settings_detail_value_row(
     return row != NULL ? 0 : -1;
 }
 
+/**
+ * @brief 把八位无符号数写成无前导零十进制文字。
+ */
 void product_ui_settings_detail_format_u8(uint8_t value, char output[4])
 {
     uint8_t hundreds;
@@ -135,6 +152,11 @@ void product_ui_settings_detail_format_u8(uint8_t value, char output[4])
     output[offset] = '\0';
 }
 
+/**
+ * @brief 把数值的低两位写成恰好两个数字，不追加终止符。
+ * @param[in] value 待格式化的八位数值。
+ * @param[out] output 调用链保证至少两字节的输出片段。
+ */
 static void product_ui_settings_detail_format_two(uint8_t value,
                                                   char output[2])
 {
@@ -142,6 +164,9 @@ static void product_ui_settings_detail_format_two(uint8_t value,
     output[1] = (char)('0' + (value % 10U));
 }
 
+/**
+ * @brief 按四位年、两位月日输出 YYYY-MM-DD。
+ */
 void product_ui_settings_detail_format_date(uint16_t year, uint8_t month,
                                             uint8_t day, char output[11])
 {
@@ -159,6 +184,9 @@ void product_ui_settings_detail_format_date(uint16_t year, uint8_t month,
     output[10] = '\0';
 }
 
+/**
+ * @brief 按两位时分秒输出 HH:MM:SS。
+ */
 void product_ui_settings_detail_format_time(uint8_t hour, uint8_t minute,
                                             uint8_t second, char output[9])
 {
@@ -173,6 +201,9 @@ void product_ui_settings_detail_format_time(uint8_t hour, uint8_t minute,
     output[8] = '\0';
 }
 
+/**
+ * @brief 把详情页周期传递给公共 UI 运行时。
+ */
 void product_ui_settings_detail_page_update(uint32_t elapsed_ms)
 {
     product_ui_process(elapsed_ms);

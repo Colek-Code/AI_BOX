@@ -1,5 +1,8 @@
-/** Official ISRG trust roots, fetched from https://letsencrypt.org/certificates/.
- * Public certificates only; not leaf pins. Source PEMs and hashes are release evidence. */
+/**
+ * @file ota_isrg_roots.h
+ * @brief 保存来自 https://letsencrypt.org/certificates/ 的 ISRG 公开信任根。
+ * @note 仅包含公开证书，不固定叶证书；来源 PEM 与摘要由发布证据记录。
+ */
 #ifndef D_OTA_ISRG_ROOTS_H
 #define D_OTA_ISRG_ROOTS_H
 #define D_OTA_ISRG_ROOTS_PEM \

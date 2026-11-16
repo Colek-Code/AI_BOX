@@ -1,3 +1,4 @@
+/** @file d_tcp_client.c @brief 按网络事件启动的 TCP 客户端诊断，不属于生产传输服务。 */
 #include "config/app_config.h"
 
 #ifdef D_TCP_CLIENT_TEST
@@ -15,13 +16,18 @@ static void *sock = NULL;
 static volatile u8 tcp_client_running;
 static volatile u8 tcp_client_stop_req;
 #ifndef SERVER_TCP_IP
-#define SERVER_TCP_IP "192.168.1.100"  //服务端ip
+#define SERVER_TCP_IP "10.17.40.160"   //服务端ip
 #endif
 #ifndef SERVER_TCP_PORT
 #define SERVER_TCP_PORT 8080           //服务端端口号
 #endif
 
-//初始化
+/**
+ * @brief 创建并连接一个 SDK TCP 套接字，失败时注销。
+ * @param[in] server_ip IPv4 文本地址。
+ * @param[in] server_port 服务端端口号。
+ * @return 连接成功返回 0；注册或连接失败返回 -1。
+ */
 static int tcp_client_init(const char *server_ip, const int server_port)
 {
     //struct sockaddr_in local;
@@ -51,19 +57,35 @@ static int tcp_client_init(const char *server_ip, const int server_port)
     return 0;
 }
 
-//发送数据
+/**
+ * @brief 经 SDK 套接字发送诊断数据。
+ * @param[in] sock_hdl SDK 套接字句柄。
+ * @param[in] buf 发送数据，调用期借用。
+ * @param[in] len 字节数。
+ * @return sock_send 的原始发送字节数或错误。
+ */
 static int tcp_send_data(const void *sock_hdl, const void *buf, const u32 len)
 {
     return sock_send(sock_hdl, buf, len, 0);
 }
 
-//接收数据
+/**
+ * @brief 经 SDK 套接字接收诊断数据。
+ * @param[in] sock_hdl SDK 套接字句柄。
+ * @param[out] buf 接收缓冲。
+ * @param[in] len 接收容量。
+ * @return sock_recvfrom 原始接收字节数或错误。
+ */
 static int tcp_recv_data(const void *sock_hdl, void *buf, u32 len)
 {
     return sock_recvfrom(sock_hdl, buf, len, 0, NULL, NULL);
 }
 
-//tcp client任务
+/**
+ * @brief 最多尝试五次连接，再发送提示并接收确认数据，最后注销套接字。
+ * @param[in] priv 任务兼容参数，本实现不使用。
+ * @note 断网通过停止标志与 sock_set_quit 促使任务退出；状态标志不构成跨任务线程安全保证。
+ */
 static void tcp_client_task(void *priv)
 {
     int  err;
@@ -130,6 +152,11 @@ static void tcp_client_task(void *priv)
     tcp_client_running = 0;
 }
 
+/**
+ * @brief 按联网、断网及重连事件创建任务或请求退出。
+ * @param[in] sys_event 非空系统事件，网络事件载荷按 net_event 解释。
+ * @note 重连兼容入口由 SDK 提供；断网设置 running 为 0 不证明旧任务已经返回。
+ */
 static void d_tcp_client_net_event_handler(struct sys_event *sys_event)
 {
     struct net_event *net_event = (struct net_event *)sys_event->payload;
@@ -176,6 +203,10 @@ static void d_tcp_client_net_event_handler(struct sys_event *sys_event)
     }
 }
 
+/**
+ * @brief 注册网络事件诊断，在当前已 DHCP 在线时尝试启动客户端。
+ * @return 当前实现固定返回 0，线程创建错误只记录日志。
+ */
 static int d_tcp_client_init(void)
 {
     register_sys_event_handler(SYS_NET_EVENT, NET_EVENT_FROM_USER, 0, d_tcp_client_net_event_handler);

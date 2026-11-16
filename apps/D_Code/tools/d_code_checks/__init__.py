@@ -1,1 +1,1 @@
-"""D_Code configuration, startup and layout contract checks."""
+"""公开分发检查辅助模块。"""

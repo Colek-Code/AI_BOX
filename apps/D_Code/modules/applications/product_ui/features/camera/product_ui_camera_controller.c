@@ -1,6 +1,6 @@
 /**
  * @file product_ui_camera_controller.c
- * @brief Project service facts to the camera page without automatic error retry.
+ * @brief 相机页面意图及屏幕占用投影；硬件与后台资源由 camera_preview 拥有。
  * @author D_Code
  * @date 2026-09-11
  */
@@ -8,6 +8,10 @@
 #include "platform/screen/power/d_screen_power.h"
 #include <string.h>
 
+/**
+ * @brief 把预览阶段和错误投影为静态状态文字、按钮文字及重试能力。
+ * @param[in,out] controller 已有最新预览快照的控制器。
+ */
 static void product_ui_camera_describe(product_ui_camera_controller_t *controller)
 {
     const camera_preview_snapshot_t *snapshot = &controller->snapshot;
@@ -46,6 +50,9 @@ static void product_ui_camera_describe(product_ui_camera_controller_t *controlle
     }
 }
 
+/**
+ * @brief 清空控制器并附着页面，根据屏幕及关机门禁形成首次启动意图。
+ */
 void product_ui_camera_enter(product_ui_camera_controller_t *controller)
 {
     if (controller == NULL) {
@@ -60,6 +67,9 @@ void product_ui_camera_enter(product_ui_camera_controller_t *controller)
     product_ui_camera_update(controller);
 }
 
+/**
+ * @brief 观察预览、屏幕及关机代次，推进已有启动意图并协调自动灭屏占用。
+ */
 void product_ui_camera_update(product_ui_camera_controller_t *controller)
 {
     uint8_t is_off, needs_hold;
@@ -86,7 +96,7 @@ void product_ui_camera_update(product_ui_camera_controller_t *controller)
     controller->was_screen_off = is_off;
     if (controller->has_start_intent) {
         result = camera_preview_request_start(&controller->session);
-        /* Only a fresh entry/wake intent waits for the previous cleanup. Errors need a click. */
+        /* 仅新进入或唤醒意图等待前次清理；普通错误必须由用户点击重试。 */
         if (result != D_ERR_BUSY) {
             controller->has_start_intent = 0U;
         }
@@ -109,6 +119,9 @@ void product_ui_camera_update(product_ui_camera_controller_t *controller)
     product_ui_camera_describe(controller);
 }
 
+/**
+ * @brief 刷新可重试能力后，为显式用户操作提交一次启动意图。
+ */
 void product_ui_camera_retry(product_ui_camera_controller_t *controller)
 {
     if (controller == NULL || !controller->is_attached) {
@@ -122,6 +135,9 @@ void product_ui_camera_retry(product_ui_camera_controller_t *controller)
     product_ui_camera_update(controller);
 }
 
+/**
+ * @brief 解除页面附着，撤销启动意图、请求会话停止并释放本控制器的灭屏占用。
+ */
 void product_ui_camera_leave(product_ui_camera_controller_t *controller)
 {
     if (controller == NULL || !controller->is_attached) {

@@ -1,10 +1,13 @@
 /**
  * @file product_ui_connection_read_policy.c
- * @brief Pure CONNECTION status-read decisions (no platform/wifi deps).
+ * @brief 连接版本稳定性与有限重读的纯决策实现。
  */
 
 #include "modules/applications/product_ui/runtime/connectivity/product_ui_connection_read_policy.h"
 
+/**
+ * @brief 决定当前发布周期是否需要读取连接状态。
+ */
 product_ui_connection_sync_action_e product_ui_connection_sync_action(
     uint8_t wifi_on,
     uint8_t have_valid_snapshot,
@@ -20,6 +23,9 @@ product_ui_connection_sync_action_e product_ui_connection_sync_action(
     return PRODUCT_UI_CONN_SYNC_FULL_READ;
 }
 
+/**
+ * @brief 从最多两次有版本围栏的状态采样中选取稳定结果。
+ */
 product_ui_connection_stable_select_e product_ui_connection_stable_select(
     uint32_t v0_before,
     uint32_t v0_after,

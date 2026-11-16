@@ -1,6 +1,6 @@
 /**
  * @file d_ui_startup.c
- * @brief Starts the selected root UI and its visible page modules in order.
+ * @brief 按顺序装配所选根界面与页面模块，周期驱动公开 UI 接口。
  */
 
 #include "config/app_config.h"
@@ -58,6 +58,9 @@ static const d_ui_module_descriptor_fn_t s_ui_modules[] = {
     NULL,
 };
 
+/**
+ * @brief 取得根界面名称；接口合同见 d_ui_startup.h。
+ */
 const char *d_ui_startup_name(void)
 {
 #if D_UI_TARGET == D_UI_PRODUCT
@@ -75,6 +78,10 @@ const char *d_ui_startup_name(void)
 #endif
 }
 
+/**
+ * @brief 根据编译期选择注册唯一根界面。
+ * @return 所选根界面注册函数的结果，0 表示成功。
+ */
 static int d_ui_startup_register_root(void)
 {
 #if D_UI_TARGET == D_UI_PRODUCT
@@ -92,6 +99,10 @@ static int d_ui_startup_register_root(void)
 #endif
 }
 
+/**
+ * @brief 依次注册功能模块及 Product UI 应用目录中的模块。
+ * @return 全部注册成功时为 0；首次发现空目录项或注册失败时为 -1，不撤销先前注册。
+ */
 static int d_ui_startup_register_modules(void)
 {
     const d_ui_module_descriptor_fn_t *get_module = s_ui_modules;
@@ -117,6 +128,10 @@ static int d_ui_startup_register_modules(void)
     return 0;
 }
 
+/**
+ * @brief 为 Product UI 预备页面；其他根界面无需额外准备。
+ * @return Product UI 准备结果；其他界面返回 0。
+ */
 static int d_ui_startup_prepare(void)
 {
 #if D_UI_TARGET == D_UI_PRODUCT
@@ -126,6 +141,9 @@ static int d_ui_startup_prepare(void)
 #endif
 }
 
+/**
+ * @brief 选择附加字体尾节点；接口合同见 d_ui_startup.h。
+ */
 const lv_font_t *d_ui_startup_font_fallback_tail(void)
 {
 #if (D_UI_TARGET == D_UI_CIPHER_PANEL) || (D_UI_TARGET == D_UI_PRODUCT)
@@ -135,6 +153,9 @@ const lv_font_t *d_ui_startup_font_fallback_tail(void)
 #endif
 }
 
+/**
+ * @brief 按注册、初始化、准备、切页的顺序启动 UI；合同见 d_ui_startup.h。
+ */
 d_err_t d_ui_startup_run(void)
 {
     d_err_t init_result;
@@ -172,6 +193,9 @@ d_err_t d_ui_startup_run(void)
     return D_OK;
 }
 
+/**
+ * @brief 周期更新页面及已启用的调试适配；合同见 d_ui_startup.h。
+ */
 void d_ui_startup_update(uint32_t elapsed_ms)
 {
     page_manager_update(elapsed_ms);

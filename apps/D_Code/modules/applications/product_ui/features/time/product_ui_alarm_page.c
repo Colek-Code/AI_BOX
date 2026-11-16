@@ -1,4 +1,4 @@
-/** @file product_ui_alarm_page.c @brief Draft ownership and deferred alarm commands. */
+/** @file product_ui_alarm_page.c @brief 闹钟页面草稿所有权与延后命令，实例及保存仍由运行时持有。 */
 #include "config/app_config.h"
 #if defined(D_LVGL_ENABLE) && (D_UI_TARGET == D_UI_PRODUCT)
 #include "product_ui_alarm_page.h"
@@ -25,11 +25,19 @@ static product_ui_page_view_t s_page;
 static lv_obj_t *s_primary, *s_settings;
 static product_ui_alarm_snapshot_t s_status;
 
+/**
+ * @brief 在单个动作槽为空时复制完整视图事件。
+ * @param[in] event 本次借用的视图事件，可为 NULL。
+ */
 static void product_ui_alarm_queue(const product_ui_alarm_ui_event_t *event)
 {
     if (event && s_controller.pending.action == PRODUCT_UI_ALARM_UI_NONE) s_controller.pending = *event;
 }
 
+/**
+ * @brief 按当前视图代次预约返回操作，事件回调不直接更换对象树。
+ * @param[in] event 导航返回事件，当前不读取载荷。
+ */
 static void product_ui_alarm_back(lv_event_t *event)
 {
     product_ui_alarm_ui_event_t request = {.action = PRODUCT_UI_ALARM_UI_BACK,
@@ -38,6 +46,10 @@ static void product_ui_alarm_back(lv_event_t *event)
     product_ui_alarm_queue(&request);
 }
 
+/**
+ * @brief 把本地准入及校验错误映射为页面提示。
+ * @param[in] error 服务或模型返回的错误。
+ */
 static void product_ui_alarm_feedback(d_err_t error)
 {
     const char *message = error == D_ERR_NOT_READY ? (s_status.clock.valid ?
@@ -48,6 +60,11 @@ static void product_ui_alarm_feedback(d_err_t error)
     product_ui_toast_show(message, 2200U);
 }
 
+/**
+ * @brief 完整子视图成功后才更新导航按钮及标题，失败保留旧可用视图。
+ * @return 成功返回 0，导航或子视图创建失败返回 -1。
+ * @note 列表专用设置按钮不在编辑视图占用对象内存。
+ */
 static int product_ui_alarm_present(void)
 {
     product_ui_alarm_mode_e mode = s_controller.mode;
@@ -61,7 +78,7 @@ static int product_ui_alarm_present(void)
         if (settings != s_settings) lv_obj_delete(settings);
         return -1;
     }
-    /* The list-only navigation action need not occupy heap in an editor. */
+    /* 仅列表使用的导航操作不必在编辑器中继续占用对象内存。 */
     if (mode != PRODUCT_UI_ALARM_LIST && settings) { lv_obj_delete(settings); settings = NULL; }
     s_settings = settings;
     lv_label_set_text(s_page.title, mode == PRODUCT_UI_ALARM_LIST ? "闹钟" : mode == PRODUCT_UI_ALARM_EDITOR ? "编辑闹钟" :
@@ -72,6 +89,10 @@ static int product_ui_alarm_present(void)
     return 0;
 }
 
+/**
+ * @brief 建立启用的单次草稿，可信时间可用时选取下一分钟作为时分初值。
+ * @note 没有可信时钟时只提供编辑初值，不据此满足单次规则保存资格。
+ */
 static void product_ui_alarm_new_draft(void)
 {
     product_ui_datetime_t now;
@@ -87,6 +108,11 @@ static void product_ui_alarm_new_draft(void)
     s_controller.draft.dirty = 1U;
 }
 
+/**
+ * @brief 接受危险确认后按当前视图代次重新排入原动作。
+ * @param[in] confirmed 非零表示接受。
+ * @param[in] context 整数编码的删除或返回动作。
+ */
 static void product_ui_alarm_confirmed(uint8_t confirmed, void *context)
 {
     product_ui_alarm_ui_event_t event = {.action = (product_ui_alarm_ui_action_e)(uintptr_t)context,
@@ -94,16 +120,25 @@ static void product_ui_alarm_confirmed(uint8_t confirmed, void *context)
     if (confirmed) { s_controller.confirmed = 1U; product_ui_alarm_queue(&event); }
 }
 
+/**
+ * @brief 消耗既有确认或显示删除／放弃修改确认框。
+ * @param[in] action 待确认的删除或返回动作。
+ * @return 已确认返回 1，其余返回 0 并留在当前页面。
+ */
 static uint8_t product_ui_alarm_confirm(product_ui_alarm_ui_action_e action)
 {
     if (s_controller.confirmed) { s_controller.confirmed = 0U; return 1U; }
     product_ui_alarm_view_cancel_input();
-    if (!product_ui_confirm_dialog_show(action == PRODUCT_UI_ALARM_UI_DELETE ? "删除闹钟" : "放弃修改",
+    if (!product_ui_danger_dialog_show(action == PRODUCT_UI_ALARM_UI_DELETE ? "删除闹钟" : "放弃修改",
         action == PRODUCT_UI_ALARM_UI_DELETE ? "删除后，该闹钟的稍后提醒也会取消。" : "未保存的修改将被放弃。",
         product_ui_alarm_confirmed, (void *)(uintptr_t)action)) product_ui_toast_show("无法显示确认，请重试", 1600U);
     return 0U;
 }
 
+/**
+ * @brief 提交草稿规则或音量，冲突时保留编辑字段并要求再次明确保存。
+ * @note 成功只标记已应用并等待保存确认；编辑器返回列表失败时保留编辑模式，不宣称存储已经完成。
+ */
 static void product_ui_alarm_save(void)
 {
     product_ui_alarm_command_t command = {0};
@@ -123,8 +158,8 @@ static void product_ui_alarm_save(void)
         product_ui_alarm_record_t latest;
         if (result == D_ERR_BUSY && s_controller.mode == PRODUCT_UI_ALARM_EDITOR &&
             product_ui_alarm_get_record(command.rule.id, &latest) == D_OK) {
-            /* Keep editable fields. A new Save click must explicitly accept the
-             * draft against the refreshed record revision; this click did not. */
+            /* 保留可编辑字段；本次点击没有接受新的记录版本，
+             * 用户须再次保存才明确提交刷新版本上的草稿。 */
             s_controller.draft.record.rule_revision = latest.rule_revision;
             s_controller.draft.has_conflict = 1U;
             product_ui_toast_show("记录已变化，请再次保存确认", 2200U);
@@ -142,6 +177,11 @@ static void product_ui_alarm_save(void)
     product_ui_toast_show("已应用，正在确认保存", 1600U);
 }
 
+/**
+ * @brief 由实际计划、作息模板及掩码选择编辑器重复模式。
+ * @param[in] rule 调用链保证非空的规则。
+ * @return 对应的单次、每日、单双休、双周或自定义模式。
+ */
 static product_ui_alarm_repeat_e product_ui_alarm_repeat_kind(const product_ui_alarm_t *rule)
 {
     if (rule->schedule == PRODUCT_UI_ALARM_SCHEDULE_ONCE) return PRODUCT_UI_ALARM_REPEAT_ONCE;
@@ -151,6 +191,10 @@ static product_ui_alarm_repeat_e product_ui_alarm_repeat_kind(const product_ui_a
     return rule->repeat_mask == 127U ? PRODUCT_UI_ALARM_REPEAT_DAILY : PRODUCT_UI_ALARM_REPEAT_CUSTOM;
 }
 
+/**
+ * @brief 按所选重复模式给作息草稿装入默认第一周及第二周掩码。
+ * @param[in,out] routine 页面持有的作息草稿，不移动已有相位锚点。
+ */
 static void product_ui_alarm_default_days(product_ui_alarm_routine_draft_t *routine)
 {
     routine->rule.repeat_mask = routine->kind == PRODUCT_UI_ALARM_REPEAT_ONCE ? 0U :
@@ -159,6 +203,10 @@ static void product_ui_alarm_default_days(product_ui_alarm_routine_draft_t *rout
     routine->rule.alternate_mask = routine->kind == PRODUCT_UI_ALARM_REPEAT_FORTNIGHT ? 62U : 0U;
 }
 
+/**
+ * @brief 在作息子草稿中处理模式、两周星期及可信当前周相位确认。
+ * @param[in] event 经视图代次校验的页面事件。
+ */
 static void product_ui_alarm_edit_routine(const product_ui_alarm_ui_event_t *event)
 {
     product_ui_alarm_routine_draft_t *routine = &s_controller.draft.routine;
@@ -183,7 +231,7 @@ static void product_ui_alarm_edit_routine(const product_ui_alarm_ui_event_t *eve
     } else if (event->action == PRODUCT_UI_ALARM_UI_ALTERNATE_DAY && value < 7U) {
         routine->rule.alternate_mask ^= (uint8_t)(1U << value);
     } else if (event->action == PRODUCT_UI_ALARM_UI_DEFAULT_DAYS) {
-        product_ui_alarm_default_days(routine); /* Do not move an established anchor. */
+        product_ui_alarm_default_days(routine); /* 恢复默认星期不移动已建立的双周锚点。 */
     } else if (event->action == PRODUCT_UI_ALARM_UI_PHASE) {
         if (!s_status.clock.valid || product_ui_time_utc_to_beijing(s_status.clock.utc_seconds, &now) != PRODUCT_UI_TIME_OK) {
             product_ui_toast_show("请先校时，再确认本周周期", 2200U); return;
@@ -192,6 +240,10 @@ static void product_ui_alarm_edit_routine(const product_ui_alarm_ui_event_t *eve
     }
 }
 
+/**
+ * @brief 验证双周相位及重复星期后，把作息子草稿合并到编辑主草稿。
+ * @return 合并成功返回 1，缺相位或规则不合法返回 0，保持主草稿不提交。
+ */
 static uint8_t product_ui_alarm_merge_routine(void)
 {
     const product_ui_alarm_routine_draft_t *routine = &s_controller.draft.routine;
@@ -210,6 +262,10 @@ static uint8_t product_ui_alarm_merge_routine(void)
     return 1U;
 }
 
+/**
+ * @brief 按已校验视图动作修改时分、标签、开关或音量草稿。
+ * @param[in] event 视图提交的明确字段及值。
+ */
 static void product_ui_alarm_edit_draft(const product_ui_alarm_ui_event_t *event)
 {
     product_ui_alarm_draft_t *draft = &s_controller.draft;
@@ -228,13 +284,18 @@ static void product_ui_alarm_edit_draft(const product_ui_alarm_ui_event_t *event
     draft->dirty = 1U;
 }
 
+/**
+ * @brief 在页面周期复核视图代次，执行草稿动作、服务受理及必要结构切换。
+ * @param[in] event 从单槽复制的完整动作值。
+ * @note 结构创建失败恢复控制器副本；已消费的放弃确认不会因失败而复用。
+ */
 static void product_ui_alarm_apply(product_ui_alarm_ui_event_t event)
 {
     product_ui_alarm_controller_t before = s_controller;
     product_ui_alarm_command_t command = {0};
     d_err_t result = D_OK;
     uint8_t active;
-    before.confirmed = 0U; /* A failed view change never reuses prior discard consent. */
+    before.confirmed = 0U; /* 视图切换失败不得复用先前放弃草稿的确认。 */
     if (event.view_generation != product_ui_alarm_view_generation()) { s_controller.confirmed = 0U; return; }
     if (event.action == PRODUCT_UI_ALARM_UI_SAVE && s_controller.mode == PRODUCT_UI_ALARM_LIST) event.action = PRODUCT_UI_ALARM_UI_NEW;
     switch (event.action) {
@@ -311,6 +372,9 @@ static void product_ui_alarm_apply(product_ui_alarm_ui_event_t event)
     }
 }
 
+/**
+ * @brief 作息视图的可信周基准或时钟代次变化时撤销旧输入资格。
+ */
 static void product_ui_alarm_check_reference(void)
 {
     product_ui_datetime_t now;
@@ -327,6 +391,9 @@ static void product_ui_alarm_check_reference(void)
     }
 }
 
+/**
+ * @brief 创建框架及当前闹钟子视图，从首页进入重建会话，临时返回保留草稿。
+ */
 int product_ui_alarm_page_create(lv_obj_t *parent)
 {
     static const product_ui_page_spec_t spec = {.title = "闹钟", .back_title = "返回",
@@ -355,6 +422,9 @@ fail:
     return -1;
 }
 
+/**
+ * @brief 保存当前模式视口、停止试听并删除显示树，保留可恢复控制器草稿。
+ */
 static void product_ui_alarm_page_destroy(void)
 {
     if (s_controller.created) s_controller.scroll[s_controller.mode] = product_ui_alarm_view_scroll();
@@ -365,6 +435,10 @@ static void product_ui_alarm_page_destroy(void)
     s_controller.pending.action = PRODUCT_UI_ALARM_UI_NONE;
 }
 
+/**
+ * @brief 推进公共 UI，取得服务状态、消费单个动作并投影试听与子视图。
+ * @param[in] elapsed_ms 本轮页面毫秒数。
+ */
 static void product_ui_alarm_page_update(uint32_t elapsed_ms)
 {
     product_ui_alarm_ui_event_t event;
@@ -389,9 +463,16 @@ static void product_ui_alarm_page_update(uint32_t elapsed_ms)
 static const page_ops_t s_alarm_ops = {.create = product_ui_alarm_page_create,
     .destroy = product_ui_alarm_page_destroy, .update = product_ui_alarm_page_update, .flags = PAGE_FLAG_NO_GESTURE};
 static page_desc_t s_alarm_desc = {.name = "ProductAlarm", .ops = &s_alarm_ops};
+/**
+ * @brief 注册静态闹钟页面描述。
+ */
 int product_ui_alarm_register_page(int page_type)
 { s_alarm_desc.page_type = page_type; return page_manager_register(&s_alarm_desc); }
 
+/**
+ * @brief 尝试初始化可选闹钟服务并发布 UNKNOWN、READY、DEGRADED 或 ERROR。
+ * @return 始终返回 D_OK，具体能力失败留在注册表及页面中展示。
+ */
 static d_err_t product_ui_alarm_module_init(void)
 {
     d_err_t result = product_ui_alarm_init();
@@ -400,7 +481,7 @@ static d_err_t product_ui_alarm_module_init(void)
     (void)product_ui_service_publish(PRODUCT_UI_SERVICE_ALARM,
         result != D_OK ? PRODUCT_UI_SERVICE_ERROR : !snapshot.loaded ? PRODUCT_UI_SERVICE_UNKNOWN :
         snapshot.storage_ready ? PRODUCT_UI_SERVICE_READY : PRODUCT_UI_SERVICE_DEGRADED, 0U, result);
-    return D_OK; /* Optional alarm capabilities never prevent desktop startup. */
+    return D_OK; /* 可选闹钟能力失败不阻止桌面启动。 */
 }
 D_UI_MODULE_DEFINE(alarm, "闹钟", LV_SYMBOL_BELL, product_ui_alarm_register_page, product_ui_alarm_module_init);
 #endif

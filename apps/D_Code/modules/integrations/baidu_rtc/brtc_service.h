@@ -1,8 +1,8 @@
 /**
  * @file    brtc_service.h
- * @brief   BRTC 百度 RTC 智能体服务 — D_Code 模块封装
+ * @brief   BRTC 百度智能体的事件桥接与异步启动、停止接口。
  * @note    封装 BRTC 模块(libbrtc.a)，提供 D_Code 事件总线集成接口
- *          生命周期：init → start(WiFi就绪后) → [对话中] → stop → deinit
+ *          生命周期：init → start（WiFi 就绪后）→ 对话 → stop 请求及后台收尾
  */
 
 #ifndef BRTC_SERVICE_H
@@ -35,49 +35,53 @@ typedef struct {
 } brtc_player_op_t;
 
 //*********************************************************************************//
-//                              API                                                //
+//                              公共接口                                           //
 //*********************************************************************************//
 
 /**
- * @brief 初始化 BRTC 服务（注册事件订阅，不连接）
- * @note  在 app_main Phase 4 中调用
- * @return D_OK 成功
+ * @brief 清空上下文并订阅 WiFi 事件，不直接连接智能体。
+ * @return 订阅成功返回 D_OK，失败撤销已订阅部分并返回 D_ERR_IO。
+ * @note 在服务启动阶段串行调用，不保证重复初始化活动服务安全。
  */
 d_err_t brtc_service_init(void);
 
 /**
- * @brief 启动 BRTC 智能体（HTTP 换 token → 创建引擎 → 登录 → 呼叫）
- * @note  需要 WiFi 已连接；会创建后台任务异步执行
- * @return D_OK 成功, D_ERR_BUSY 已在运行
+ * @brief 在空闲状态创建后台 HTTP 换令牌及引擎启动流程。
+ * @return 任务创建成功返回 D_OK；状态非空闲返回 D_ERR_BUSY；创建失败返回 D_ERR_IO。
+ * @note 调用方应先确认 WiFi 就绪；D_OK 仅表示任务创建，实际媒体就绪由事件确认。
  */
 d_err_t brtc_service_start(void);
 
 /**
- * @brief 停止 BRTC 智能体（销毁引擎，释放音频资源）
- * @return D_OK 成功
+ * @brief 请求监控任务停止智能体与相关后台资源。
+ * @return 当前固定返回 D_OK，包括原本空闲。
+ * @note 异步停止意图，不确认引擎销毁、线程退出或服务端实例停止完成。
  */
 d_err_t brtc_service_stop(void);
 
 /**
- * @brief 发送文本到 AI 智能体
- * @param text 文本消息
+ * @brief 在引擎运行阶段向智能体提交文本。
+ * @param[in] text SDK 使用的非空文本，调用期间保持有效。
+ * @note 其他阶段无操作；本封装不反馈发送结果。
  */
 void brtc_service_send_text(const char *text);
 
 /**
- * @brief 发送文本到 TTS 直接播报
- * @param text 文本内容
+ * @brief 在引擎运行阶段提交直接 TTS 播报文本。
+ * @param[in] text SDK 使用的非空文本，调用期间保持有效。
+ * @note 其他阶段无操作，不等待播报完成。
  */
 void brtc_service_send_tts(const char *text);
 
 /**
- * @brief 打断当前对话
+ * @brief 引擎运行时提交打断请求。
  */
 void brtc_service_interrupt(void);
 
 /**
- * @brief 查询服务是否正在运行
- * @return true=运行中
+ * @brief 按当前阶段判断是否已进入呼叫或后续阶段。
+ * @return state 大于等于 CALLING 返回 true，否则 false。
+ * @note STOPPING 也符合该比较，不能作为停止完成确认。
  */
 bool brtc_service_is_running(void);
 
@@ -86,36 +90,46 @@ bool brtc_service_is_running(void);
 //*********************************************************************************//
 
 /**
- * @brief 查询是否可以安全退出（监控任务运行中为 true）
+ * @brief 读取监控任务发布的可响应退出标记。
+ * @return 监控任务运行阶段为 true，否则 false。
+ * @note 该标记不是引擎或音频资源已释放的证明。
  */
 bool app_brtc_agent_can_exit(void);
 
 /**
- * @brief 查询 TTS 是否正在播放
+ * @brief 读取 SDK 回调维护的 AI TTS 播放标记。
+ * @return SDK 报告正在说话返回 true。
  */
 bool brtc_aiagent_tts_busy(void);
 
 /**
- * @brief 设置/获取音频设备独占标识
+ * @brief 设置 RTC 与外部音乐共用设备的协作标记。
+ * @param[in] used true 表示需要在 TTS 开始和结束时交接。
  */
 void brtc_audio_device_need_used_set(bool used);
+/**
+ * @brief 读取音频设备交接协作标记。
+ * @return 当前设置值。
+ */
 bool brtc_audio_device_need_used_get(void);
 
 /**
- * @brief 快速关闭
- * @param quickly 是否快速退出（跳过等待提示音）
+ * @brief 记录快速退出选择并标记网络离线、异常退出，同时请求音乐停止。
+ * @param[in] quickly 非零省略部分退出提示等待。
+ * @note 实际引擎清理由监控任务推进，本函数不等待。
  */
 void app_sdk_should_close(int quickly);
 
 /**
- * @brief 切换云端 ASR 长文本录音模式
- * @param enable true=进入长文本模式, false=退出长文本模式
+ * @brief 先禁用实时 ASR，再切换云端长文本录音状态。
+ * @param[in] enable true 开始长文本录音，false 停止。
+ * @note 启用时在两个 SDK 事件间延时 20 个节拍；退出长文本不会自动恢复实时模式。
  */
 void app_brtc_agent_longtext_mode(bool enable);
 
 /**
- * @brief 控制 ASR 实时模式
- * @param enable true=启用, false=禁用
+ * @brief 存在引擎时提交实时 ASR 启用或禁用事件。
+ * @param[in] enable true 启用，false 禁用。
  */
 void app_brtc_agent_asr_realtime(bool enable);
 

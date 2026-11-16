@@ -629,7 +629,9 @@ u8 product_main(void)
     msg_demo_display();
 #endif
 
+#if !D_QWEN_FACTORY_TEST_BUILD
     __THIS->enter_flag = 1;
+#endif
     __THIS->recv_buf = zalloc(RECV_BUFFER_SIZE);
     __THIS->resp_buf = zalloc(RESP_BUFFER_SIZE);
     ASSERT(__THIS->recv_buf && __THIS->recv_buf, "product tool zalloc buffer err");
@@ -640,6 +642,11 @@ u8 product_main(void)
     devices_module_init();
 
     os_mutex_create(&__THIS->rsp_mutex);
+#if D_QWEN_FACTORY_TEST_BUILD
+    /* CDC IRQ may post as soon as product mode is visible. Publish only after
+     * the receive semaphore, buffers and response mutex have been initialized. */
+    __THIS->enter_flag = 1;
+#endif
     thread_fork("msg_handle_task", 10, 1024, 0, NULL, msg_handle_task, NULL);
     thread_fork("data_handle_task", 30, 1024, 0, NULL, data_handle_task, NULL);
 

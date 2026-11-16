@@ -1,6 +1,4 @@
-/** @file product_ui_calendar_page.c
- * @brief Calendar session controller; structural changes run in page update.
- */
+/** @file product_ui_calendar_page.c @brief 日历会话控制器，结构变更只在页面更新阶段执行。 */
 #include "config/app_config.h"
 #if defined(D_LVGL_ENABLE) && (D_UI_TARGET == D_UI_PRODUCT)
 #include "modules/applications/product_ui/features/time/product_ui_calendar_page.h"
@@ -28,12 +26,24 @@ static product_ui_calendar_controller_t s_calendar;
 static product_ui_calendar_month_t s_calendar_month;
 static product_ui_page_view_t s_calendar_page;
 
+/**
+ * @brief 逐字段比较两个已知有效日期是否相同。
+ * @param[in] a 调用链保证非空的左日期。
+ * @param[in] b 调用链保证非空的右日期。
+ * @return 年月日完全相同返回非零，否则为零。
+ */
 static uint8_t product_ui_calendar_same_date(const product_ui_date_t *a,
                                              const product_ui_date_t *b)
 {
     return a->year == b->year && a->month == b->month && a->day == b->day;
 }
 
+/**
+ * @brief 浏览动作立即停止自动跟随，其余动作及可选日期进入单槽队列。
+ * @param[in] action 视图产生的页面动作。
+ * @param[in] date 可为空的日期，存在时复制到队列状态。
+ * @note 事件回调不切换结构子树；已有待处理动作时保留先受理的一个。
+ */
 static void product_ui_calendar_queue(product_ui_calendar_action_e action,
                                        const product_ui_date_t *date)
 {
@@ -51,6 +61,10 @@ static void product_ui_calendar_queue(product_ui_calendar_action_e action,
     s_calendar.pending = action;
 }
 
+/**
+ * @brief 点击导航返回时预约页面返回动作。
+ * @param[in] event 导航按钮事件，只处理 CLICKED。
+ */
 static void product_ui_calendar_back_cb(lv_event_t *event)
 {
     if (lv_event_get_code(event) == LV_EVENT_CLICKED) {
@@ -58,6 +72,10 @@ static void product_ui_calendar_back_cb(lv_event_t *event)
     }
 }
 
+/**
+ * @brief 点击今天操作时预约回到可信今天。
+ * @param[in] event 导航按钮事件，只处理 CLICKED。
+ */
 static void product_ui_calendar_today_cb(lv_event_t *event)
 {
     if (lv_event_get_code(event) == LV_EVENT_CLICKED) {
@@ -65,6 +83,10 @@ static void product_ui_calendar_today_cb(lv_event_t *event)
     }
 }
 
+/**
+ * @brief 成功构建当前视图后同步标题、今天能力及选择器下拉占用。
+ * @return 成功返回 0，视图替换失败返回 -1，保留旧可用视图。
+ */
 static int product_ui_calendar_present(void)
 {
     product_ui_calendar_presentation_t *state = &s_calendar.presentation;
@@ -86,6 +108,12 @@ static int product_ui_calendar_present(void)
     return 0;
 }
 
+/**
+ * @brief 从时间域核实今天，只有未自主浏览或明确跟随时才移动查询日期。
+ * @param[in] is_new_visit 非零表示从首页开始的新日历访问。
+ * @return 今天可用性／日期或新访问需要刷新时返回 1，内容未变返回 0。
+ * @note 无可信今天时只撤销 has_today，不把浏览锚点当作当前日期；自主查询不被后台校时强制跳走。
+ */
 static uint8_t product_ui_calendar_update_clock(uint8_t is_new_visit)
 {
     product_ui_time_domain_summary_t summary;
@@ -115,6 +143,10 @@ static uint8_t product_ui_calendar_update_clock(uint8_t is_new_visit)
     return 1U;
 }
 
+/**
+ * @brief 在日历支持上下界内移动一个月，并选择目标月第一天。
+ * @param[in] direction 负值前一月，非负值后一月。
+ */
 static void product_ui_calendar_shift_month(int direction)
 {
     uint16_t year = s_calendar_month.year;
@@ -138,6 +170,11 @@ static void product_ui_calendar_shift_month(int direction)
     s_calendar.presentation.month_scroll = 0;
 }
 
+/**
+ * @brief 在控制器副本上处理月份、日期详情、年月选择及今天动作。
+ * @param[in] action 已从单槽取出的动作。
+ * @note 此函数更新查询状态和月模型，不直接提交视图；上层呈现失败时恢复前一控制器状态。
+ */
 static void product_ui_calendar_apply_action(product_ui_calendar_action_e action)
 {
     product_ui_calendar_presentation_t *state = &s_calendar.presentation;
@@ -206,6 +243,10 @@ static void product_ui_calendar_apply_action(product_ui_calendar_action_e action
     }
 }
 
+/**
+ * @brief 消费单个动作，成功呈现后保留新查询，创建失败恢复原控制器及月模型。
+ * @note 月视图返回交统一导航；切换前撤销旧视图按压资格，避免旧控件操作新查询。
+ */
 static void product_ui_calendar_process_action(void)
 {
     product_ui_calendar_action_e action = s_calendar.pending;
@@ -232,6 +273,9 @@ static void product_ui_calendar_process_action(void)
     }
 }
 
+/**
+ * @brief 创建日历页面及当前查询视图，首次无可信今天时只使用浏览锚点。
+ */
 int product_ui_calendar_page_create(lv_obj_t *parent)
 {
     static const product_ui_page_spec_t spec = {
@@ -244,8 +288,8 @@ int product_ui_calendar_page_create(lv_obj_t *parent)
     if (parent == NULL) {
         return -1;
     }
-    /* Preparation runs while page_manager_get_current() is still the source
-     * page. Returning from a temporary settings page must keep the query. */
+    /* 准备目标页面时，页面管理器的当前页仍是来源页；
+     * 从临时设置页返回须保留原查询。 */
     is_new_visit = !s_calendar.is_initialized || page_manager_get_current() == PAGE_TYPE_MAIN;
     if (!s_calendar.is_initialized) {
         s_calendar.presentation.selected = (product_ui_date_t){PRODUCT_UI_CALENDAR_BROWSE_ANCHOR_YEAR, 1U, 1U};
@@ -255,8 +299,8 @@ int product_ui_calendar_page_create(lv_obj_t *parent)
     }
     s_calendar.pending = PRODUCT_UI_CALENDAR_ACTION_NONE;
     s_calendar.elapsed_ms = 0U;
-    /* Home -> calendar is a new visit. Detail/picker returns do not recreate
-     * this page, so their selection and viewport remain controller-owned. */
+    /* 首页进入日历属于新访问；详情／选择器返回不重建本页，
+     * 其选择日期及视口继续由控制器持有。 */
     if (is_new_visit) {
         s_calendar.presentation.mode = PRODUCT_UI_CALENDAR_MONTH;
         s_calendar.presentation.detail_scroll = 0;
@@ -279,9 +323,13 @@ int product_ui_calendar_page_create(lv_obj_t *parent)
     return 0;
 }
 
+/**
+ * @brief 保存对应视图滚动位置、归还下拉占用并解除 LVGL 状态，保留查询会话。
+ * @note 创建准备失败也会调用此路径；视图已经回退时不会读取失效对象。
+ */
 static void product_ui_calendar_page_destroy(void)
 {
-    /* Failed preparation also calls destroy, after the temporary view was reset. */
+    /* 准备失败且临时视图已经重置时，也会调用 destroy。 */
     if (s_calendar_page.root != NULL) {
         if (s_calendar.presentation.mode == PRODUCT_UI_CALENDAR_MONTH) {
             s_calendar.presentation.month_scroll = product_ui_calendar_view_scroll();
@@ -295,6 +343,10 @@ static void product_ui_calendar_page_destroy(void)
     s_calendar.pending = PRODUCT_UI_CALENDAR_ACTION_NONE;
 }
 
+/**
+ * @brief 推进公共 UI、消费结构动作，再按节奏更新可信今天及详情事件投影。
+ * @param[in] elapsed_ms 本轮页面经过的毫秒数。
+ */
 static void product_ui_calendar_page_update(uint32_t elapsed_ms)
 {
     product_ui_process(elapsed_ms);
@@ -323,6 +375,9 @@ static page_desc_t s_product_ui_calendar_desc = {
     .name = "ProductCalendar", .ops = &s_product_ui_calendar_ops,
 };
 
+/**
+ * @brief 注册静态万年历页面描述。
+ */
 int product_ui_calendar_register_page(int page_type)
 {
     s_product_ui_calendar_desc.page_type = page_type;

@@ -1,7 +1,4 @@
-/**
- * @file product_ui_calendar_model.h
- * @brief Bounded Beijing civil calendar queries, independent of clock and LVGL.
- */
+/** @file product_ui_calendar_model.h @brief 有限北京时间公历查询，不依赖当前时钟或 LVGL。 */
 #ifndef __PRODUCT_UI_CALENDAR_MODEL_H__
 #define __PRODUCT_UI_CALENDAR_MODEL_H__
 
@@ -37,7 +34,7 @@ typedef enum {
     PRODUCT_UI_CALENDAR_QINGMING = 1U << 14,
 } product_ui_calendar_festival_e;
 
-/* Chronological order in each Gregorian year; zero means no solar term. */
+/** 按每个公历年中的先后顺序编号，零表示当天无节气。 */
 typedef enum {
     PRODUCT_UI_CALENDAR_TERM_NONE = 0,
     PRODUCT_UI_CALENDAR_MINOR_COLD, PRODUCT_UI_CALENDAR_MAJOR_COLD,
@@ -65,7 +62,7 @@ typedef struct {
     product_ui_date_t solar;
     product_ui_calendar_lunar_t lunar;
     uint16_t festivals;
-    uint8_t weekday; /* Monday=0 through Sunday=6. */
+    uint8_t weekday; /**< 周一为 0，至周日为 6。 */
     uint8_t term;
 } product_ui_calendar_day_t;
 
@@ -86,9 +83,23 @@ typedef struct {
     product_ui_calendar_cell_t cells[PRODUCT_UI_CALENDAR_CELL_COUNT];
 } product_ui_calendar_month_t;
 
-/** Invalid arguments leave output unchanged; data errors zero affected output. */
+/**
+ * @brief 查询受支持日期的农历、星期、节气及节日位。
+ * @param[in] date 借用公历日期，受支持年份为 MIN_YEAR 至 MAX_YEAR。
+ * @param[out] out 成功时接收完整日信息；参数／范围错误保持原值，历表错误清零。
+ * @return 成功为 CALENDAR_OK；非法日期为 ARGUMENT，超出查询年份为 RANGE，历表不一致为 DATA。
+ * @note 星期使用周一为零；无可信今天也可做独立日期查询。
+ */
 product_ui_calendar_result_e product_ui_calendar_get_day(
     const product_ui_date_t *date, product_ui_calendar_day_t *out);
+/**
+ * @brief 构建周一起始的六行七列月份模型，含前后相邻月份单元。
+ * @param[in] year 查询年份，须在日历支持区间。
+ * @param[in] month 1 至 12 的月份。
+ * @param[out] out 完整月份值模型；参数／范围错误不改，内部数据错误清零。
+ * @return 成功为 CALENDAR_OK；月份／零年或空输出为 ARGUMENT，年份超范围为 RANGE；内部历表／推进错误为 DATA。
+ * @note 支持范围边缘之外的相邻单元保留公历日期并标记 OUT_OF_RANGE，不把缺农历当作整个合法月份失败。
+ */
 product_ui_calendar_result_e product_ui_calendar_build_month(
     uint16_t year, uint8_t month, product_ui_calendar_month_t *out);
 

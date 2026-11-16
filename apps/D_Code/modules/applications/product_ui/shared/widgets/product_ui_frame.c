@@ -1,7 +1,4 @@
-/**
- * @file product_ui_frame.c
- * @brief Status, navigation, and page-frame components.
- */
+/** @file product_ui_frame.c @brief 页面状态栏、导航及内容框架；对象树与页面持久状态共同遵守删除生命周期。 */
 
 #include "config/app_config.h"
 
@@ -26,6 +23,10 @@ typedef struct {
 static void product_ui_status_view_apply(
     product_ui_status_view_t *view, const product_ui_status_t *status);
 
+/**
+ * @brief 从静态状态栏链解除指定状态，不删除其对象树。
+ * @param[in,out] view 状态栏引用，NULL 或尚未登记也可安全忽略。
+ */
 static void product_ui_status_unregister(product_ui_status_view_t *view)
 {
     product_ui_status_view_t **link;
@@ -45,6 +46,10 @@ static void product_ui_status_unregister(product_ui_status_view_t *view)
     view->is_registered = 0U;
 }
 
+/**
+ * @brief 清除对象默认样式及滚动能力，NULL 时忽略。
+ * @param[in,out] obj 借用对象。
+ */
 static void product_ui_clean_obj(lv_obj_t *obj)
 {
     if (obj == NULL) {
@@ -54,6 +59,13 @@ static void product_ui_clean_obj(lv_obj_t *obj)
     lv_obj_clear_flag(obj, LV_OBJ_FLAG_SCROLLABLE);
 }
 
+/**
+ * @brief 创建主题标签并复制本次文字。
+ * @param[in,out] parent 标签父对象。
+ * @param[in] text 本次复制的文字。
+ * @param[in] style 主题样式标记。
+ * @return 成功返回父树拥有的标签，失败为 NULL。
+ */
 static lv_obj_t *product_ui_make_label(lv_obj_t *parent, const char *text,
                                        product_ui_style_e style)
 {
@@ -78,6 +90,12 @@ static const lv_style_const_prop_t s_status_icon_geometry[] = {
 };
 static LV_STYLE_CONST_INIT(s_status_icon_style, (void *)s_status_icon_geometry);
 
+/**
+ * @brief 创建指定原生状态栏尺寸的不可交互 A4 图像。
+ * @param[in,out] parent 图像父对象。
+ * @param[in] icon_id 静态图标编号。
+ * @return 成功返回父树拥有的图像，资源缺失或创建失败为 NULL。
+ */
 static lv_obj_t *product_ui_make_status_icon(lv_obj_t *parent,
                                              product_ui_icon_id_t icon_id)
 {
@@ -93,7 +111,7 @@ static lv_obj_t *product_ui_make_status_icon(lv_obj_t *parent,
         return NULL;
     }
     lv_image_set_src(image, source);
-    /* The generated glyph and layout box share their native dimensions. */
+    /* 生成字形及布局框使用相同原生尺寸。 */
     lv_obj_add_style(image, &s_status_icon_style, 0);
     lv_image_set_scale(image, LV_SCALE_NONE);
     lv_obj_clear_flag(image, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE |
@@ -101,12 +119,10 @@ static lv_obj_t *product_ui_make_status_icon(lv_obj_t *parent,
     return image;
 }
 
-/*
- * Status-bar WiFi: Cipher-style 4 rising bars (wifi_level 0..4).
- * Settings rows keep PRODUCT_UI_ICON_WIFI asset separately.
- */
-/* Signal geometry is identical on every page, including both pages retained
- * during a transactional transition. Keep it in Flash instead of local styles. */
+/* 状态栏 WiFi 使用 Cipher 式四根递增信号条，对应零至四格；
+ * 设置行继续独立使用图标资源。 */
+/* 所有页面信号几何一致，包含事务切换中同时保留的两页；
+ * 用 Flash 只读样式避免重复本地样式分配。 */
 static const lv_style_prop_t s_signal_geometry_props[] = {
     LV_STYLE_WIDTH, LV_STYLE_HEIGHT, LV_STYLE_X, LV_STYLE_Y, LV_STYLE_RADIUS, LV_STYLE_BORDER_WIDTH
 };
@@ -131,8 +147,8 @@ static const lv_style_t *const s_signal_styles[] = {
     &s_signal_0_style, &s_signal_1_style, &s_signal_2_style, &s_signal_3_style
 };
 
-/* Status geometry is repeated on the home page, control center and both sides
- * of a page transition. Only values that vary with live status stay local. */
+/* 首页、控制中心及页面切换两侧复用状态几何；
+ * 只有随真实状态变化的值保留为局部样式。 */
 enum {
     STATUS_WIDTH, STATUS_HEIGHT, STATUS_X, STATUS_Y, STATUS_BG_OPA, STATUS_BORDER,
     STATUS_RADIUS, STATUS_PAD_LEFT, STATUS_PAD_RIGHT, STATUS_PAD_TOP, STATUS_PAD_BOTTOM,
@@ -202,18 +218,18 @@ static const lv_style_const_prop_t s_nav_back_geometry[] = {
     STATUS_VALUE(ALIGN, LV_ALIGN_LEFT_MID), STATUS_VALUE(X, PRODUCT_UI_PAGE_PAD), STATUS_VALUE(Y, 0),
     LV_STYLE_CONST_PROPS_END
 };
-#define PRODUCT_UI_CONTENT_GEOMETRY(name, content_height, content_y) \
+#define PRODUCT_UI_CONTENT_GEOMETRY(name, content_height, content_y, vertical_pad) \
     static const lv_style_const_prop_t name[] = { \
         STATUS_VALUE(WIDTH, PRODUCT_UI_SCREEN_W), STATUS_VALUE(HEIGHT, content_height), \
         STATUS_VALUE(X, 0), STATUS_VALUE(Y, content_y), \
         STATUS_VALUE(PAD_LEFT, PRODUCT_UI_PAGE_PAD), STATUS_VALUE(PAD_RIGHT, PRODUCT_UI_PAGE_PAD), \
-        STATUS_VALUE(PAD_TOP, PRODUCT_UI_PAGE_PAD), STATUS_VALUE(PAD_BOTTOM, PRODUCT_UI_PAGE_PAD), \
+        STATUS_VALUE(PAD_TOP, vertical_pad), STATUS_VALUE(PAD_BOTTOM, vertical_pad), \
         LV_STYLE_CONST_PROPS_END \
     }
 PRODUCT_UI_CONTENT_GEOMETRY(s_page_content_geometry, PRODUCT_UI_CONTENT_H,
-                            PRODUCT_UI_STATUS_H + PRODUCT_UI_NAV_H);
+                            PRODUCT_UI_STATUS_H + PRODUCT_UI_NAV_H, PRODUCT_UI_SPACE_SM);
 PRODUCT_UI_CONTENT_GEOMETRY(s_home_content_geometry, PRODUCT_UI_SCREEN_H - PRODUCT_UI_STATUS_H,
-                            PRODUCT_UI_STATUS_H);
+                            PRODUCT_UI_STATUS_H, PRODUCT_UI_PAGE_PAD);
 #undef PRODUCT_UI_CONTENT_GEOMETRY
 static LV_STYLE_CONST_INIT(s_wifi_box_style, (void *)s_wifi_box_geometry);
 static LV_STYLE_CONST_INIT(s_battery_host_style, (void *)s_battery_host_geometry);
@@ -230,6 +246,12 @@ static LV_STYLE_CONST_INIT(s_home_content_style, (void *)s_home_content_geometry
 #undef STATUS_ZERO_PADDING
 #undef STATUS_VALUE
 
+/**
+ * @brief 创建具有固定几何的四格信号及容器，不另取网络状态。
+ * @param[in,out] view 接收信号对象引用的持续状态。
+ * @param[in,out] parent 信号父容器。
+ * @return 完整创建为 0，参数或对象失败为 -1，部分对象仍属父树。
+ */
 static int product_ui_wifi_signal_create(product_ui_status_view_t *view,
                                          lv_obj_t *parent)
 {
@@ -261,12 +283,12 @@ static int product_ui_wifi_signal_create(product_ui_status_view_t *view,
     return 0;
 }
 
-/*
- * Portrait Cipher battery style (cipher_panel_demo.c cipher_battery_icon):
- *   body 26x14 border shell (transparent fill)
- *   liquid at +2,+2 size (22*pct/100) x 10
- *   tip 2x6 at body_w+gap
- * Host is a fixed flex unit so tip cannot collide with peers.
+/**
+ * @brief 创建固定 flex 单元内的电池外框、独立填充、端点及充电标志。
+ * @param[in,out] view 接收电池对象引用的持续状态。
+ * @param[in,out] parent 电池父容器。
+ * @return 完整创建为 0，参数或对象失败为 -1，部分对象仍属父树。
+ * @note 填充和外框为同级绝对内缩，避免未布局时内容宽为零而出现空壳。
  */
 static int product_ui_battery_create(product_ui_status_view_t *view,
                                      lv_obj_t *parent)
@@ -283,7 +305,7 @@ static int product_ui_battery_create(product_ui_status_view_t *view,
     lv_obj_clear_flag(view->battery_host, LV_OBJ_FLAG_CLICKABLE |
                       LV_OBJ_FLAG_SCROLLABLE);
 
-    /* Outer shell: border only (Cipher). */
+    /* 外壳仅绘边框，沿用 Cipher 几何。 */
     view->battery = lv_obj_create(view->battery_host);
     if (view->battery == NULL) {
         return -1;
@@ -293,10 +315,8 @@ static int product_ui_battery_create(product_ui_status_view_t *view,
     lv_obj_clear_flag(view->battery, LV_OBJ_FLAG_CLICKABLE |
                       LV_OBJ_FLAG_SCROLLABLE);
 
-    /*
-     * Fill is sibling of body under host (not pad-based child). Matches Cipher
-     * absolute inset and avoids pre-layout content_width = 0 empty shells.
-     */
+    /* 填充与外框在 host 下同级，使用绝对内缩；
+     * 避免布局前 content_width 为零而出现空壳。 */
     view->battery_fill = lv_obj_create(view->battery_host);
     view->battery_tip = lv_obj_create(view->battery_host);
     view->battery_charge = product_ui_make_label(view->battery_host,
@@ -315,13 +335,17 @@ static int product_ui_battery_create(product_ui_status_view_t *view,
     lv_obj_add_style(view->battery_tip, &s_battery_tip_style, 0);
     lv_obj_clear_flag(view->battery_tip, LV_OBJ_FLAG_CLICKABLE);
 
-    /* Center charge glyph on body rect (host is wider by tip). */
+    /* 充电标志对齐电池本体，host 还包含更宽的端点。 */
     lv_obj_add_style(view->battery_charge, &s_battery_charge_style, 0);
     lv_obj_add_flag(view->battery_charge, LV_OBJ_FLAG_HIDDEN);
     lv_obj_clear_flag(view->battery_charge, LV_OBJ_FLAG_CLICKABLE);
     return 0;
 }
 
+/**
+ * @brief 状态根删除时先解除静态登记，再清空调用方持有的状态引用。
+ * @param[in] event 根 DELETE 事件，用户数据借用持续状态。
+ */
 static void product_ui_status_delete_cb(lv_event_t *event)
 {
     product_ui_status_view_t *view;
@@ -333,6 +357,11 @@ static void product_ui_status_delete_cb(lv_event_t *event)
     }
 }
 
+/**
+ * @brief 把完整根登记到静态刷新链并附着删除收尾回调。
+ * @param[in,out] view 内存寿命覆盖根对象删除回调的状态。
+ * @return 登记成功为 0，空状态、无根或已经登记为 -1。
+ */
 static int product_ui_status_register(product_ui_status_view_t *view)
 {
     if ((view == NULL) || (view->root == NULL) || view->is_registered) {
@@ -346,6 +375,12 @@ static int product_ui_status_register(product_ui_status_view_t *view)
     return 0;
 }
 
+/**
+ * @brief 创建固定行布局状态根，按参数选择透明或页面色背景。
+ * @param[in,out] parent 状态根父对象。
+ * @param[in] is_transparent 非零透明背景，零页面背景。
+ * @return 成功返回父树拥有的根，失败为 NULL。
+ */
 static lv_obj_t *product_ui_status_root_create(lv_obj_t *parent,
                                                uint8_t is_transparent)
 {
@@ -362,12 +397,18 @@ static lv_obj_t *product_ui_status_root_create(lv_obj_t *parent,
     } else {
         lv_obj_set_style_bg_color(root, product_ui_color(PRODUCT_UI_COLOR_PAGE), 0);
     }
-    /* Keep time | spacer | wifi | bt | battery from colliding. */
+    /* 时间、伸展占位、WiFi、蓝牙及电池依次布局，避免互相碰撞。 */
     lv_obj_add_style(root, &s_status_root_style, 0);
     lv_obj_add_flag(root, LV_OBJ_FLAG_CLICKABLE);
     return root;
 }
 
+/**
+ * @brief 完成时间、占位及可选下拉绑定，登记成功后才输出状态根。
+ * @param[in] params 借用创建描述，其 view／root_out 输出会更新。
+ * @param[in,out] spacer 有效伸展占位对象。
+ * @return 成功为 0，状态登记失败为 -1。
+ */
 static int product_ui_status_finish(
     const product_ui_status_create_params_t *params, lv_obj_t *spacer)
 {
@@ -393,6 +434,13 @@ static int product_ui_status_finish(
     return 0;
 }
 
+/**
+ * @brief 创建全部状态子对象，先应用当前值，再完成登记和可选根输出。
+ * @param[in,out] parent 状态栏父容器。
+ * @param[in] params 借用创建描述，view 指向的持续状态由本函数重置并填写。
+ * @return 完整创建为 0，参数或任一对象失败为 -1。
+ * @note 失败不删除父树，调用方按页面失败清理；当前状态值来自统一快照，不读取硬件。
+ */
 static int product_ui_status_create(
     lv_obj_t *parent, const product_ui_status_create_params_t *params)
 {
@@ -412,10 +460,7 @@ static int product_ui_status_create(
     }
     view->is_light = params->is_light;
     view->hide_connectivity = params->hide_connectivity;
-    /*
-     * Time uses the STATUS font role. Do not attach
-     * PRODUCT_UI_STYLE_STATUS (it carries status-bar background).
-     */
+    /* 时间只使用状态字体角色，不附着带状态栏背景的整套状态样式。 */
     view->time = product_ui_make_label(view->root, "--:--",
                                        PRODUCT_UI_STYLE_CAPTION);
     if (view->time != NULL) {
@@ -445,6 +490,10 @@ static int product_ui_status_create(
     return product_ui_status_finish(params, spacer);
 }
 
+/**
+ * @brief 把默认返回点击交给统一导航，失败显示提示。
+ * @param[in] event 返回事件，当前不读取载荷。
+ */
 static void product_ui_back_cb(lv_event_t *event)
 {
     (void)event;
@@ -454,6 +503,12 @@ static void product_ui_back_cb(lv_event_t *event)
     }
 }
 
+/**
+ * @brief 创建返回按钮并选择页面自定义或统一导航回调。
+ * @param[in,out] nav 导航父容器。
+ * @param[in] spec 借用的页面返回回调及上下文规格。
+ * @return 成功为 0，按钮或图标标签失败为 -1。
+ */
 static int product_ui_nav_back_create(lv_obj_t *nav,
                                       const product_ui_page_spec_t *spec)
 {
@@ -466,22 +521,27 @@ static int product_ui_nav_back_create(lv_obj_t *nav,
         return -1;
     }
     product_ui_clean_obj(back);
+    product_ui_button_style(back, PRODUCT_UI_BUTTON_ICON_LIGHT);
+    lv_obj_set_style_text_color(back, product_ui_color(PRODUCT_UI_COLOR_ACCENT), 0);
     lv_obj_add_style(back, &s_nav_back_style, 0);
     lv_obj_clear_flag(back, LV_OBJ_FLAG_PRESS_LOCK);
     callback = spec->nav_back_cb != NULL ? spec->nav_back_cb :
                                           product_ui_back_cb;
     user_data = spec->nav_back_cb != NULL ? spec->nav_back_user_data : NULL;
     lv_obj_add_event_cb(back, callback, LV_EVENT_CLICKED, user_data);
-    back = product_ui_make_label(back, LV_SYMBOL_LEFT, PRODUCT_UI_STYLE_BODY);
+    back = lv_label_create(back);
     if (back == NULL) {
         return -1;
     }
-    lv_obj_set_style_text_color(
-        back, product_ui_color(PRODUCT_UI_COLOR_ACCENT), 0);
+    lv_obj_set_style_text_font(back, product_ui_font(PRODUCT_UI_FONT_BODY), 0);
+    lv_label_set_text(back, LV_SYMBOL_LEFT);
     lv_obj_center(back);
     return 0;
 }
 
+/**
+ * @brief 更新导航文字动作的显示、使能及只读状态；操作改变时撤销按压资格。
+ */
 void product_ui_page_action_update(product_ui_page_view_t *view,
                                     const char *text, uint8_t is_enabled,
                                     uint8_t is_read_only)
@@ -503,7 +563,7 @@ void product_ui_page_action_update(product_ui_page_view_t *view,
          view->is_nav_action_read_only == is_read_only))) {
         return;
     }
-    /* A press belongs to the operation displayed when that press began. */
+    /* 按压身份属于按下时显示的操作，更新操作须撤销旧资格。 */
     view->is_nav_action_armed = 0U;
     view->is_nav_action_read_only = is_read_only;
     lv_obj_clear_state(action, LV_STATE_PRESSED);
@@ -511,9 +571,7 @@ void product_ui_page_action_update(product_ui_page_view_t *view,
     if (!is_visible) {
         return;
     }
-    if (strcmp(lv_label_get_text(view->nav_action_label), text) != 0) {
-        lv_label_set_text(view->nav_action_label, text);
-    }
+    (void)product_ui_label_sync(view->nav_action_label, text, NULL);
     if (!is_enabled && !is_read_only) {
         lv_obj_add_state(action, LV_STATE_DISABLED);
     } else {
@@ -528,6 +586,10 @@ void product_ui_page_action_update(product_ui_page_view_t *view,
     }
 }
 
+/**
+ * @brief 跟踪导航动作完整按压，操作变化、隐藏、禁用或资格丢失时拦截点击。
+ * @param[in] event 动作按钮事件，用户数据借用页面状态。
+ */
 static void product_ui_nav_action_event(lv_event_t *event)
 {
     product_ui_page_view_t *view = lv_event_get_user_data(event);
@@ -548,6 +610,13 @@ static void product_ui_nav_action_event(lv_event_t *event)
     }
 }
 
+/**
+ * @brief 按文字优先、其次图像或符号创建导航动作，并先绑定输入资格门禁。
+ * @param[in,out] nav 导航父容器。
+ * @param[in] spec 借用动作规格；图片及回调上下文持续借用。
+ * @param[in,out] view 接收动作及可用标签引用的页面状态。
+ * @return 无需动作或成功创建为 0，按钮或视觉子对象失败为 -1。
+ */
 static int product_ui_nav_action_create(lv_obj_t *nav,
                                          const product_ui_page_spec_t *spec,
                                          product_ui_page_view_t *view)
@@ -566,6 +635,7 @@ static int product_ui_nav_action_create(lv_obj_t *nav,
     }
     view->nav_action = action;
     product_ui_clean_obj(action);
+    product_ui_button_style(action, is_text ? PRODUCT_UI_BUTTON_PRIMARY : PRODUCT_UI_BUTTON_ICON_LIGHT);
     lv_obj_clear_flag(action, LV_OBJ_FLAG_PRESS_LOCK | LV_OBJ_FLAG_GESTURE_BUBBLE);
     lv_obj_set_size(action, is_text ? 96 : PRODUCT_UI_TOUCH_MIN, PRODUCT_UI_TOUCH_MIN);
     lv_obj_align(action, LV_ALIGN_RIGHT_MID, -PRODUCT_UI_PAGE_PAD, 0);
@@ -575,14 +645,6 @@ static int product_ui_nav_action_create(lv_obj_t *nav,
                             spec->nav_action_user_data);
     }
     if (is_text) {
-        lv_obj_set_style_radius(action, PRODUCT_UI_RADIUS_MD, 0);
-        lv_obj_set_style_bg_color(action, product_ui_color(PRODUCT_UI_COLOR_ACTION), 0);
-        lv_obj_set_style_bg_color(action, product_ui_color(PRODUCT_UI_COLOR_ACTION_PRESSED),
-                                  LV_STATE_PRESSED);
-        lv_obj_set_style_bg_color(action, product_ui_color(PRODUCT_UI_COLOR_SURFACE_ALT),
-                                  LV_STATE_DISABLED);
-        lv_obj_set_style_text_color(action, product_ui_color(PRODUCT_UI_COLOR_TEXT_MUTED),
-                                    LV_STATE_DISABLED);
         visual = lv_label_create(action);
         if (visual != NULL) {
             lv_obj_set_style_text_font(visual, product_ui_font(PRODUCT_UI_FONT_BODY), 0);
@@ -603,15 +665,17 @@ static int product_ui_nav_action_create(lv_obj_t *nav,
             lv_obj_set_style_image_recolor_opa(visual, LV_OPA_COVER, 0);
         }
     } else {
-        visual = product_ui_make_label(action, spec->nav_action_symbol, PRODUCT_UI_STYLE_BODY);
+        visual = lv_label_create(action);
+        if (visual != NULL) {
+            lv_obj_set_style_text_font(visual, product_ui_font(PRODUCT_UI_FONT_BODY), 0);
+            lv_label_set_text(visual, spec->nav_action_symbol);
+        }
     }
     if (visual == NULL) {
         return -1;
     }
     lv_obj_center(visual);
     if (!is_text) {
-        lv_obj_set_style_bg_color(action, product_ui_color(PRODUCT_UI_COLOR_SURFACE_ALT), LV_STATE_PRESSED);
-        lv_obj_set_style_bg_opa(action, LV_OPA_COVER, LV_STATE_PRESSED);
         if (spec->nav_action_cb == NULL) {
             lv_obj_add_state(action, LV_STATE_DISABLED);
         } else {
@@ -624,12 +688,21 @@ static int product_ui_nav_action_create(lv_obj_t *nav,
 
 static uint32_t s_page_enter_event;
 
+/**
+ * @brief 标题仍存在时应用进入动画的横向偏移。
+ * @param[in,out] context 持久页面状态。
+ * @param[in] offset 标题横向平移像素。
+ */
 static void product_ui_title_apply(void *context, int32_t offset)
 {
     product_ui_page_view_t *view = context;
     if (view->title != NULL) lv_obj_set_style_translate_x(view->title, offset, 0);
 }
 
+/**
+ * @brief 仅页面根收到共用进入事件时初始化并启动标题动效。
+ * @param[in] event 同步进入事件，param 借用本次 is_back 字节。
+ */
 static void product_ui_page_enter_cb(lv_event_t *event)
 {
     product_ui_page_view_t *view = lv_event_get_user_data(event);
@@ -640,6 +713,9 @@ static void product_ui_page_enter_cb(lv_event_t *event)
     product_ui_motion_start(&view->title_motion, 0, PRODUCT_UI_MOTION_ENTER_MS);
 }
 
+/**
+ * @brief 向已有页面同步发送共用进入事件，触发标题轻移进入效果。
+ */
 void product_ui_page_enter(lv_obj_t *root, uint8_t is_back)
 {
     if (root != NULL && s_page_enter_event != 0U) {
@@ -647,15 +723,26 @@ void product_ui_page_enter(lv_obj_t *root, uint8_t is_back)
     }
 }
 
+/**
+ * @brief 根删除分发中先清根引用，再解除页面状态，保留其他删除监听继续执行。
+ * @param[in] event 页面根 DELETE 事件，用户数据借用持续页面状态。
+ */
 static void product_ui_page_deleted(lv_event_t *event)
 {
     product_ui_page_view_t *view = lv_event_get_user_data(event);
     if (lv_event_get_target(event) != view->root) return;
-    /* Do not remove this callback during dispatch: later page cleanup must run. */
+    /* 删除分发中不移除此回调，后续页面清理监听仍须运行。 */
     view->root = NULL;
     product_ui_page_view_reset(view);
 }
 
+/**
+ * @brief 创建导航、标题及动作，标题借用页面状态绑定进入动画。
+ * @param[in,out] parent 页面父容器。
+ * @param[in] spec 本次借用的页面规格。
+ * @param[in,out] view 接收导航、标题及动效状态的持久页面引用。
+ * @return 完整创建为 0，任一对象或动作失败为 -1。
+ */
 static int product_ui_nav_create(lv_obj_t *parent,
                                  const product_ui_page_spec_t *spec,
                                  product_ui_page_view_t *view)
@@ -698,6 +785,9 @@ static int product_ui_nav_create(lv_obj_t *parent,
     return 0;
 }
 
+/**
+ * @brief 解除标题动效、页面监听和状态栏登记，再清空页面状态，不删除父对象树。
+ */
 void product_ui_page_view_reset(product_ui_page_view_t *view)
 {
     if (view != NULL) {
@@ -711,6 +801,13 @@ void product_ui_page_view_reset(product_ui_page_view_t *view)
     }
 }
 
+/**
+ * @brief 按是否导航返回选择共用内容几何，并按首页角色／透明主题设背景。
+ * @param[in,out] parent 页面父容器。
+ * @param[in] spec 借用的几何及主题规格。
+ * @param[in] role 已经推导的页面角色。
+ * @return 成功返回父树拥有的内容容器，失败为 NULL。
+ */
 static lv_obj_t *product_ui_page_content_create(
     lv_obj_t *parent, const product_ui_page_spec_t *spec,
     product_ui_page_role_e role)
@@ -731,6 +828,9 @@ static lv_obj_t *product_ui_page_content_create(
     return content;
 }
 
+/**
+ * @brief 在页面管理器提供的根对象中创建状态栏、可选导航和内容区。
+ */
 int product_ui_page_frame_create_ex(lv_obj_t *parent,
                                     const product_ui_page_spec_t *spec,
                                     product_ui_page_view_t *view)
@@ -783,6 +883,9 @@ int product_ui_page_frame_create_ex(lv_obj_t *parent,
     return 0;
 }
 
+/**
+ * @brief 创建控制中心专用浅色前景状态栏，注册到共用值刷新链。
+ */
 lv_obj_t *product_ui_control_status_create(lv_obj_t *parent,
                                            product_ui_status_view_t *view)
 {
@@ -800,8 +903,7 @@ lv_obj_t *product_ui_control_status_create(lv_obj_t *parent,
         (product_ui_status_create(parent, &params) != 0)) {
         return NULL;
     }
-    /* The dark control-center bar uses light foregrounds but still exposes
-     * connectivity icons when a real capability publishes them. */
+    /* 深色控制中心用浅色前景，但真实能力发布时仍显示连接图标。 */
     view->hide_connectivity = 0U;
     lv_obj_set_style_border_color(
         root, product_ui_color(PRODUCT_UI_COLOR_CONTROL_BORDER), 0);
@@ -811,28 +913,11 @@ lv_obj_t *product_ui_control_status_create(lv_obj_t *parent,
     return root;
 }
 
-static void product_ui_status_visibility_update(
-    product_ui_status_view_t *view, const product_ui_status_t *status)
-{
-    /* Transparent objects keep their layout slots when a capability disappears. */
-    lv_obj_clear_flag(view->time, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_clear_flag(view->wifi, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_clear_flag(view->bluetooth, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_clear_flag(view->battery_host, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_set_style_opa(view->time, status->valid_mask & PRODUCT_UI_STATUS_VALID_TIME ?
-                          LV_OPA_COVER : LV_OPA_TRANSP, 0);
-    if (view->hide_connectivity || !(status->valid_mask & PRODUCT_UI_STATUS_VALID_WIFI)) {
-        lv_obj_set_style_opa(view->wifi, LV_OPA_TRANSP, 0);
-    }
-    if (view->hide_connectivity || !(status->valid_mask & PRODUCT_UI_STATUS_VALID_BLUETOOTH)) {
-        lv_obj_set_style_opa(view->bluetooth, LV_OPA_TRANSP, 0);
-    }
-    if (!(status->valid_mask & PRODUCT_UI_STATUS_VALID_BATTERY)) {
-        lv_obj_set_style_opa(view->battery_host, LV_OPA_TRANSP, 0);
-    }
-    lv_obj_add_flag(view->battery_text, LV_OBJ_FLAG_HIDDEN);
-}
-
+/**
+ * @brief 检查状态栏所有必要对象及四格信号引用是否齐全。
+ * @param[in] view 借用的状态栏引用。
+ * @return 全部齐全为 1，空或局部状态为 0。
+ */
 static uint8_t product_ui_status_view_ready(
     const product_ui_status_view_t *view)
 {
@@ -856,136 +941,123 @@ static uint8_t product_ui_status_view_ready(
     return 1U;
 }
 
-static void product_ui_status_connectivity_update(
-    product_ui_status_view_t *view, const product_ui_status_t *status,
-    lv_color_t color)
+/**
+ * @brief 把状态值转换为显示文字、颜色、透明度及电池填充宽度。
+ * @param[in] view 提供前景及连接显隐策略的状态栏配置。
+ * @param[in] status 已经规范化的服务状态。
+ * @return 无对象所有权的完整渲染值投影。
+ */
+static product_ui_status_projection_t product_ui_status_project(
+    const product_ui_status_view_t *view, const product_ui_status_t *status)
 {
-    lv_opa_t bt_opa = LV_OPA_30;
-    lv_opa_t lit_opa = LV_OPA_COVER;
+    product_ui_status_projection_t next = {0};
     lv_opa_t dim_opa = LV_OPA_30;
-    lv_opa_t wifi_root_opa = LV_OPA_COVER;
     uint8_t level = 0U;
+    uint8_t percent = 0U;
     uint8_t i;
-
-    lv_obj_set_style_image_recolor(view->bluetooth, color, 0);
-
-    /*
-     * WiFi signal bars (wifi_level 0..4):
-     * - CONNECTED: light first N bars from status->wifi_level
-     * - ON (associating): all bars dim, root mid-opa
-     * - OFF/UNKNOWN: all bars dim
-     */
+    next.foreground = view->is_light ? lv_color_white() : product_ui_color(PRODUCT_UI_COLOR_TEXT);
+    lv_snprintf(next.time, sizeof(next.time), "%02u:%02u", status->hour, status->minute);
+    next.time_opa = status->valid_mask & PRODUCT_UI_STATUS_VALID_TIME ? LV_OPA_COVER : LV_OPA_TRANSP;
+    next.wifi_opa = LV_OPA_COVER;
     if (status->valid_mask & PRODUCT_UI_STATUS_VALID_WIFI) {
         if (status->wifi_state == PRODUCT_UI_LINK_CONNECTED) {
-            level = status->wifi_level;
-            if (level > PRODUCT_UI_WIFI_BAR_COUNT) {
-                level = PRODUCT_UI_WIFI_BAR_COUNT;
-            }
-            lit_opa = LV_OPA_COVER;
-            dim_opa = LV_OPA_30;
-            wifi_root_opa = LV_OPA_COVER;
+            level = LV_MIN(status->wifi_level, PRODUCT_UI_WIFI_BAR_COUNT);
         } else if (status->wifi_state == PRODUCT_UI_LINK_ON) {
-            level = 0U;
             dim_opa = LV_OPA_40;
-            wifi_root_opa = LV_OPA_70;
-        } else {
-            level = 0U;
-            dim_opa = LV_OPA_30;
-            wifi_root_opa = LV_OPA_COVER;
-        }
-    } else {
-        level = 0U;
-        dim_opa = LV_OPA_30;
-        wifi_root_opa = LV_OPA_COVER;
-    }
-    for (i = 0U; i < PRODUCT_UI_WIFI_BAR_COUNT; i++) {
-        lv_obj_set_style_bg_color(view->wifi_bar[i], color, 0);
-        if (i < level) {
-            lv_obj_set_style_bg_opa(view->wifi_bar[i], lit_opa, 0);
-        } else {
-            lv_obj_set_style_bg_opa(view->wifi_bar[i], dim_opa, 0);
+            next.wifi_opa = LV_OPA_70;
         }
     }
-    lv_obj_set_style_opa(view->wifi, wifi_root_opa, 0);
-
+    for (i = 0U; i < PRODUCT_UI_WIFI_BAR_COUNT; i++)
+        next.wifi_bars[i] = i < level ? LV_OPA_COVER : dim_opa;
+    if (view->hide_connectivity || !(status->valid_mask & PRODUCT_UI_STATUS_VALID_WIFI))
+        next.wifi_opa = LV_OPA_TRANSP;
+    next.bluetooth_opa = LV_OPA_30;
     if ((status->valid_mask & PRODUCT_UI_STATUS_VALID_BLUETOOTH) &&
-        (status->bluetooth_state >= PRODUCT_UI_LINK_ON)) {
-        bt_opa = LV_OPA_COVER;
+        status->bluetooth_state >= PRODUCT_UI_LINK_ON) next.bluetooth_opa = LV_OPA_COVER;
+    if (view->hide_connectivity || !(status->valid_mask & PRODUCT_UI_STATUS_VALID_BLUETOOTH))
+        next.bluetooth_opa = LV_OPA_TRANSP;
+    next.battery_color = next.foreground;
+    if (status->valid_mask & PRODUCT_UI_STATUS_VALID_BATTERY) {
+        percent = LV_MIN(status->battery_percent, 100U);
+        next.battery_opa = LV_OPA_COVER;
+        if (status->battery_percent <= 20U) next.battery_color = product_ui_color(PRODUCT_UI_COLOR_DANGER);
+        next.charging = status->is_charging != 0U;
     }
-    lv_obj_set_style_opa(view->bluetooth, bt_opa, 0);
+    next.battery_width = (uint8_t)(((uint32_t)percent * PRODUCT_UI_STATUS_BAT_FILL_MAX) / 100U);
+    return next;
 }
 
-static void product_ui_status_battery_update(
-    product_ui_status_view_t *view, const product_ui_status_t *status,
-    lv_color_t color)
+/**
+ * @brief 比较前次值投影，按组只更新变化的颜色、尺寸、显隐及透明度。
+ * @param[in,out] view 完整状态栏控件及旧投影。
+ * @param[in] next 本次待呈现的值投影。
+ * @note 不提交新投影身份；上层须等时间文字更新成功后再提交，避免失败呈现被缓存。
+ */
+static void product_ui_status_projection_apply(product_ui_status_view_t *view,
+    const product_ui_status_projection_t *next)
 {
-    uint8_t is_valid = (uint8_t)((status->valid_mask &
-        PRODUCT_UI_STATUS_VALID_BATTERY) != 0U);
-    /* Cipher: low battery uses warn/danger fill; shell/tip follow accent color. */
-    lv_color_t fill_color = (is_valid && (status->battery_percent <= 20U)) ?
-                            product_ui_color(PRODUCT_UI_COLOR_DANGER) : color;
-    uint8_t percent = 0U;
-    uint8_t fill_width;
-
-    lv_obj_set_style_border_color(view->battery, color, 0);
-    lv_obj_set_style_bg_opa(view->battery, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_bg_color(view->battery_fill, fill_color, 0);
-    lv_obj_set_style_bg_color(view->battery_tip, fill_color, 0);
-
-    if (is_valid) {
-        percent = status->battery_percent;
-        if (percent > 100U) {
-            percent = 100U;
-        }
+    const product_ui_status_projection_t *old = &view->projection;
+    uint8_t first = !view->has_projection;
+    uint8_t i;
+    if (first || !lv_color_eq(old->foreground, next->foreground)) {
+        lv_obj_set_style_text_color(view->time, next->foreground, 0);
+        lv_obj_set_style_image_recolor(view->bluetooth, next->foreground, 0);
+        lv_obj_set_style_border_color(view->battery, next->foreground, 0);
+        lv_obj_set_style_text_color(view->battery_charge, next->foreground, 0);
+        lv_obj_set_style_text_color(view->battery_text, next->foreground, 0);
+        for (i = 0U; i < PRODUCT_UI_WIFI_BAR_COUNT; i++)
+            lv_obj_set_style_bg_color(view->wifi_bar[i], next->foreground, 0);
     }
-    /* Cipher: fill_w = (22 * pct) / 100; only draw when fill_w > 0. */
-    fill_width = (uint8_t)(((uint32_t)percent *
-                            (uint32_t)PRODUCT_UI_STATUS_BAT_FILL_MAX) / 100U);
-    lv_obj_set_pos(view->battery_fill, PRODUCT_UI_STATUS_BAT_INSET,
-                   PRODUCT_UI_STATUS_BAT_INSET);
-    if (fill_width > 0U) {
-        lv_obj_set_size(view->battery_fill, fill_width,
-                        PRODUCT_UI_STATUS_BAT_FILL_H);
-        lv_obj_clear_flag(view->battery_fill, LV_OBJ_FLAG_HIDDEN);
-    } else {
-        lv_obj_set_size(view->battery_fill, 0, PRODUCT_UI_STATUS_BAT_FILL_H);
-        lv_obj_add_flag(view->battery_fill, LV_OBJ_FLAG_HIDDEN);
+    if (first || !lv_color_eq(old->battery_color, next->battery_color)) {
+        lv_obj_set_style_bg_color(view->battery_fill, next->battery_color, 0);
+        lv_obj_set_style_bg_color(view->battery_tip, next->battery_color, 0);
     }
-    lv_obj_set_style_opa(view->battery_host,
-                         is_valid ? LV_OPA_COVER : LV_OPA_50, 0);
-    lv_obj_set_style_text_color(view->battery_charge, color, 0);
-    lv_obj_set_style_text_color(view->battery_text, color, 0);
-    lv_label_set_text(view->battery_text, "");
-    if (is_valid && status->is_charging) {
-        lv_obj_clear_flag(view->battery_charge, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_move_foreground(view->battery_charge);
-    } else {
-        lv_obj_add_flag(view->battery_charge, LV_OBJ_FLAG_HIDDEN);
+    if (first || old->battery_width != next->battery_width) {
+        lv_obj_set_size(view->battery_fill, next->battery_width, PRODUCT_UI_STATUS_BAT_FILL_H);
+        lv_obj_update_flag(view->battery_fill, LV_OBJ_FLAG_HIDDEN, next->battery_width == 0U);
+    }
+    if (first || old->charging != next->charging) {
+        lv_obj_update_flag(view->battery_charge, LV_OBJ_FLAG_HIDDEN, !next->charging);
+        if (next->charging) lv_obj_move_foreground(view->battery_charge);
+    }
+    if (first || old->time_opa != next->time_opa) lv_obj_set_style_opa(view->time, next->time_opa, 0);
+    if (first || old->wifi_opa != next->wifi_opa) lv_obj_set_style_opa(view->wifi, next->wifi_opa, 0);
+    if (first || old->bluetooth_opa != next->bluetooth_opa) lv_obj_set_style_opa(view->bluetooth, next->bluetooth_opa, 0);
+    if (first || old->battery_opa != next->battery_opa) lv_obj_set_style_opa(view->battery_host, next->battery_opa, 0);
+    for (i = 0U; i < PRODUCT_UI_WIFI_BAR_COUNT; i++)
+        if (first || old->wifi_bars[i] != next->wifi_bars[i])
+            lv_obj_set_style_bg_opa(view->wifi_bar[i], next->wifi_bars[i], 0);
+    if (first) {
+        lv_obj_set_style_bg_opa(view->battery, LV_OPA_TRANSP, 0);
+        lv_obj_set_pos(view->battery_fill, PRODUCT_UI_STATUS_BAT_INSET, PRODUCT_UI_STATUS_BAT_INSET);
+        lv_obj_add_flag(view->battery_text, LV_OBJ_FLAG_HIDDEN);
     }
 }
 
+/**
+ * @brief 完整控件上应用值投影，时间标签成功后才更新已呈现缓存。
+ * @param[in,out] view 持续有效的状态栏引用。
+ * @param[in] status 本次规范化状态，NULL 时忽略。
+ */
 static void product_ui_status_view_apply(
     product_ui_status_view_t *view, const product_ui_status_t *status)
 {
-    char time_text[8];
-    lv_color_t color;
+    product_ui_status_projection_t next;
 
     if (!product_ui_status_view_ready(view) || (status == NULL)) {
         return;
     }
-    color = view->is_light ? lv_color_white() :
-            product_ui_color(PRODUCT_UI_COLOR_TEXT);
-    lv_snprintf(time_text, sizeof(time_text), "%02u:%02u",
-                status->hour, status->minute);
-    lv_label_set_text(view->time, time_text);
-    lv_obj_set_style_text_font(view->time,
-                               product_ui_font(PRODUCT_UI_FONT_STATUS), 0);
-    lv_obj_set_style_text_color(view->time, color, 0);
-    product_ui_status_connectivity_update(view, status, color);
-    product_ui_status_battery_update(view, status, color);
-    product_ui_status_visibility_update(view, status);
+    next = product_ui_status_project(view, status);
+    product_ui_status_projection_apply(view, &next);
+    /* 标签更新失败不能发布为完整呈现快照。 */
+    if (product_ui_label_sync(view->time, next.time, NULL) < 0) return;
+    view->projection = next;
+    view->has_projection = 1U;
 }
 
+/**
+ * @brief 把已规范化状态值投影到所有完整且仍登记的状态栏。
+ */
 void product_ui_status_bar_refresh(const product_ui_status_t *status)
 {
     product_ui_status_view_t *view;

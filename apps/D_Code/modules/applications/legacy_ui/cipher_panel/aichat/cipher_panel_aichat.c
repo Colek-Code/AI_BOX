@@ -1,7 +1,4 @@
-/**
- * @file cipher_panel_aichat.c
- * @brief Scrollable sentence subtitles for Cipher Panel AIChat.
- */
+/** @file cipher_panel_aichat.c @brief Cipher Panel 的可滚动句子字幕，原文及分句由共用 Qwen 字幕层提供。 */
 #include "config/app_config.h"
 #if defined(D_LVGL_ENABLE) && (D_UI_TARGET == D_UI_CIPHER_PANEL)
 
@@ -39,6 +36,10 @@ static uint8_t s_aichat_logged_sentence_count = 0xFFU;
 static uint8_t s_aichat_logged_clip = 0xFFU;
 static uint8_t s_aichat_logged_auto_follow = 0xFFU;
 
+/**
+ * @brief 只在句子数或裁剪状态变化时输出已有诊断信息。
+ * @param[in] render 借用的呈现快照，NULL 时忽略。
+ */
 static void cipher_aichat_log_render_state(
         const cipher_panel_aichat_render_t *render)
 {
@@ -57,6 +58,10 @@ static void cipher_aichat_log_render_state(
     }
 }
 
+/**
+ * @brief 更新自动跟随策略，并对策略变化去重记录日志。
+ * @param[in] is_enabled 非零自动跟随，零保留用户视口。
+ */
 static void cipher_aichat_set_auto_follow(uint8_t is_enabled)
 {
     if (s_aichat_auto_follow == is_enabled) {
@@ -71,6 +76,10 @@ static void cipher_aichat_set_auto_follow(uint8_t is_enabled)
     }
 }
 
+/**
+ * @brief 根据距底部距离更新自动跟随资格。
+ * @param[in] e 滚动面板事件。
+ */
 static void cipher_aichat_scroll_event(lv_event_t *e)
 {
     lv_obj_t *panel = lv_event_get_target(e);
@@ -85,6 +94,12 @@ static void cipher_aichat_scroll_event(lv_event_t *e)
         (scroll_bottom <= CIPHER_AICHAT_AUTO_FOLLOW_PX) ? 1U : 0U);
 }
 
+/**
+ * @brief 按槽创建行及标签，并逐步保存控件引用。
+ * @param[in] index 小于字幕最大行数的物理槽。
+ * @return 面板或行创建失败为 NULL；标签创建失败仍返回已创建行，不能据此证明该行完整。
+ * @note 当前调用方仅在 row 为空时再建，因此 label 分配失败后的缺行不保证自动恢复。
+ */
 static lv_obj_t *cipher_aichat_create_row(uint8_t index)
 {
     lv_obj_t *row;
@@ -121,6 +136,11 @@ static lv_obj_t *cipher_aichat_create_row(uint8_t index)
     return row;
 }
 
+/**
+ * @brief 只有当前句状态变化时更新文字及背景高亮。
+ * @param[in] index 句子物理槽下标。
+ * @param[in] is_current 非零表示最新句，零为历史句。
+ */
 static void cipher_aichat_style_row(uint8_t index, uint8_t is_current)
 {
     lv_obj_t *row;
@@ -148,6 +168,10 @@ static void cipher_aichat_style_row(uint8_t index, uint8_t is_current)
         row, (is_current != 0U) ? LV_OPA_70 : LV_OPA_TRANSP, 0);
 }
 
+/**
+ * @brief 隐藏剩余句子槽并清空文字及当前句缓存。
+ * @param[in] from_index 首个不再使用的句子槽下标。
+ */
 static void cipher_aichat_hide_unused_rows(uint8_t from_index)
 {
     uint8_t index;
@@ -161,6 +185,11 @@ static void cipher_aichat_hide_unused_rows(uint8_t from_index)
     }
 }
 
+/**
+ * @brief 按有限句子数按需建立行并复制文字，末行高亮，隐藏其余槽。
+ * @param[in] render 共用字幕层提供且行数不超最大值的借用快照。
+ * @note 当前 void 接口不发布整组呈现成功或 pending 重试状态。
+ */
 static void cipher_aichat_render_rows(
         const cipher_panel_aichat_render_t *render)
 {
@@ -197,6 +226,10 @@ static void cipher_aichat_render_rows(
     cipher_aichat_hide_unused_rows(render->sentence_count);
 }
 
+/**
+ * @brief 自动跟随开启且最新行存在时，立即滚动使其可见。
+ * @param[in] render 借用呈现快照，可为空。
+ */
 static void cipher_aichat_follow_latest(
         const cipher_panel_aichat_render_t *render)
 {
@@ -214,6 +247,11 @@ static void cipher_aichat_follow_latest(
     }
 }
 
+/**
+ * @brief 从共用字幕准备新内容，再更新状态、行和跟随。
+ * @param[in] force 非零强制重新准备字幕。
+ * @note prepare 返回后共用脏位已消费；本旧视图不另维护分配失败的待呈现身份。
+ */
 static void cipher_aichat_refresh(uint8_t force)
 {
     cipher_panel_aichat_render_t render;
@@ -234,6 +272,9 @@ static void cipher_aichat_refresh(uint8_t force)
     cipher_aichat_log_render_state(&render);
 }
 
+/**
+ * @brief 清空页面对象引用及行文字，恢复自动跟随，不删除旧对象树。
+ */
 static void cipher_aichat_reset_rows(void)
 {
     uint8_t index;
@@ -250,6 +291,11 @@ static void cipher_aichat_reset_rows(void)
     s_aichat_logged_auto_follow = 0xFFU;
 }
 
+/**
+ * @brief 创建固定大小且纵向排列的可滚动字幕面板。
+ * @param[in,out] card 字幕面板父卡片。
+ * @return 成功返回卡片拥有的面板，失败为 NULL。
+ */
 static lv_obj_t *cipher_aichat_create_panel(lv_obj_t *card)
 {
     lv_obj_t *panel;
@@ -277,11 +323,17 @@ static lv_obj_t *cipher_aichat_create_panel(lv_obj_t *card)
     return panel;
 }
 
+/**
+ * @brief 尝试初始化共用字幕订阅，当前兼容 void 接口不返回失败。
+ */
 void cipher_panel_aichat_init(void)
 {
     (void)qwen_subtitle_init();
 }
 
+/**
+ * @brief 清空本页引用并创建字幕卡、状态及滚动区域，强制首次准备。
+ */
 void cipher_panel_aichat_show(lv_obj_t *parent)
 {
     lv_obj_t *card;
@@ -310,6 +362,9 @@ void cipher_panel_aichat_show(lv_obj_t *parent)
     cipher_aichat_refresh(1U);
 }
 
+/**
+ * @brief 字幕层有新内容时更新行、自动跟随及状态。
+ */
 void cipher_panel_aichat_update(void)
 {
     cipher_aichat_refresh(0U);

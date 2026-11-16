@@ -1,6 +1,6 @@
 /**
- * @file    d_event_payloads.h
- * @brief   Shared D_Code event payloads and emotion values.
+ * @file d_event_payloads.h
+ * @brief 定义 framework 共用事件载荷及表情值，不装配业务服务。
  */
 
 #ifndef D_EVENT_PAYLOADS_H

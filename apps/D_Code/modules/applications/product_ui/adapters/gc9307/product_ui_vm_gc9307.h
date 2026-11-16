@@ -1,32 +1,28 @@
-/** @file product_ui_vm_gc9307.h @brief Read-only, pinned SDK VM presence classification. */
+/** @file product_ui_vm_gc9307.h @brief 固定 SDK 布局下的只读 VM 存在性判别，避免错误创建默认记录。 */
 #ifndef PRODUCT_UI_VM_GC9307_H
 #define PRODUCT_UI_VM_GC9307_H
 #include "framework/d_error.h"
 #include "framework/d_log.h"
 #include "syscfg/syscfg_id.h"
 #include <stdint.h>
+#include "platform/storage/d_vm_status.h"
 
-/* cfg_tool.a e276ce59adddc701a71558f50cc331309efeba360350dc19a1de8c9104d889bd.
- * check_alarm_sdk_vm.py verifies this opaque ABI. Each IO owner supplies its
- * own scratch buffer; alarm and Pomodoro workers must not share mutable data. */
-#define PRODUCT_UI_VM_STATUS_SIZE 624U
-#define PRODUCT_UI_VM_INDEX_OFFSET 24U
-#define PRODUCT_UI_VM_FLAGS_OFFSET 623U
-struct _VM_STRUCT;
-extern int vm_status(struct _VM_STRUCT *status);
+/* 保留产品适配 API 及 IO 策略；SDK 布局由平台层拥有，
+ * 闹钟与番茄钟各自持有独立暂存缓冲。 */
+#define PRODUCT_UI_VM_STATUS_SIZE D_VM_STATUS_SIZE
+#define PRODUCT_UI_VM_INDEX_OFFSET D_VM_INDEX_OFFSET
+#define PRODUCT_UI_VM_FLAGS_OFFSET D_VM_FLAGS_OFFSET
+#define product_ui_vm_present d_vm_present
 
-static inline int product_ui_vm_present(uint16_t id, uint32_t *scratch)
-{
-    const uint8_t *bytes = (const uint8_t *)scratch;
-    uint16_t position = (uint16_t)(PRODUCT_UI_VM_INDEX_OFFSET + id * 2U);
-    if (id >= 256U || vm_status((struct _VM_STRUCT *)(void *)scratch) != 0 ||
-        (bytes[PRODUCT_UI_VM_FLAGS_OFFSET] & 1U) == 0U) return -1;
-    return (bytes[position] | bytes[position + 1U]) != 0U;
-}
-
-/* -510 means both absent and damaged in this SDK. A stable absent index is
- * the only permission to create defaults; neither a zero read nor a sentinel
- * in the destination buffer proves absence. Preserve -511 for caller policy. */
+/**
+ * @brief 以读取前后两次存在性观察区分确实缺失、损坏及未就绪。
+ * @param[in] id 项目已分配的 VM 索引。
+ * @param[out] record 容量至少为 size 的读取缓冲区；失败时内容不可使用。
+ * @param[in] size 本次完整记录大小。
+ * @param[in,out] scratch 由调用方串行持有的 SDK 状态暂存，至少 PRODUCT_UI_VM_STATUS_SIZE 字节。
+ * @return 正读取长度或 VM_DATA_LEN_ERR 原样返回；稳定缺失为 NOT_FOUND，已存在但读取错误为 IO，不可判断为 NOT_READY。
+ * @note SDK 的 -510 同时表示缺失或损坏；只有前后均明确不存在才允许上层创建默认值，零读长或缓冲哨兵都不证明缺失。
+ */
 static inline int product_ui_vm_read(uint16_t id, void *record, uint16_t size,
                                      uint32_t *scratch)
 {

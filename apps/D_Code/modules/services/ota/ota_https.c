@@ -1,4 +1,4 @@
-/** @file ota_https.c @brief Private strict TLS transport; SDK https_cli is not used. */
+/** @file ota_https.c @brief 专用严格 TLS 传输，不使用 SDK https_cli 封装。 */
 #include "config/app_config.h"
 #if D_FEATURE_OTA
 #include "ota_port.h"
@@ -23,13 +23,16 @@ static struct {
     mbedtls_ctr_drbg_context random;
     mbedtls_sha256_context hash;
     ota_url_t url;
-    char wire[OTA_HEADER_CAPACITY]; /* Request/header storage reused serially. */
+    char wire[OTA_HEADER_CAPACITY]; /* 请求与响应头顺序复用同一存储。 */
     uint8_t initialized;
     uint8_t hash_initialized;
     int hash_error;
 } s_https;
 static const char s_ota_roots[] = D_OTA_ISRG_ROOTS_PEM;
 
+/**
+ * @brief 释放哈希与网络 TLS 对象，不等待无界 close-notify；完整合同见 ota_port.h。
+ */
 void ota_transport_close(void)
 {
     if (s_https.hash_initialized) {
@@ -37,7 +40,7 @@ void ota_transport_close(void)
         s_https.hash_initialized = 0U;
     }
     if (!s_https.initialized) return;
-    /* No unbounded close-notify exchange. No TLS object escapes this owner. */
+    /* 不执行无界 close-notify 往返；TLS 对象不逃逸当前所有者。 */
     mbedtls_net_free(&s_https.net);
     mbedtls_ssl_free(&s_https.ssl);
     mbedtls_ssl_config_free(&s_https.config);
@@ -47,6 +50,11 @@ void ota_transport_close(void)
     s_https.initialized = 0U;
 }
 
+/**
+ * @brief 初始化 TLS 对象并在可信时间条件下验证服务器握手。
+ * @return 成功返回 D_OK；时间、连接、证书或期限失败返回相应错误。
+ * @note 失败可能保留初始化对象，由调用者 close 收尾；不降低证书验证模式。
+ */
 static d_err_t ota_https_connect(void)
 {
     int result;
@@ -78,9 +86,9 @@ static d_err_t ota_https_connect(void)
                       mbedtls_net_recv, mbedtls_net_recv_timeout);
     if (mbedtls_net_connect(&s_https.net, s_https.url.host, s_https.url.port,
                             MBEDTLS_NET_PROTO_TCP) != 0) {
-        /* This SDK frees each failed socket but leaves hdl pointing at the
-         * last freed one. No socket is owned on failure; prevent our close
-         * path from passing that stale pointer to mbedtls_net_free again. */
+        /* 当前 SDK 释放失败套接字后仍让 hdl 指向最后的已释放对象；
+         * 失败时本层不再拥有套接字，将其置空，
+         * 避免收尾再次把失效指针交给 mbedtls_net_free。 */
         s_https.net.hdl = NULL;
         return D_ERR_NETWORK;
     }
@@ -100,6 +108,11 @@ static d_err_t ota_https_connect(void)
     }
 }
 
+/**
+ * @brief 完整发送 wire 中指定长度的请求，并限制无进展时间。
+ * @param[in] length wire 缓冲中待发送字节数。
+ * @return 成功返回 D_OK；网络失败或进度期限超时返回对应错误。
+ */
 static d_err_t ota_https_send(unsigned length)
 {
     unsigned sent = 0U;
@@ -116,6 +129,9 @@ static d_err_t ota_https_send(unsigned length)
     return D_OK;
 }
 
+/**
+ * @brief 有界等待并读取当前 TLS 数据；完整合同见 ota_port.h。
+ */
 int ota_transport_read(uint8_t *bytes, uint16_t capacity)
 {
     uint32_t started = ota_port_now();
@@ -129,6 +145,9 @@ int ota_transport_read(uint8_t *bytes, uint16_t capacity)
     }
 }
 
+/**
+ * @brief 建立严格 TLS 连接，发送 HEAD 或 GET 并解析响应头；完整合同见 ota_port.h。
+ */
 d_err_t ota_transport_open(const char *url, uint8_t head, const char *etag,
                            ota_http_response_t *response)
 {
@@ -162,6 +181,9 @@ d_err_t ota_transport_open(const char *url, uint8_t head, const char *etag,
     return D_ERR_INVALID_ARG;
 }
 
+/**
+ * @brief 开始新一次 SHA256 流式摘要，释放旧哈希上下文；完整合同见 ota_port.h。
+ */
 void ota_transport_hash_begin(void)
 {
     if (s_https.hash_initialized) mbedtls_sha256_free(&s_https.hash);
@@ -169,10 +191,16 @@ void ota_transport_hash_begin(void)
     s_https.hash_initialized = 1U;
     s_https.hash_error = mbedtls_sha256_starts(&s_https.hash, 0);
 }
+/**
+ * @brief 在无已锁存错误时继续累计 SHA256；完整合同见 ota_port.h。
+ */
 void ota_transport_hash_update(const uint8_t *bytes, uint32_t length)
 {
     if (!s_https.hash_error) s_https.hash_error = mbedtls_sha256_update(&s_https.hash, bytes, length);
 }
+/**
+ * @brief 结束 SHA256 并释放哈希上下文；完整合同见 ota_port.h。
+ */
 d_err_t ota_transport_hash_finish(uint8_t digest[32])
 {
     int result = s_https.hash_error;

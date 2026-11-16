@@ -650,7 +650,7 @@ static void tutk_state_task(void *arg)
 
 
 
-#define BIND_TOKEN  "your_bind_token"
+#define BIND_TOKEN  "174f9d4e-b5bf-4194-8158-f00bf00ea619"
 #define DEV_INFO_JSON "{\"device_uuid\":\"%s\",\"bind_token\":\"%s\"}"
 static char buffer[1024];
 static char *dev_info()

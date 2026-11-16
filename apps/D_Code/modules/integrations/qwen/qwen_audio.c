@@ -1,3 +1,4 @@
+/** @file qwen_audio.c @brief 录音与播放双生产任务的静态缓冲、节拍和共享音频交接。 */
 #include "config/app_config.h"
 
 #if D_FEATURE_QWEN
@@ -31,25 +32,30 @@
 #define QWEN_AUDIO_CMD_PREPARE_RECORDER 8U
 #define QWEN_AUDIO_CMD_STOP_RECORDER_ACK 9U
 #define QWEN_AUDIO_CMD_STOP_PLAYER_ACK 10U
+#define QWEN_AUDIO_CMD_START_CUE_PLAYER 11U
 #define QWEN_AUDIO_REC_CHUNK 1280U
 #define QWEN_AUDIO_REC_PREBUF_SIZE (32U * 1024U)
 #define QWEN_AUDIO_PLAYER_OUTPUT_BUF_SIZE (2U * 1024U)
 #define QWEN_AUDIO_PLAYER_PUMP_CHUNK (2U * 1024U)
 #define QWEN_AUDIO_PLAYER_CBUF_SIZE (1024U * 1024U)
 #if (D_QWEN_DS_AUDIO_FORMAT == D_QWEN_AUDIO_FORMAT_RAW_OPUS)
-#define QWEN_AUDIO_PLAYER_START_THRESHOLD (D_QWEN_DS_OPUS_PKT_LEN * 3U)
+/* 预存六个 60 ms 包吸收起播抖动，不必等待 TTS_END。 */
+#define QWEN_AUDIO_PLAYER_START_THRESHOLD (D_QWEN_DS_OPUS_PKT_LEN * 6U)
+#define QWEN_AUDIO_PLAYER_CUE_START_THRESHOLD (D_QWEN_DS_OPUS_PKT_LEN * 24U)
 #define QWEN_AUDIO_PLAYER_FEED_CHUNK D_QWEN_DS_OPUS_PKT_LEN
 #define QWEN_AUDIO_PLAYER_FEED_INTERVAL_MS D_QWEN_DS_OPUS_FRAME_MS
 #define QWEN_AUDIO_PLAYER_TAIL_DRAIN_MS 600U
 #define QWEN_AUDIO_PLAYER_FORMAT_NAME "raw_opus"
 #else
 #define QWEN_AUDIO_PLAYER_START_THRESHOLD 7200U
+#define QWEN_AUDIO_PLAYER_CUE_START_THRESHOLD QWEN_AUDIO_PLAYER_START_THRESHOLD
 #define QWEN_AUDIO_PLAYER_FEED_CHUNK 320U
 #define QWEN_AUDIO_PLAYER_FEED_INTERVAL_MS 20U
 #define QWEN_AUDIO_PLAYER_TAIL_DRAIN_MS 300U
 #define QWEN_AUDIO_PLAYER_FORMAT_NAME "pcm"
 #endif
 #define QWEN_AUDIO_PLAYER_WAIT_MS 10U
+#define QWEN_AUDIO_PLAYER_CUE_MAX_WAIT_MS 1500U
 #define QWEN_AUDIO_SWITCH_WAIT_TICKS 30U
 #define QWEN_AUDIO_READY_CUE_WARMUP_TICKS 180U
 #define QWEN_AUDIO_PLAYER_COLD_WARMUP_MS 120U
@@ -96,6 +102,14 @@ typedef struct {
     uint8_t recorder_first_packet_logged;
     uint8_t recorder_capture_first_packet_logged;
     uint8_t player_first_packet_logged;
+    uint8_t player_cue_profile;
+    uint8_t player_has_data;
+    uint32_t player_first_data_ms;
+#if D_QWEN_WSS_DIAG_ENABLE
+    uint8_t player_sdk_first_logged;
+    uint32_t player_last_sdk_data_ms;
+    uint32_t player_sdk_gaps;
+#endif
     uint8_t player_cold_warmup_done;
     int task_pid;
     int player_task_pid;
@@ -126,6 +140,15 @@ typedef struct {
 } qwen_audio_context_t;
 
 static qwen_audio_context_t s_qwen_audio;
+static uint8_t (*s_audio_admitted)(void);
+
+/**
+ * @brief 初始化前绑定硬件准备时复核的非阻塞准入探针；完整合同见 qwen_audio.h。
+ */
+void qwen_audio_bind_admission(uint8_t (*admitted)(void))
+{
+    s_audio_admitted = admitted;
+}
 static d_audio_stop_ticket_t s_recorder_stop;
 static d_audio_stop_ticket_t s_player_stop;
 static volatile uint32_t s_player_generation;
@@ -137,11 +160,16 @@ static void qwen_audio_stop_recorder_inner(void);
 static void qwen_audio_post_recorder_cmd(uint32_t cmd);
 static void qwen_audio_post_player_cmd(uint32_t cmd);
 static void qwen_audio_wait_player_idle(uint32_t wait_ticks);
-static void qwen_audio_wait_recorder_idle(uint32_t wait_ticks);
+static d_err_t qwen_audio_wait_recorder_idle(uint32_t wait_ticks);
 static void qwen_audio_wait_player_ready(uint32_t wait_ticks);
 static d_err_t qwen_audio_wait_recorder_ready(uint32_t wait_ticks);
 static d_err_t qwen_audio_wait_recorder_hw_ready(uint32_t wait_ticks);
 
+/**
+ * @brief 借用录音阶段诊断名称。
+ * @param[in] recorder_state 录音阶段。
+ * @return 静态阶段名称，未知值返回 UNKNOWN。
+ */
 static const char *qwen_audio_recorder_state_name(qwen_audio_recorder_state_e recorder_state)
 {
     switch (recorder_state) {
@@ -160,6 +188,11 @@ static const char *qwen_audio_recorder_state_name(qwen_audio_recorder_state_e re
     }
 }
 
+/**
+ * @brief 录音阶段变化时保存并记录转移原因。
+ * @param[in] recorder_state 目标阶段。
+ * @param[in] reason 可空原因字符串。
+ */
 static void qwen_audio_set_recorder_state(qwen_audio_recorder_state_e recorder_state, const char *reason)
 {
     qwen_audio_recorder_state_e old_state;
@@ -176,12 +209,20 @@ static void qwen_audio_set_recorder_state(qwen_audio_recorder_state_e recorder_s
          (reason != NULL) ? reason : "unknown");
 }
 
+/**
+ * @brief 检查录音是否处于准备、预缓冲或喂数据阶段。
+ * @return 活动返回非零，IDLE 或 STOPPING 返回 0。
+ */
 static uint8_t qwen_audio_recorder_is_active(void)
 {
     return (s_qwen_audio.recorder_state != QWEN_AUDIO_RECORDER_IDLE) &&
            (s_qwen_audio.recorder_state != QWEN_AUDIO_RECORDER_STOPPING);
 }
 
+/**
+ * @brief 检查没有停止请求且录音阶段为 FEEDING。
+ * @return 允许向 SDK 送数据时返回 1。
+ */
 static uint8_t qwen_audio_recorder_can_feed_sdk(void)
 {
     if (s_qwen_audio.recorder_stop_requested != 0U) {
@@ -191,17 +232,29 @@ static uint8_t qwen_audio_recorder_can_feed_sdk(void)
     return (s_qwen_audio.recorder_state == QWEN_AUDIO_RECORDER_FEEDING) ? 1U : 0U;
 }
 
+/**
+ * @brief 记录当前播放器进展的单调毫秒时刻。
+ */
 static void qwen_audio_mark_player_progress(void)
 {
     s_qwen_audio.player_last_progress_ms = (uint32_t)timer_get_ms();
 }
 
+/**
+ * @brief 检查录音是否已进入预缓冲或喂数据阶段。
+ * @return 已准备返回非零。
+ */
 static uint8_t qwen_audio_recorder_is_ready(void)
 {
     return (s_qwen_audio.recorder_state == QWEN_AUDIO_RECORDER_PREBUFFERING) ||
            (s_qwen_audio.recorder_state == QWEN_AUDIO_RECORDER_FEEDING);
 }
 
+/**
+ * @brief 把无符号音量限制到最大 100。
+ * @param[in] volume_percent 请求百分比。
+ * @return 截断后的百分比。
+ */
 static uint8_t qwen_audio_clamp_volume(uint8_t volume_percent)
 {
     if (volume_percent > QWEN_AUDIO_VOLUME_MAX) {
@@ -211,6 +264,10 @@ static uint8_t qwen_audio_clamp_volume(uint8_t volume_percent)
     return volume_percent;
 }
 
+/**
+ * @brief 仅在没有底层停止在途时接受播放已打开视图。
+ * @return 可视为已打开返回 1，否则为 0。
+ */
 static uint8_t qwen_audio_player_hw_open(void)
 {
     if (is_audio_play_stop_pending() != 0) {
@@ -220,6 +277,11 @@ static uint8_t qwen_audio_player_hw_open(void)
     return (is_audio_play_open() != 0) ? 1U : 0U;
 }
 
+/**
+ * @brief 按当前 PCM 或固定 Opus 包长估算累计播放时长。
+ * @param[in] player_bytes 累计已送到底层的字节数。
+ * @return 估算毫秒数。
+ */
 static uint32_t qwen_audio_calc_player_ms(uint32_t player_bytes)
 {
 #if (D_QWEN_DS_AUDIO_FORMAT == D_QWEN_AUDIO_FORMAT_RAW_OPUS)
@@ -229,6 +291,12 @@ static uint32_t qwen_audio_calc_player_ms(uint32_t player_bytes)
 #endif
 }
 
+/**
+ * @brief 向 MMI 写入录音并累计实际接收字节。
+ * @param[in] recorder_data 本次借用录音缓冲。
+ * @param[in] data_len 输入字节数。
+ * @note 短写只记录诊断，当前不自动重发未接收尾部。
+ */
 static void qwen_audio_write_recorder_sdk(uint8_t *recorder_data, uint32_t data_len)
 {
     uint32_t write_len;
@@ -248,6 +316,11 @@ static void qwen_audio_write_recorder_sdk(uint8_t *recorder_data, uint32_t data_
     }
 }
 
+/**
+ * @brief 有界缓存启动前录音，溢出时保留最新输入并累计丢弃。
+ * @param[in] recorder_data 本次输入录音。
+ * @param[in] data_len 字节数。
+ */
 static void qwen_audio_write_recorder_prebuffer(uint8_t *recorder_data, uint32_t data_len)
 {
     uint32_t cache_len;
@@ -280,6 +353,9 @@ static void qwen_audio_write_recorder_prebuffer(uint8_t *recorder_data, uint32_t
     }
 }
 
+/**
+ * @brief 按固定块读出预缓冲并向 SDK 送入，直到缓存为空。
+ */
 static void qwen_audio_flush_recorder_prebuffer(void)
 {
     uint32_t cache_len;
@@ -307,6 +383,9 @@ static void qwen_audio_flush_recorder_prebuffer(void)
     }
 }
 
+/**
+ * @brief 活动期间至多约每秒记录音频收发计数。
+ */
 static void qwen_audio_log_stats_if_needed(void)
 {
     uint32_t now_ms;
@@ -334,6 +413,9 @@ static void qwen_audio_log_stats_if_needed(void)
                (unsigned)s_qwen_audio.player_full_writes);
 }
 
+/**
+ * @brief 标记当前下行流结束，后续仍按本地缓存和尾部期限排空。
+ */
 static void qwen_audio_finish_player_inner(void)
 {
     if (s_qwen_audio.player_running == 0U) {
@@ -346,6 +428,10 @@ static void qwen_audio_finish_player_inner(void)
     LOGI(TAG, "player stream end");
 }
 
+/**
+ * @brief 停止本地播放器生产并提交共享播放停止。
+ * @note 推进播放器代次并清缓冲；实际底层 STOP 仍需共享屏障确认。
+ */
 static void qwen_audio_stop_player_inner(void)
 {
     uint8_t player_open;
@@ -364,6 +450,9 @@ static void qwen_audio_stop_player_inner(void)
     s_qwen_audio.player_last_progress_ms = 0U;
     s_qwen_audio.player_tail_deadline_ms = 0U;
     s_qwen_audio.player_warmup_deadline_ms = 0U;
+    s_qwen_audio.player_cue_profile = 0U;
+    s_qwen_audio.player_has_data = 0U;
+    s_qwen_audio.player_first_data_ms = 0U;
     cbuf_clear(&s_qwen_audio.player_cbuf);
     if (player_open != 0U) {
         _device_rbuf_clear();
@@ -372,9 +461,16 @@ static void qwen_audio_stop_player_inner(void)
     LOGI(TAG, "player stopped");
 }
 
+/**
+ * @brief 复核准入并按对话模式交接录音，初始化下行缓冲与硬件播放。
+ * @return 准备成功或已经运行返回 D_OK；准入被撤销返回 D_ERR_BUSY；录音交接等待失败返回 D_ERR_TIMEOUT。
+ * @note 阻塞交接后重新检查准入，硬件启动完成另由底层视图观察。
+ */
 static d_err_t qwen_audio_start_player_inner(void)
 {
     uint8_t player_open;
+
+    if (s_audio_admitted != NULL && !s_audio_admitted()) return D_ERR_BUSY;
 
     if (s_qwen_audio.player_running != 0U) {
         return D_OK;
@@ -385,9 +481,14 @@ static d_err_t qwen_audio_start_player_inner(void)
     if (s_qwen_audio.recorder_state != QWEN_AUDIO_RECORDER_IDLE) {
         s_qwen_audio.recorder_stop_requested = 1U;
         qwen_audio_post_recorder_cmd(QWEN_AUDIO_CMD_STOP_RECORDER);
-        qwen_audio_wait_recorder_idle(QWEN_AUDIO_SWITCH_WAIT_TICKS);
+        if (qwen_audio_wait_recorder_idle(QWEN_AUDIO_SWITCH_WAIT_TICKS) != D_OK) {
+            return D_ERR_TIMEOUT;
+        }
     }
 #endif
+
+    /* 录音交接可能阻塞，期间占用可撤销准入，因此再次检查。 */
+    if (s_audio_admitted != NULL && !s_audio_admitted()) return D_ERR_BUSY;
 
 #if (D_QWEN_DIALOG_MODE == D_QWEN_DIALOG_MODE_DUPLEX)
     if (s_qwen_audio.recorder_state == QWEN_AUDIO_RECORDER_IDLE) {
@@ -409,6 +510,14 @@ static d_err_t qwen_audio_start_player_inner(void)
     s_qwen_audio.player_decoder_started = 0U;
     s_qwen_audio.player_stream_ended = 0U;
     s_qwen_audio.player_first_packet_logged = 0U;
+    s_qwen_audio.player_cue_profile = 0U;
+    s_qwen_audio.player_has_data = 0U;
+    s_qwen_audio.player_first_data_ms = 0U;
+#if D_QWEN_WSS_DIAG_ENABLE
+    s_qwen_audio.player_sdk_first_logged = 0U;
+    s_qwen_audio.player_last_sdk_data_ms = 0U;
+    s_qwen_audio.player_sdk_gaps = 0U;
+#endif
     s_qwen_audio.player_bytes = 0U;
     s_qwen_audio.player_empty_reads = 0U;
     s_qwen_audio.player_full_writes = 0U;
@@ -430,9 +539,16 @@ static d_err_t qwen_audio_start_player_inner(void)
     return D_OK;
 }
 
+/**
+ * @brief 复核准入后准备采集与预缓冲，按按键对讲模式停止旧播放。
+ * @return 准备完成返回 D_OK；准入冲突返回 D_ERR_BUSY；硬件未就绪返回 D_ERR_TIMEOUT。
+ * @note 硬件期限失败会提交停止，不代表该 STOP 已确认。
+ */
 static d_err_t qwen_audio_prepare_recorder_inner(void)
 {
     uint8_t should_stop_player;
+
+    if (s_audio_admitted != NULL && !s_audio_admitted()) return D_ERR_BUSY;
 
     if (s_qwen_audio.recorder_state != QWEN_AUDIO_RECORDER_IDLE) {
         return D_OK;
@@ -470,6 +586,9 @@ static d_err_t qwen_audio_prepare_recorder_inner(void)
     _device_net_audio_recorder(true);
     if (qwen_audio_wait_recorder_hw_ready(QWEN_AUDIO_RECORDER_READY_WAIT_TICKS) != D_OK) {
         _device_net_audio_recorder(false);
+        if (should_stop_player != 0U) {
+            _device_net_audio_play(false);
+        }
         qwen_audio_set_recorder_state(QWEN_AUDIO_RECORDER_IDLE, "hw_ready_timeout");
         LOGW(TAG, "recorder hw ready timeout");
         return D_ERR_TIMEOUT;
@@ -483,8 +602,12 @@ static d_err_t qwen_audio_prepare_recorder_inner(void)
     return D_OK;
 }
 
+/**
+ * @brief 必要时准备录音，并在没有停止请求时转为向 SDK 喂数据。
+ */
 static void qwen_audio_start_recorder_inner(void)
 {
+    if (s_audio_admitted != NULL && !s_audio_admitted()) return;
     if (s_qwen_audio.recorder_state == QWEN_AUDIO_RECORDER_IDLE) {
         if (qwen_audio_prepare_recorder_inner() != D_OK) {
             return;
@@ -503,6 +626,10 @@ static void qwen_audio_start_recorder_inner(void)
          (unsigned)cbuf_get_data_size(&s_qwen_audio.recorder_pre_cbuf));
 }
 
+/**
+ * @brief 停止录音生产、清预缓冲并提交共享编码停止。
+ * @note 本地 IDLE 不证明共享编码器已完成关闭。
+ */
 static void qwen_audio_stop_recorder_inner(void)
 {
     if (s_qwen_audio.recorder_state == QWEN_AUDIO_RECORDER_IDLE) {
@@ -523,6 +650,10 @@ static void qwen_audio_stop_recorder_inner(void)
          (unsigned)s_qwen_audio.recorder_empty_reads);
 }
 
+/**
+ * @brief 有限等待本地播放器及硬件视图空闲，超时仅记录日志。
+ * @param[in] wait_ticks 最多等待系统节拍数，每轮延时一拍。
+ */
 static void qwen_audio_wait_player_idle(uint32_t wait_ticks)
 {
     uint32_t tick;
@@ -539,21 +670,31 @@ static void qwen_audio_wait_player_idle(uint32_t wait_ticks)
          (unsigned)qwen_audio_player_hw_open());
 }
 
-static void qwen_audio_wait_recorder_idle(uint32_t wait_ticks)
+/**
+ * @brief 有限等待本地录音阶段回到 IDLE。
+ * @param[in] wait_ticks 最多等待系统节拍数，每轮延时一拍。
+ * @return 观察到空闲返回 D_OK，否则 D_ERR_TIMEOUT。
+ */
+static d_err_t qwen_audio_wait_recorder_idle(uint32_t wait_ticks)
 {
     uint32_t tick;
 
     for (tick = 0U; tick < wait_ticks; tick++) {
         if (s_qwen_audio.recorder_state == QWEN_AUDIO_RECORDER_IDLE) {
-            return;
+            return D_OK;
         }
         os_time_dly(1);
     }
 
     LOGW(TAG, "wait recorder idle timeout: state=%s",
          qwen_audio_recorder_state_name(s_qwen_audio.recorder_state));
+    return D_ERR_TIMEOUT;
 }
 
+/**
+ * @brief 有限等待播放器硬件打开视图，超时仅记录日志。
+ * @param[in] wait_ticks 最多等待系统节拍数，每轮延时一拍。
+ */
 static void qwen_audio_wait_player_ready(uint32_t wait_ticks)
 {
     uint32_t tick;
@@ -570,6 +711,11 @@ static void qwen_audio_wait_player_ready(uint32_t wait_ticks)
          (unsigned)qwen_audio_player_hw_open());
 }
 
+/**
+ * @brief 有限等待本地录音进入可预缓冲或喂数据状态。
+ * @param[in] wait_ticks 最多等待系统节拍数，每轮延时一拍。
+ * @return 就绪返回 D_OK，否则 D_ERR_TIMEOUT。
+ */
 static d_err_t qwen_audio_wait_recorder_ready(uint32_t wait_ticks)
 {
     uint32_t tick;
@@ -587,6 +733,11 @@ static d_err_t qwen_audio_wait_recorder_ready(uint32_t wait_ticks)
     return D_ERR_TIMEOUT;
 }
 
+/**
+ * @brief 有限等待共享底层录音打开视图。
+ * @param[in] wait_ticks 最多等待系统节拍数，每轮延时一拍。
+ * @return 打开返回 D_OK，否则 D_ERR_TIMEOUT。
+ */
 static d_err_t qwen_audio_wait_recorder_hw_ready(uint32_t wait_ticks)
 {
     uint32_t tick;
@@ -601,6 +752,10 @@ static d_err_t qwen_audio_wait_recorder_hw_ready(uint32_t wait_ticks)
     return D_ERR_TIMEOUT;
 }
 
+/**
+ * @brief 在录音任务内顺序执行准备、启停及带票据停止确认。
+ * @param[in] cmd QWEN_AUDIO_CMD_* 命令。
+ */
 static void qwen_audio_handle_recorder_cmd(uint32_t cmd)
 {
     switch (cmd) {
@@ -625,9 +780,23 @@ static void qwen_audio_handle_recorder_cmd(uint32_t cmd)
     }
 }
 
+/**
+ * @brief 在播放任务内顺序执行普通或固定提示音启动、结束与停止确认。
+ * @param[in] cmd QWEN_AUDIO_CMD_* 命令。
+ */
 static void qwen_audio_handle_player_cmd(uint32_t cmd)
 {
     switch (cmd) {
+    case QWEN_AUDIO_CMD_START_CUE_PLAYER:
+        /* 仅两个固定服务提示音使用此命令；同一流之后到达的普通 START
+         * 不能撤销已经选择的缓冲策略。 */
+        if (qwen_audio_start_player_inner() != D_OK) break;
+#if (D_QWEN_DS_AUDIO_FORMAT == D_QWEN_AUDIO_FORMAT_RAW_OPUS)
+        if (!s_qwen_audio.player_decoder_started && !s_qwen_audio.player_bytes) {
+            s_qwen_audio.player_cue_profile = 1U;
+        }
+#endif
+        break;
     case QWEN_AUDIO_CMD_START_PLAYER:
         (void)qwen_audio_start_player_inner();
         break;
@@ -649,6 +818,9 @@ static void qwen_audio_handle_player_cmd(uint32_t cmd)
     }
 }
 
+/**
+ * @brief 先排预缓冲，再从底层采集；按阶段缓存或送入 SDK。
+ */
 static void qwen_audio_pump_recorder(void)
 {
     uint32_t read_len;
@@ -682,6 +854,10 @@ static void qwen_audio_pump_recorder(void)
     qwen_audio_write_recorder_sdk(s_qwen_audio.recorder_buf, read_len);
 }
 
+/**
+ * @brief 从 SDK 拉取有界下行缓存，按启动门槛、预热和帧节拍喂解码。
+ * @note 流结束后等待缓存排空及尾部期限，再发带播放代次的本地结束事件；不把 TTS_END 直接视为本地已静音。
+ */
 static void qwen_audio_pump_player(void)
 {
     uint32_t now_ms;
@@ -690,6 +866,10 @@ static void qwen_audio_pump_player(void)
     uint32_t read_len;
     uint32_t feed_len;
     int write_len;
+#if D_QWEN_WSS_DIAG_ENABLE
+    uint32_t sdk_read_started_ms;
+    uint32_t sdk_read_finished_ms;
+#endif
 
     if ((s_qwen_audio.player_running == 0U) || (s_qwen_audio.player_feed_enabled == 0U)) {
         return;
@@ -707,10 +887,42 @@ static void qwen_audio_pump_player(void)
             space_len = sizeof(s_qwen_audio.player_buf);
         }
 
+#if D_QWEN_WSS_DIAG_ENABLE
+        sdk_read_started_ms = (uint32_t)timer_get_ms();
+#endif
         read_len = c_mmi_get_player_data(s_qwen_audio.player_buf, space_len);
+#if D_QWEN_WSS_DIAG_ENABLE
+        sdk_read_finished_ms = (uint32_t)timer_get_ms();
+        if (sdk_read_finished_ms - sdk_read_started_ms >= 100U) {
+            LOGW(TAG, "player SDK read slow: gen=%u at=%u elapsed=%u bytes=%u",
+                 (unsigned)qwen_audio_player_generation(), (unsigned)sdk_read_started_ms,
+                 (unsigned)(sdk_read_finished_ms - sdk_read_started_ms), (unsigned)read_len);
+        }
+#endif
         if (read_len == 0U) {
             break;
         }
+        if (!s_qwen_audio.player_has_data) {
+            s_qwen_audio.player_has_data = 1U;
+            s_qwen_audio.player_first_data_ms = (uint32_t)timer_get_ms();
+        }
+#if D_QWEN_WSS_DIAG_ENABLE
+        if (!s_qwen_audio.player_sdk_first_logged) {
+            s_qwen_audio.player_sdk_first_logged = 1U;
+            LOGI(TAG, "player SDK first: gen=%u at=%u bytes=%u",
+                 (unsigned)qwen_audio_player_generation(), (unsigned)sdk_read_finished_ms,
+                 (unsigned)read_len);
+        } else if (sdk_read_finished_ms - s_qwen_audio.player_last_sdk_data_ms >= 180U) {
+            s_qwen_audio.player_sdk_gaps++;
+            if (s_qwen_audio.player_sdk_gaps <= 4U || !(s_qwen_audio.player_sdk_gaps % 32U)) {
+                LOGI(TAG, "player SDK resumed: gen=%u at=%u gap=%u bytes=%u count=%u",
+                     (unsigned)qwen_audio_player_generation(), (unsigned)sdk_read_finished_ms,
+                     (unsigned)(sdk_read_finished_ms - s_qwen_audio.player_last_sdk_data_ms),
+                     (unsigned)read_len, (unsigned)s_qwen_audio.player_sdk_gaps);
+            }
+        }
+        s_qwen_audio.player_last_sdk_data_ms = sdk_read_finished_ms;
+#endif
 
         if (cbuf_write(&s_qwen_audio.player_cbuf, s_qwen_audio.player_buf, read_len) != read_len) {
             s_qwen_audio.player_full_writes++;
@@ -722,12 +934,21 @@ static void qwen_audio_pump_player(void)
     cache_len = cbuf_get_data_size(&s_qwen_audio.player_cbuf);
 
     if (s_qwen_audio.player_decoder_started == 0U) {
-        if ((cache_len >= QWEN_AUDIO_PLAYER_START_THRESHOLD) ||
-            ((s_qwen_audio.player_stream_ended != 0U) && (cache_len > 0U))) {
+        uint32_t start_target = s_qwen_audio.player_cue_profile ?
+            QWEN_AUDIO_PLAYER_CUE_START_THRESHOLD : QWEN_AUDIO_PLAYER_START_THRESHOLD;
+        uint32_t buffered_ms = s_qwen_audio.player_has_data ?
+            (uint32_t)((uint32_t)timer_get_ms() - s_qwen_audio.player_first_data_ms) : 0U;
+        /* 固定提示音以有界起播延迟换取突发容忍；
+         * 空输入不启动，END 与取消仍遵守原有语义。 */
+        uint8_t cue_budget_elapsed = s_qwen_audio.player_cue_profile &&
+            s_qwen_audio.player_has_data && buffered_ms >= QWEN_AUDIO_PLAYER_CUE_MAX_WAIT_MS;
+        if ((cache_len >= start_target) ||
+            ((s_qwen_audio.player_stream_ended != 0U || cue_budget_elapsed) && cache_len > 0U)) {
             s_qwen_audio.player_decoder_started = 1U;
-            LOGI(TAG, "player open cache=%u end=%u",
+            LOGI(TAG, "player open cache=%u end=%u cue=%u waited=%u",
                  (unsigned)cache_len,
-                 (unsigned)s_qwen_audio.player_stream_ended);
+                 (unsigned)s_qwen_audio.player_stream_ended,
+                 (unsigned)s_qwen_audio.player_cue_profile, (unsigned)buffered_ms);
         } else {
             return;
         }
@@ -783,6 +1004,15 @@ static void qwen_audio_pump_player(void)
             }
         } else {
             s_qwen_audio.player_empty_reads++;
+#if D_QWEN_WSS_DIAG_ENABLE
+            if (s_qwen_audio.player_empty_reads <= 4U ||
+                (s_qwen_audio.player_empty_reads % 32U) == 0U) {
+                LOGW(TAG, "player feed empty: gen=%u at=%u count=%u fed=%u since_progress=%u",
+                     (unsigned)qwen_audio_player_generation(), (unsigned)now_ms,
+                     (unsigned)s_qwen_audio.player_empty_reads, (unsigned)s_qwen_audio.player_bytes,
+                     (unsigned)(now_ms - s_qwen_audio.player_last_progress_ms));
+            }
+#endif
         }
         return;
     }
@@ -810,12 +1040,18 @@ static void qwen_audio_pump_player(void)
         s_qwen_audio.player_bytes += (uint32_t)write_len;
         qwen_audio_mark_player_progress();
     }
-    if (s_qwen_audio.player_first_packet_logged == 0U) {
+    if ((s_qwen_audio.player_first_packet_logged == 0U) &&
+        (write_len > 0) && ((uint32_t)write_len == read_len)) {
         s_qwen_audio.player_first_packet_logged = 1U;
-        LOGI(TAG, "player first packet=%d", write_len);
+        LOGI(TAG, "player first packet=%d gen=%u at=%u", write_len,
+             (unsigned)qwen_audio_player_generation(), (unsigned)timer_get_ms());
     }
 }
 
+/**
+ * @brief 消费播放队列并持续泵送下行数据，退出前请求停止。
+ * @param[in] priv 任务兼容参数，本实现不使用。
+ */
 static void qwen_audio_player_task(void *priv)
 {
     void *msg;
@@ -842,6 +1078,10 @@ static void qwen_audio_player_task(void *priv)
     s_qwen_audio.player_task_pid = 0;
 }
 
+/**
+ * @brief 消费录音队列，泵送采集并输出有界统计。
+ * @param[in] priv 任务兼容参数，本实现不使用。
+ */
 static void qwen_audio_task(void *priv)
 {
     void *msg;
@@ -869,6 +1109,10 @@ static void qwen_audio_task(void *priv)
     s_qwen_audio.task_pid = 0;
 }
 
+/**
+ * @brief 已初始化时尝试投递录音命令，失败仅记录日志。
+ * @param[in] cmd 录音命令编号。
+ */
 static void qwen_audio_post_recorder_cmd(uint32_t cmd)
 {
     if (s_qwen_audio.is_initialized == 0U) {
@@ -880,6 +1124,10 @@ static void qwen_audio_post_recorder_cmd(uint32_t cmd)
     }
 }
 
+/**
+ * @brief 已初始化时尝试投递播放命令，失败仅记录日志。
+ * @param[in] cmd 播放命令编号。
+ */
 static void qwen_audio_post_player_cmd(uint32_t cmd)
 {
     if (s_qwen_audio.is_initialized == 0U) {
@@ -891,6 +1139,9 @@ static void qwen_audio_post_player_cmd(uint32_t cmd)
     }
 }
 
+/**
+ * @brief 初始化共享音频、静态缓冲及录音和播放工作任务；完整合同见 qwen_audio.h。
+ */
 d_err_t qwen_audio_init(void)
 {
     if (s_qwen_audio.is_initialized != 0U) {
@@ -937,11 +1188,17 @@ d_err_t qwen_audio_init(void)
     return D_OK;
 }
 
+/**
+ * @brief 读取本模块已完成初始化的标记；完整合同见 qwen_audio.h。
+ */
 uint8_t qwen_audio_is_initialized(void)
 {
     return s_qwen_audio.is_initialized;
 }
 
+/**
+ * @brief 检查播放意图、尾部、硬件视图或本地缓冲是否仍活动；完整合同见 qwen_audio.h。
+ */
 uint8_t qwen_audio_is_player_active(void)
 {
     if (s_qwen_audio.is_initialized == 0U) {
@@ -959,6 +1216,9 @@ uint8_t qwen_audio_is_player_active(void)
     return 0U;
 }
 
+/**
+ * @brief 检查运行播放器距上次进展是否达到给定期限；完整合同见 qwen_audio.h。
+ */
 uint8_t qwen_audio_is_player_stalled(uint32_t timeout_ms)
 {
     uint32_t idle_ms;
@@ -975,6 +1235,9 @@ uint8_t qwen_audio_is_player_stalled(uint32_t timeout_ms)
     return (idle_ms >= timeout_ms) ? 1U : 0U;
 }
 
+/**
+ * @brief 投递退出并等待两个生产任务，再删除队列和清空本模块状态；完整合同见 qwen_audio.h。
+ */
 void qwen_audio_deinit(void)
 {
     if (s_qwen_audio.is_initialized == 0U) {
@@ -1002,58 +1265,88 @@ void qwen_audio_deinit(void)
     memset(&s_qwen_audio, 0, sizeof(s_qwen_audio));
 }
 
+/**
+ * @brief 提交固定服务提示音播放器准备，并有限等待硬件及预热；完整合同见 qwen_audio.h。
+ */
 void qwen_audio_prepare_player(void)
 {
-    qwen_audio_post_player_cmd(QWEN_AUDIO_CMD_START_PLAYER);
+    qwen_audio_post_player_cmd(QWEN_AUDIO_CMD_START_CUE_PLAYER);
     qwen_audio_wait_player_ready(QWEN_AUDIO_SWITCH_WAIT_TICKS);
     if (s_qwen_audio.player_running != 0U) {
         os_time_dly(QWEN_AUDIO_READY_CUE_WARMUP_TICKS);
     }
 }
 
+/**
+ * @brief 提交预采集准备并有限等待 PREBUFFERING 或 FEEDING；完整合同见 qwen_audio.h。
+ */
 d_err_t qwen_audio_prepare_recorder(void)
 {
     qwen_audio_post_recorder_cmd(QWEN_AUDIO_CMD_PREPARE_RECORDER);
     return qwen_audio_wait_recorder_ready(QWEN_AUDIO_RECORDER_READY_WAIT_TICKS);
 }
 
+/**
+ * @brief 非阻塞投递开始向 SDK 送录音数据的命令；完整合同见 qwen_audio.h。
+ */
 void qwen_audio_start_recorder(void)
 {
     qwen_audio_post_recorder_cmd(QWEN_AUDIO_CMD_START_RECORDER);
 }
 
+/**
+ * @brief 先禁止继续喂 SDK，再投递录音停止意图；完整合同见 qwen_audio.h。
+ */
 void qwen_audio_stop_recorder(void)
 {
     s_qwen_audio.recorder_stop_requested = 1U;
     qwen_audio_post_recorder_cmd(QWEN_AUDIO_CMD_STOP_RECORDER);
 }
 
+/**
+ * @brief 非阻塞投递普通下行播放启动命令；完整合同见 qwen_audio.h。
+ */
 void qwen_audio_start_player(void)
 {
     qwen_audio_post_player_cmd(QWEN_AUDIO_CMD_START_PLAYER);
 }
 
+/**
+ * @brief 投递流结束标记，让已缓存音频按尾部排空；完整合同见 qwen_audio.h。
+ */
 void qwen_audio_finish_player(void)
 {
     qwen_audio_post_player_cmd(QWEN_AUDIO_CMD_FINISH_PLAYER);
 }
 
+/**
+ * @brief 非阻塞投递播放器停止命令；完整合同见 qwen_audio.h。
+ */
 void qwen_audio_stop_player(void)
 {
     qwen_audio_post_player_cmd(QWEN_AUDIO_CMD_STOP_PLAYER);
 }
 
+/**
+ * @brief 读取播放器启停推进的当前代次；完整合同见 qwen_audio.h。
+ */
 uint32_t qwen_audio_player_generation(void)
 {
     return s_player_generation;
 }
 
+/**
+ * @brief 同时请求停止录音与播放，不等待底层收尾；完整合同见 qwen_audio.h。
+ */
 void qwen_audio_stop_all(void)
 {
     qwen_audio_stop_recorder();
     qwen_audio_stop_player();
 }
 
+/**
+ * @brief 排空两个 Qwen 生产队列，再等待共享音频 FIFO 屏障和实际 STOP；完整合同见 qwen_audio.h。
+ */
 d_err_t qwen_audio_stop_all_wait(uint32_t timeout_ms)
 {
     uint32_t start_ms;
@@ -1093,6 +1386,9 @@ d_err_t qwen_audio_stop_all_wait(uint32_t timeout_ms)
     return D_ERR_TIMEOUT;
 }
 
+/**
+ * @brief 同步设置共享播放音量，成功后更新本地确认值；完整合同见 qwen_audio.h。
+ */
 d_err_t qwen_audio_set_player_volume(uint8_t volume_percent)
 {
     uint8_t new_volume_percent;
@@ -1118,6 +1414,9 @@ d_err_t qwen_audio_set_player_volume(uint8_t volume_percent)
     return D_OK;
 }
 
+/**
+ * @brief 在本地确认音量基础上同步调整并截断到 0～100；完整合同见 qwen_audio.h。
+ */
 d_err_t qwen_audio_adjust_player_volume(int8_t step_percent)
 {
     int16_t new_volume_percent;
@@ -1132,6 +1431,9 @@ d_err_t qwen_audio_adjust_player_volume(int8_t step_percent)
     return qwen_audio_set_player_volume((uint8_t)new_volume_percent);
 }
 
+/**
+ * @brief 同步静音或恢复上次非零音量；完整合同见 qwen_audio.h。
+ */
 d_err_t qwen_audio_set_player_mute(uint8_t is_mute)
 {
     uint8_t restore_volume_percent;
@@ -1150,6 +1452,9 @@ d_err_t qwen_audio_set_player_mute(uint8_t is_mute)
     return qwen_audio_set_player_volume(restore_volume_percent);
 }
 
+/**
+ * @brief 读取最近一次硬件设置成功后的缓存音量；完整合同见 qwen_audio.h。
+ */
 uint8_t qwen_audio_get_player_volume(void)
 {
     return s_qwen_audio.player_volume_percent;

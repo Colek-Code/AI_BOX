@@ -1,6 +1,6 @@
 /**
  * @file d_sdk_system_config.h
- * @brief JieLi system, memory, diagnostics and power configuration.
+ * @brief 解析杰理系统、内存、诊断及电源配置，不承载产品运行策略。
  */
 
 #ifndef D_SDK_SYSTEM_CONFIG_H

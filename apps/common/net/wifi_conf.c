@@ -118,6 +118,8 @@ u16 wl_custom_listen_interval = 10;		// 默认自定义的监听间隔是 10，�
 u16 wl_default_listen_interval = 3;	// 默认监听间隔是 3，防止没有 set 这个变量而导致异常
 
 u8 wl_transmit_keep_awake_time = 12;	// 默认收发包时等待 12 * 100ms 的清醒时间，该期间内系统不会休眠。单位 100ms，最小可设置为 1，即只等待 100ms
+
+const u8 wifi_ampdu_disable = 0;
 /*--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------*/
 
 void wifi_password_wrong_notify(const u8 *ssid, const u8 *passphrase)
@@ -1610,6 +1612,10 @@ const unsigned long wl_rfd_ram_lut [256][2] = {
 /*-----------------------------------------------------------*/
 const char log_tag_const_v_WEBSOCKET AT(.LOG_TAG_CONST) = CONFIG_DEBUG_LIB(FALSE);
 const char log_tag_const_d_WEBSOCKET AT(.LOG_TAG_CONST) = CONFIG_DEBUG_LIB(FALSE);
+#if defined(D_QWEN_PRIVATE_ACCESS_LOGS) && D_QWEN_PRIVATE_ACCESS_LOGS
+const char log_tag_const_i_WEBSOCKET AT(.LOG_TAG_CONST) = CONFIG_DEBUG_LIB(FALSE);
+#else
 const char log_tag_const_i_WEBSOCKET AT(.LOG_TAG_CONST) = CONFIG_DEBUG_LIB(TRUE);
+#endif
 const char log_tag_const_w_WEBSOCKET AT(.LOG_TAG_CONST) = CONFIG_DEBUG_LIB(TRUE);
 const char log_tag_const_e_WEBSOCKET AT(.LOG_TAG_CONST) = CONFIG_DEBUG_LIB(TRUE);

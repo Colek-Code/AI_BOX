@@ -1,3 +1,8 @@
+/**
+ * @file app_main.c
+ * @brief 装配 D_Code 启动链并适配 SDK 应用事件；业务资源由各服务自行管理。
+ */
+
 //*********************************************************************************//
 //                              D_Code 应用程序主入口                               //
 //                                                                                 //
@@ -9,6 +14,12 @@
 //*********************************************************************************//
 
 #include "config/app_config.h"
+#if D_DEBUG_AUTH_CODE_READBACK
+#include "modules/diagnostics/auth_code/d_auth_code_probe.h"
+#endif
+#if D_QWEN_FACTORY_TEST_BUILD
+#include "modules/integrations/qwen/qwen_factory.h"
+#endif
 #include "system/includes.h"
 #include "os/os_api.h"
 #include "system/app_core.h"
@@ -19,6 +30,7 @@
 #include "device/device.h"
 #ifdef CONFIG_MBEDTLS_ENABLE
 #include "framework/d_crypto.h"
+#include "ntp/ntp.h"
 #include <time.h>
 #endif
 #endif
@@ -74,6 +86,10 @@ static d_app_startup_tracker_t s_app_startup = {
 #endif
 };
 
+/**
+ * @brief 根据已记录的必需错误、UI 在途状态及可选失败输出启动摘要。
+ * @note 不触发服务重试；摘要不替代各服务的实际就绪快照。
+ */
 static void d_app_log_startup_summary(void)
 {
 	if (s_app_startup.has_startup_error != 0U) {
@@ -92,6 +108,11 @@ static void d_app_log_startup_summary(void)
 }
 
 #ifdef D_LVGL_ENABLE
+/**
+ * @brief 在临界区内登记首个尚未消费的 UI 初始化结果。
+ * @param[in] result LVGL 初始化完成结果。
+ * @note 重复或已消费结果不会覆盖当前记录，不在临界区内打印或执行业务回调。
+ */
 static void d_app_publish_ui_result(d_err_t result)
 {
 	OS_ENTER_CRITICAL();
@@ -103,6 +124,10 @@ static void d_app_publish_ui_result(d_err_t result)
 	OS_EXIT_CRITICAL();
 }
 
+/**
+ * @brief 终态尚未登记或消费时，标记 UI 仍在后台初始化。
+ * @return 本次成功标记在途时为 1；完成回调已经取得结果时为 0。
+ */
 static int d_app_mark_ui_init_pending(void)
 {
 	int is_pending = 0;
@@ -117,6 +142,12 @@ static int d_app_mark_ui_init_pending(void)
 	return is_pending;
 }
 
+/**
+ * @brief 只消费一次已发布的 UI 结果，更新启动事实并在锁外打印。
+ * @param[in] log_updated_summary 非零时在消费终态后追加更新后的启动摘要。
+ * @return 本次取得一个未消费终态时为 1；没有可消费结果时为 0。
+ * @note 只在临界区内更新结果和消费标志；日志输出发生在临界区外。
+ */
 static int d_app_finalize_ui_result(int log_updated_summary)
 {
 	d_err_t result = D_ERR_NOT_READY;
@@ -159,6 +190,12 @@ static int d_app_finalize_ui_result(int log_updated_summary)
 	return 1;
 }
 
+/**
+ * @brief 接收 LVGL 完成回调，首轮摘要已发布时立即消费并补报。
+ * @param[in] result LVGL 初始化终态。
+ * @param[in] context 装配时传入的借用上下文，当前未使用。
+ * @note 回调可以早于同步启动等待结束；发布与消费标志共同避免重复报终态。
+ */
 static void d_app_on_lvgl_init_complete(d_err_t result, void *context)
 {
 	int can_finalize;
@@ -179,7 +216,14 @@ static void d_app_on_lvgl_init_complete(d_err_t result, void *context)
 //                              弱函数定义（SDK 要求）                              //
 //*********************************************************************************//
 
+/**
+ * @brief 提供 SDK 所需的弱兼容入口，当前不调整通信计数。
+ * @param[in] phcom_cnt SDK 传入的计数，当前未使用。
+ */
 __attribute__((weak)) void wf_set_phcom_cnt(u32 phcom_cnt) { (void)phcom_cnt; }
+/**
+ * @brief 提供 SDK 所需的弱 C++ 初始化入口，当前实现不执行额外初始化。
+ */
 __attribute__((weak)) void cpp_run_init(void) {}
 
 //*********************************************************************************//
@@ -283,13 +327,25 @@ const struct task_info task_info_table[] = {
 //                    SDK 事件 → 事件总线转发                                       //
 //*********************************************************************************//
 
+/**
+ * @brief 接收 SDK 应用状态通知并输出诊断，不执行额外状态迁移。
+ * @param[in] app SDK 应用对象，当前未使用。
+ * @param[in] state SDK 应用状态。
+ * @param[in] it SDK 意图对象，当前未使用。
+ * @return 当前始终返回 0。
+ */
 static int d_app_state_machine(struct application *app, enum app_state state, struct intent *it)
 {
 	LOGD(TAG, "State: %d", state);
 	return 0;
 }
 
-/* 设备事件转发到事件总线 */
+/**
+ * @brief 将 SD0/SD1 插拔先登记到存储事实，再通知事件总线。
+ * @param[in] dev SDK 借用的设备事件，只在当前处理期间读取。
+ * @return dev 或其 arg 为空时为 false；其他输入为 true，不代表某个业务已经处理完成。
+ * @note 介质代次先更新，异步通知可能丢失；消费者仍须查询存储快照，不能依靠通知作为唯一事实。
+ */
 static int d_app_device_event_handler(struct device_event *dev)
 {
 	if ((dev == NULL) || (dev->arg == NULL)) {
@@ -299,10 +355,12 @@ static int d_app_device_event_handler(struct device_event *dev)
 	if (!strcmp(dev->arg, "sd0") || !strcmp(dev->arg, "sd1")) {
 		switch (dev->event) {
 		case DEVICE_EVENT_IN:
+			d_storage_sd_notify((uint8_t)(((const char *)dev->arg)[2] - '0'), 1U);
 			LOGI(TAG, "SD 插入: %s", dev->arg);
 			d_event_post(EVT_SD_INSERTED, NULL, 0);
 			break;
 		case DEVICE_EVENT_OUT:
+			d_storage_sd_notify((uint8_t)(((const char *)dev->arg)[2] - '0'), 0U);
 			LOGI(TAG, "SD 拔出: %s", dev->arg);
 			d_event_post(EVT_SD_REMOVED, NULL, 0);
 			break;
@@ -312,44 +370,28 @@ static int d_app_device_event_handler(struct device_event *dev)
 }
 
 #if defined(CONFIG_NET_ENABLE) && defined(CONFIG_MBEDTLS_ENABLE)
-static int d_app_sync_crypto_time_from_rtc(void)
+/**
+ * @brief 确认 SDK NTP 已成功并校验时间范围，再设置密码工具的时间基准。
+ * @return 0 表示本次已同步；-1 表示 NTP 未就绪或时间不在支持范围。
+ */
+static int d_app_sync_crypto_time_from_sdk(void)
 {
-	void *rtc_dev;
-	struct sys_time rtc_time = {0};
-	struct tm tm_local = {0};
-	time_t epoch_sec;
-
-	rtc_dev = dev_open("rtc", NULL);
-	if (rtc_dev == NULL) {
-		return -1;
-	}
-	if (dev_ioctl(rtc_dev, IOCTL_GET_SYS_TIME, (u32)&rtc_time) != 0) {
-		dev_close(rtc_dev);
-		return -1;
-	}
-	dev_close(rtc_dev);
-	if ((rtc_time.year < 2024U) || (rtc_time.month == 0U) || (rtc_time.day == 0U)) {
-		return -1;
-	}
-
-	tm_local.tm_year = (int)rtc_time.year - 1900;
-	tm_local.tm_mon = (int)rtc_time.month - 1;
-	tm_local.tm_mday = rtc_time.day;
-	tm_local.tm_hour = rtc_time.hour;
-	tm_local.tm_min = rtc_time.min;
-	tm_local.tm_sec = rtc_time.sec;
-	epoch_sec = mktime(&tm_local);
-	if (epoch_sec < 28800) {
-		return -1;
-	}
-
-	d_crypto_set_ntp_time((unsigned long long)(epoch_sec - 28800));
+	int64_t epoch_sec;
+	if (ntp_client_get_time_status() != 1U) return -1;
+	epoch_sec = (int64_t)time(NULL);
+	if (epoch_sec < 1704067200LL || epoch_sec > INT32_MAX) return -1;
+	d_crypto_set_ntp_time((unsigned long long)epoch_sec);
 	return 0;
 }
 #endif
 
 #ifdef CONFIG_NET_ENABLE
-/* 网络事件转发到事件总线 */
+/**
+ * @brief 将 SDK 网络事件转发到总线，并连接配网完成及 NTP 校时链路。
+ * @param[in] net SDK 借用的网络事件，只在当前处理期间读取。
+ * @return net 或其 arg 为空时为 false；其他输入为 true，不代表 Wi-Fi 或 AI 已就绪。
+ * @note 总线 NTP 通知仍按 SDK 成功事件发出；密码时间是否可用由校时状态接口另行确认。
+ */
 static int d_app_net_event_handler(struct net_event *net)
 {
 	if ((net == NULL) || (net->arg == NULL)) {
@@ -384,7 +426,7 @@ static int d_app_net_event_handler(struct net_event *net)
 			break;
 		case NET_NTP_GET_TIME_SUCC:
 #ifdef CONFIG_MBEDTLS_ENABLE
-			if (d_app_sync_crypto_time_from_rtc() == 0) {
+			if (d_app_sync_crypto_time_from_sdk() == 0) {
 				LOGI(TAG, "NTP 时间已同步到 CRYPTO");
 			} else {
 				LOGW(TAG, "NTP 时间同步到 CRYPTO 失败");
@@ -398,6 +440,12 @@ static int d_app_net_event_handler(struct net_event *net)
 }
 #endif
 
+/**
+ * @brief 按 SDK 系统事件类型分派按键、设备、网络及 BLE 事件。
+ * @param[in] app SDK 应用对象，当前未使用。
+ * @param[in] sys_event SDK 保证有效的系统事件；载荷按类型解释，不在此保存。
+ * @return 按键被消费或设备/网络适配接受时返回 true；其他路径返回 false。
+ */
 static int d_app_event_handler(struct application *app, struct sys_event *sys_event)
 {
 	switch (sys_event->type) {
@@ -464,6 +512,10 @@ REGISTER_APPLICATION(d_app) = {
  */
 void app_main()
 {
+#if D_QWEN_FACTORY_TEST_BUILD
+    qwen_factory_start();
+    return;
+#endif
 	d_err_t init_err;
 	d_service_start_result_t service_result = {0};
 	int is_event_bus_ready = 0;
@@ -488,6 +540,9 @@ void app_main()
 	printf("  Build: %s %s\r\n", __DATE__, __TIME__);
 	printf("============================================\r\n\r\n");
 	d_config_report_print();
+#if D_DEBUG_AUTH_CODE_READBACK
+	d_auth_code_probe_run();
+#endif
 
 	/* ═══════════════════════════════════════════════════════════ */
 	/*  Phase 1: 事件总线初始化（必须最先）                        */
@@ -562,6 +617,9 @@ void app_main()
 			.font_fallback_tail = d_ui_startup_font_fallback_tail(),
 			.complete_cb = d_app_on_lvgl_init_complete,
 			.complete_context = NULL,
+#if D_BOARD_IS_GC9307 && (D_UI_TARGET == D_UI_PRODUCT)
+			.worker_priority = D_PRODUCT_UI_TASK_PRIORITY,
+#endif
 		};
 		d_err_t snapshot_err;
 
@@ -583,7 +641,7 @@ void app_main()
 				     "LVGL 同步等待已分离: wait_result=%d，后台初始化仍在继续",
 				     init_err);
 			} else {
-				/* The callback won the snapshot-to-pending race. */
+				/* 完成回调已先于在途标记登记结果，此处接着消费，不能再标成等待。 */
 				(void)d_app_finalize_ui_result(0);
 			}
 		} else {
@@ -612,7 +670,7 @@ void app_main()
 	start_app(&it);
 
 #ifdef D_LVGL_ENABLE
-	/* Reconcile a result that arrived before Phase 5 completed. */
+	/* 接纳在第五阶段完成前到达的 UI 结果。 */
 	(void)d_app_finalize_ui_result(0);
 #endif
 	d_app_log_startup_summary();
@@ -620,7 +678,7 @@ void app_main()
 	OS_ENTER_CRITICAL();
 	s_app_startup.is_initial_summary_reported = 1U;
 	OS_EXIT_CRITICAL();
-	/* Close the race between the first reconciliation and summary publication. */
+	/* 补查首次结果接纳与摘要发布之间到达的完成回调，避免遗漏终态。 */
 	(void)d_app_finalize_ui_result(1);
 #endif
 }

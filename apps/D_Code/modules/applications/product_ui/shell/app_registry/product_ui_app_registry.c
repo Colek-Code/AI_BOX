@@ -1,7 +1,4 @@
-/**
- * @file product_ui_app_registry.c
- * @brief Explicit manifest for every Product UI page module.
- */
+/** @file product_ui_app_registry.c @brief Product UI 页面模块与首页可见目录共用的静态清单。 */
 
 #include "config/app_config.h"
 
@@ -27,6 +24,9 @@ D_UI_MODULE_DECLARE(product_settings_display);
 D_UI_MODULE_DECLARE(product_settings_sound);
 D_UI_MODULE_DECLARE(product_settings_wallpaper);
 D_UI_MODULE_DECLARE(product_settings_time);
+#if D_QWEN_ACTIVATION_ENABLE
+D_UI_MODULE_DECLARE(product_settings_activation);
+#endif
 #if D_FEATURE_OTA
 D_UI_MODULE_DECLARE(product_settings_ota);
 #endif
@@ -68,16 +68,25 @@ static const product_ui_app_entry_t s_product_ui_apps[] = {
     PRODUCT_UI_DETAIL_ENTRY(product_settings_sound),
     PRODUCT_UI_DETAIL_ENTRY(product_settings_wallpaper),
     PRODUCT_UI_DETAIL_ENTRY(product_settings_time),
+#if D_QWEN_ACTIVATION_ENABLE
+    PRODUCT_UI_DETAIL_ENTRY(product_settings_activation),
+#endif
 #if D_FEATURE_OTA
     PRODUCT_UI_DETAIL_ENTRY(product_settings_ota),
 #endif
 };
 
+/**
+ * @brief 读取当前编译配置中的完整应用目录数。
+ */
 uint8_t product_ui_app_registry_count(void)
 {
     return (uint8_t)(sizeof(s_product_ui_apps) / sizeof(s_product_ui_apps[0]));
 }
 
+/**
+ * @brief 按目录下标借用静态应用条目。
+ */
 const product_ui_app_entry_t *product_ui_app_registry_get(uint8_t index)
 {
     if (index >= product_ui_app_registry_count()) {
@@ -86,6 +95,9 @@ const product_ui_app_entry_t *product_ui_app_registry_get(uint8_t index)
     return &s_product_ui_apps[index];
 }
 
+/**
+ * @brief 通过条目中的静态访问器借用模块描述。
+ */
 const d_ui_module_t *product_ui_app_entry_module(
     const product_ui_app_entry_t *entry)
 {
@@ -95,11 +107,17 @@ const d_ui_module_t *product_ui_app_entry_module(
     return entry->descriptor();
 }
 
+/**
+ * @brief 按目录下标调用描述符访问器借用模块描述。
+ */
 const d_ui_module_t *product_ui_app_registry_module(uint8_t index)
 {
     return product_ui_app_entry_module(product_ui_app_registry_get(index));
 }
 
+/**
+ * @brief 统计被标记为首页可见的目录项数。
+ */
 uint8_t product_ui_app_registry_home_count(void)
 {
     uint8_t count = 0U;
@@ -113,6 +131,9 @@ uint8_t product_ui_app_registry_home_count(void)
     return count;
 }
 
+/**
+ * @brief 按显式首页顺序键查找可见条目。
+ */
 const product_ui_app_entry_t *product_ui_app_registry_home_get(uint8_t order)
 {
     uint8_t index;

@@ -1,13 +1,21 @@
-/** @file d_ble_provision_json.c @brief Uses the SDK's existing cJSON, without global hooks. */
+/** @file d_ble_provision_json.c @brief 使用 SDK 现有 cJSON 解码，不改全局分配钩子。 */
 #include "d_ble_provision_json.h"
 #include "cJSON.h"
 #include <string.h>
 
+/**
+ * @brief 判断 JSON 允许的四类空白字符。
+ * @param[in] value 待检查字符。
+ * @return 匹配空格、制表、回车或换行返回非零。
+ */
 static int d_ble_json_space(char value)
 {
     return value == ' ' || value == '\t' || value == '\r' || value == '\n';
 }
 
+/**
+ * @brief 检查有界接收片段是否包含一个完整 JSON 对象；完整合同见 d_ble_provision_json.h。
+ */
 int d_ble_json_frame(const char *json, uint16_t length)
 {
     uint16_t index;
@@ -19,8 +27,8 @@ int d_ble_json_frame(const char *json, uint16_t length)
         if (quoted) {
             if ((unsigned char)value < 0x20U) return -1;
             if (escaped) {
-                /* cJSON strings use NUL termination; reject an embedded NUL
-                 * rather than silently changing the SSID/password prefix. */
+                /* cJSON 字符串以零结束；拒绝内嵌零转义，
+                 * 避免静默改变 SSID 或密码的有效前缀。 */
                 if (value == 'u' && length - index >= 5 &&
                     memcmp(json + index + 1U, "0000", 4U) == 0) return -1;
                 escaped = 0U;
@@ -32,10 +40,10 @@ int d_ble_json_frame(const char *json, uint16_t length)
         if (!started) {
             if (value != '{') return -1;
             started = 1U;
-        } else if (depth == 0U) return -1; /* One command per frame. */
+        } else if (depth == 0U) return -1; /* 每帧只允许一个命令。 */
         if (value == '"') quoted = 1U;
         else if (value == '{' || value == '[') {
-            if (++depth > 4U) return -1; /* Bound cJSON recursion on the BT stack. */
+            if (++depth > 4U) return -1; /* 限制蓝牙任务栈上的 cJSON 递归深度。 */
         } else if (value == '}' || value == ']') {
             if (depth == 0U) return -1;
             depth--;
@@ -44,6 +52,13 @@ int d_ble_json_frame(const char *json, uint16_t length)
     return started && depth == 0U && !quoted ? 1 : 0;
 }
 
+/**
+ * @brief 将 JSON 字符串完整复制到有界缓冲，不截断。
+ * @param[in] item 待复制 JSON 项。
+ * @param[out] out 非空目标缓冲。
+ * @param[in] capacity 包含末尾零的容量。
+ * @return 成功返回 0；字段非字符串或容量不足返回 -1。
+ */
 static int d_ble_json_copy(const cJSON *item, char *out, unsigned capacity)
 {
     size_t length;
@@ -54,6 +69,9 @@ static int d_ble_json_copy(const cJSON *item, char *out, unsigned capacity)
     return 0;
 }
 
+/**
+ * @brief 解析一个完整零结尾对象，不截断配网凭据；完整合同见 d_ble_provision_json.h。
+ */
 int d_ble_json_decode(const char *json, uint16_t length, d_ble_json_command_t *command)
 {
     cJSON *root, *item;

@@ -14,27 +14,29 @@
 #include "lvgl.h"
 
 /**
- * @brief 创建聊天UI界面（标题栏 + 消息区 + 底部栏）
- * @param parent  父容器对象，如果为NULL则使用当前活跃屏幕
+ * @brief 在父对象或当前屏幕下创建标题、有限消息区及麦克风操作栏。
+ * @param[in,out] parent 聊天容器父对象；NULL 使用当前活动屏幕。
+ * @note 仅 LVGL 线程使用静态单实例引用；不提供销毁重置或重复创建幂等保证，父页面删除后不得继续调用旧引用。
  */
 void chat_ui_create(lv_obj_t *parent);
 
 /**
- * @brief 添加一条消息气泡
- * @param is_user  1=用户消息(右侧绿色), 0=AI消息(左侧白色)
- * @param text     消息文本内容
+ * @brief 复制消息文字到新气泡，限制历史数量并滚动到最新消息。
+ * @param[in] is_user 非零为右侧用户气泡，零为左侧 AI 气泡。
+ * @param[in] text NUL 结尾的借用文字；空指针或空串忽略。
+ * @note 须先创建；只存 UI 副本，不拥有业务消息或网络请求。
  */
 void chat_ui_add_msg(int is_user, const char *text);
 
 /**
- * @brief 显示/隐藏AI正在输入指示器
- * @param show  1=显示, 0=隐藏
+ * @brief 创建或删除当前单个输入指示气泡。
+ * @param[in] show 非零显示、零隐藏；须先建立消息区域。
  */
 void chat_ui_show_typing(int show);
 
 /**
- * @brief 获取麦克风按钮对象（用于外部绑定事件）
- * @return 麦克风按钮的 lv_obj_t 指针
+ * @brief 借用当前静态聊天实例的麦克风按钮。
+ * @return 按钮对象指针，初始未创建时为 NULL；随父页面删除失效。
  */
 lv_obj_t *chat_ui_get_mic_btn(void);
 

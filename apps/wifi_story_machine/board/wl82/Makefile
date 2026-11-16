@@ -424,6 +424,9 @@ c_SRC_FILES := \
 	../../../../apps/common/audio_music/eq_config_new.c \
 	../../../../apps/common/audio_music/http_recorder.c \
 	../../../../apps/common/audio_music/midi/audio_dec_midi_ctrl.c \
+	../../../../apps/common/audio_music/midi/midi_dec.c \
+	../../../../apps/common/audio_music/midi/midi_event.c \
+	../../../../apps/common/audio_music/midi/midi_play.c \
 	../../../../apps/common/audio_music/music_decrypt.c \
 	../../../../apps/common/audio_music/pcm_play_api.c \
 	../../../../apps/common/audio_music/usb_audio_api.c \
@@ -489,6 +492,7 @@ c_SRC_FILES := \
 	../../../../apps/common/example/third_party/littlefs/lfs_util.c \
 	../../../../apps/common/example/third_party/littlefs/port/wl82/port.c \
 	../../../../apps/common/fat_nor/extflash.c \
+	../../../../apps/common/fat_nor/user_norflash.c \
 	../../../../apps/common/fm/fm_manage.c \
 	../../../../apps/common/fm/fm_rw.c \
 	../../../../apps/common/fm/qn8035/QN8035.c \

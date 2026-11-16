@@ -1,6 +1,6 @@
 /**
  * @file d_display_gc9307.c
- * @brief GC9307 display adapter: init task and PWM backlight brightness.
+ * @brief 实现 GC9307 显示启动任务及 PWM 背光适配，不承载产品页面或偏好策略。
  */
 
 #include "config/app_config.h"
@@ -21,7 +21,7 @@
 #define BSP_LCD_GC9307_INIT_TIMEOUT_TICKS 500
 #define BSP_LCD_BACKLIGHT_PWM_DEV         "pwm_lcd_bl"
 #define BSP_LCD_BRIGHTNESS_DEFAULT        80
-/* Keep in sync with PRODUCT_UI_BRIGHTNESS_MIN_PERCENT (settings service). */
+/* 与设置服务 PRODUCT_UI_BRIGHTNESS_MIN_PERCENT 的可见下限保持一致。 */
 #define BSP_LCD_BRIGHTNESS_MIN_VISIBLE    5
 #define BSP_LCD_PWM_FREQ_HZ               20000
 /* #define BSP_LCD_GC9307_PWM_VERIFY_LOG_ENABLE */
@@ -45,6 +45,10 @@ static struct pwm_platform_data s_lcd_bl_pwm_cfg = {0};
 
 extern const struct lcd_platform_data *d_get_lcd_pdata(void);
 
+/**
+ * @brief 按需创建背光互斥锁，创建失败时保留未就绪标志。
+ * @note 启动层先调用以减少初始化竞争；本函数本身不提供并发首次创建保护，也不向调用方报告创建失败。
+ */
 static void d_display_gc9307_bl_mutex_ensure(void)
 {
     if (s_bl_mutex_ready) {
@@ -55,6 +59,10 @@ static void d_display_gc9307_bl_mutex_ensure(void)
     }
 }
 
+/**
+ * @brief 尝试准备背光锁，存在时无限期等待取得。
+ * @note 锁创建失败时继续原路径，不可据此宣称所有配置下均有互斥保证。
+ */
 static void d_display_gc9307_bl_lock(void)
 {
     d_display_gc9307_bl_mutex_ensure();
@@ -63,6 +71,9 @@ static void d_display_gc9307_bl_lock(void)
     }
 }
 
+/**
+ * @brief 仅在背光锁创建成功时归还锁。
+ */
 static void d_display_gc9307_bl_unlock(void)
 {
     if (s_bl_mutex_ready) {
@@ -70,16 +81,27 @@ static void d_display_gc9307_bl_unlock(void)
     }
 }
 
+/**
+ * @brief 读取面板宽度；完整合同见 d_display.h。
+ */
 uint16_t d_display_get_width(void)
 {
     return s_lcd_width;
 }
 
+/**
+ * @brief 读取面板高度；完整合同见 d_display.h。
+ */
 uint16_t d_display_get_height(void)
 {
     return s_lcd_height;
 }
 
+/**
+ * @brief 将非零背光请求限制在可见下限与百分比上限之间。
+ * @param[in] percent 请求的无符号百分比。
+ * @return 零仍为关闭；1至4变为5；超过100变为100，其余保留。
+ */
 static u8 d_display_gc9307_clamp_brightness(u8 percent)
 {
     if (percent > 100U) {
@@ -91,16 +113,25 @@ static u8 d_display_gc9307_clamp_brightness(u8 percent)
     return percent;
 }
 
+/**
+ * @brief 按板级有效电平把亮度换算为 PWM 占空比。
+ * @param[in] percent 已经限制为 0 至 100 的亮度。
+ * @return 低有效时为 100-percent，高有效时等于 percent。
+ */
 static u8 d_display_gc9307_brightness_to_pwm_duty(u8 percent)
 {
 #ifdef D_LCD_BL_ACTIVE_LOW
     return (u8)(100U - percent);
 #else
-    /* GC9307 PC4 active-high: duty tracks brightness percent. */
+    /* GC9307 PC4 高电平有效，占空比随亮度百分比变化。 */
     return percent;
 #endif
 }
 
+/**
+ * @brief 用板级背光引脚执行数字开关，缺少有效引脚时不处理。
+ * @param[in] on 非零输出高电平，零输出低电平。
+ */
 static void d_display_gc9307_set_gpio_backlight(u8 on)
 {
     const struct lcd_platform_data *pdata = d_get_lcd_pdata();
@@ -111,6 +142,10 @@ static void d_display_gc9307_set_gpio_backlight(u8 on)
 }
 
 #ifdef D_LCD_BACKLIGHT_PWM_ENABLE
+/**
+ * @brief 关闭并清空本适配持有的 PWM 句柄。
+ * @note 调用方负责背光串行化；本函数不作为底层关闭完成可查询票据。
+ */
 static void d_display_gc9307_pwm_release(void)
 {
     if (s_lcd_bl_pwm_handle != NULL) {
@@ -119,6 +154,11 @@ static void d_display_gc9307_pwm_release(void)
     }
 }
 
+/**
+ * @brief 按需打开 PWM，补齐板级默认参数并启动通道。
+ * @return D_OK 为已有或新启动成功；否则为底层打开/启动错误。
+ * @note 启动失败关闭并清空本适配句柄，不占用别人的 PWM 句柄。
+ */
 static d_err_t d_display_gc9307_pwm_ensure_open(void)
 {
     d_err_t err;
@@ -166,6 +206,11 @@ static d_err_t d_display_gc9307_pwm_ensure_open(void)
     return D_OK;
 }
 
+/**
+ * @brief 准备 PWM 后写入换算后的占空比。
+ * @param[in] percent 已限制为 0 至 100 的亮度。
+ * @return 准备或写入结果，不在此提交软件亮度缓存。
+ */
 static d_err_t d_display_gc9307_pwm_set_brightness(u8 percent)
 {
     d_err_t err;
@@ -193,9 +238,11 @@ static d_err_t d_display_gc9307_pwm_set_brightness(u8 percent)
 }
 #endif /* D_LCD_BACKLIGHT_PWM_ENABLE */
 
-/*
- * Apply brightness with lock held. Caller must hold bl mutex.
- * Continuous % is committed only after PWM success. Off may degrade to GPIO.
+/**
+ * @brief 在背光串行区应用亮度，成功后才提交软件连续亮度。
+ * @param[in] brightness 已经限制范围的目标亮度。
+ * @return 成功为 D_OK；非零 PWM 应用失败时保留原亮度并返回错误；关闭可降级为 GPIO 低电平并返回 D_OK。
+ * @note 调用方应持有背光锁；非零失败不抢占已打开 PWM 引脚，以保留最后成功的硬件占空比。
  */
 static d_err_t d_display_gc9307_apply_brightness_locked(u8 brightness)
 {
@@ -205,24 +252,18 @@ static d_err_t d_display_gc9307_apply_brightness_locked(u8 brightness)
     err = d_display_gc9307_pwm_set_brightness(brightness);
     if (err != D_OK) {
         if (brightness == 0U) {
-            /*
-             * Off: release PWM then digital GPIO low so pin is not left in
-             * PWM mode while claiming off. SW 0 is product-correct.
-             */
+            /* 关闭失败时先释放 PWM，再将 GPIO 拉低，不能仍占 PWM 却宣称已关闭。 */
             d_display_gc9307_pwm_release();
             d_display_gc9307_set_gpio_backlight(0U);
             s_lcd_brightness = 0U;
             return D_OK;
         }
-        /*
-         * Non-zero fail: keep handle if open so last successful duty stays on
-         * HW. open/run fail already leaves handle NULL (release in ensure).
-         * Do not GPIO-steal or claim a new continuous %.
-         */
+        /* 非零写入失败时保留已打开句柄及最后成功占空比；打开/启动失败已清句柄。
+         * 不抢占 GPIO，也不公布未成功应用的连续亮度。 */
         return err;
     }
 #else
-    /* Digital-only path: software % is on/off truth (0 or last request). */
+    /* 纯数字背光仅表示开/关，软件百分比为零或最近请求值。 */
     d_display_gc9307_set_gpio_backlight(brightness > 0U ? 1U : 0U);
     err = D_OK;
 #endif
@@ -234,15 +275,16 @@ static d_err_t d_display_gc9307_apply_brightness_locked(u8 brightness)
     return err;
 }
 
+/**
+ * @brief 串行应用亮度；完整合同见 d_display.h。
+ */
 d_err_t d_display_set_brightness(uint8_t percent)
 {
     u8 brightness = d_display_gc9307_clamp_brightness(percent);
     d_err_t err;
 
-    /*
-     * While screen power is off, reject non-zero apply so UI cannot light HW
-     * without clearing the off state. Wake/clear_off clears screen_off first.
-     */
+    /* 息屏状态下拒绝非零应用，不能绕过屏幕电源事实直接点亮；
+     * wake/clear_off 路径先合法清除息屏状态。 */
     if ((brightness > 0U) && (d_screen_power_is_off() != 0U)) {
         return D_ERR_BUSY;
     }
@@ -253,6 +295,9 @@ d_err_t d_display_set_brightness(uint8_t percent)
     return err;
 }
 
+/**
+ * @brief 读取已接纳的亮度缓存；完整合同见 d_display.h。
+ */
 uint8_t d_display_get_brightness(void)
 {
     u8 value;
@@ -263,15 +308,15 @@ uint8_t d_display_get_brightness(void)
     return value;
 }
 
+/**
+ * @brief 关闭或恢复背光；完整合同见 d_display.h。
+ */
 d_err_t d_display_set_backlight(uint8_t on)
 {
     u8 target;
     d_err_t err;
 
-    /*
-     * While screen power is off, reject non-zero apply.
-     * Backlight-on is only legal after clear_off/wake.
-     */
+    /* 息屏时拒绝非零应用，只有 clear_off/wake 后才允许开启背光。 */
     if (on && (d_screen_power_is_off() != 0U)) {
         return D_ERR_BUSY;
     }
@@ -291,6 +336,11 @@ d_err_t d_display_set_backlight(uint8_t on)
     return err;
 }
 
+/**
+ * @brief 保存显示启动结果并通知同步等待者。
+ * @param[in] result 本次启动阶段结果。
+ * @note 由初始化工作任务调用，静态信号量及结果仍可能在同步等待超时后使用。
+ */
 static void d_display_gc9307_signal_init(d_err_t result)
 {
     s_lcd_init_result = result;
@@ -298,6 +348,11 @@ static void d_display_gc9307_signal_init(d_err_t result)
     os_sem_post(&s_lcd_init_sem);
 }
 
+/**
+ * @brief 初始化 GC9307/HYN 配置与默认背光，并发布启动结果。
+ * @param[in] priv SDK 任务参数，当前未使用。
+ * @note 面板成功后默认背光失败也报告失败；面板已初始化的路径保留原屏幕空闲任务，不在此进入 LVGL。
+ */
 static void d_display_gc9307_task(void *priv)
 {
     const struct lcd_platform_data *pdata;
@@ -315,7 +370,7 @@ static void d_display_gc9307_task(void *priv)
     result = d_screen_gc9307_hyn_init(pdata, &s_lcd_width, &s_lcd_height);
     if (result == D_OK) {
         LOGI(TAG, "ready %ux%u", s_lcd_width, s_lcd_height);
-        /* Apply default PWM brightness after panel init. */
+        /* 面板初始化完成后再应用默认 PWM 亮度。 */
         result = d_display_set_brightness(BSP_LCD_BRIGHTNESS_DEFAULT);
         if (result != D_OK) {
             LOGE(TAG, "backlight init failed: %d", result);
@@ -333,6 +388,9 @@ static void d_display_gc9307_task(void *priv)
     d_display_gc9307_signal_init(result);
 }
 
+/**
+ * @brief 创建 GC9307 初始化任务并有界等待；完整合同见 d_display.h。
+ */
 d_err_t d_display_init(void)
 {
     int ret;
@@ -345,7 +403,7 @@ d_err_t d_display_init(void)
         return s_lcd_init_result;
     }
 
-    /* Create BL mutex before worker/task races set_brightness. */
+    /* 在工作任务可能调用 set_brightness 前先准备背光锁。 */
     d_display_gc9307_bl_mutex_ensure();
 
     if (os_sem_create(&s_lcd_init_sem, 0) != OS_NO_ERR) {

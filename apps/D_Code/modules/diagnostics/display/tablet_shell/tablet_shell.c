@@ -1,6 +1,6 @@
 /**
  * @file tablet_shell.c
- * @brief GC9307 landscape tablet-style home shell.
+ * @brief GC9307 横屏平板外壳演示页实现。
  */
 
 #include "config/app_config.h"
@@ -44,6 +44,9 @@ static uint8_t s_panel_gesture_active;
 static uint8_t s_panel_gesture_consumed;
 static uint8_t s_panel_click_blocked;
 
+/**
+ * @brief 清空扫描线与面板手势运行状态，不删除对象。
+ */
 static void tablet_shell_reset_runtime_state(void)
 {
     s_scan_line = NULL;
@@ -56,6 +59,10 @@ static void tablet_shell_reset_runtime_state(void)
     s_panel_click_blocked = 0;
 }
 
+/**
+ * @brief 移除对象样式并默认允许事件及手势冒泡。
+ * @param[in,out] obj 待调整的 LVGL 对象；为空时不处理。
+ */
 static void tablet_clean_obj(lv_obj_t *obj)
 {
     if (obj == NULL) {
@@ -66,6 +73,10 @@ static void tablet_clean_obj(lv_obj_t *obj)
     lv_obj_add_flag(obj, LV_OBJ_FLAG_GESTURE_BUBBLE);
 }
 
+/**
+ * @brief 让对象自行接收手势，清除手势冒泡标志。
+ * @param[in,out] obj 待调整的 LVGL 对象；为空时不处理。
+ */
 static void tablet_accept_gesture(lv_obj_t *obj)
 {
     if (obj == NULL) {
@@ -74,6 +85,11 @@ static void tablet_accept_gesture(lv_obj_t *obj)
     lv_obj_remove_flag(obj, LV_OBJ_FLAG_GESTURE_BUBBLE);
 }
 
+/**
+ * @brief 记录本次按压起点或终止状态，失焦时阻止随后点击。
+ * @param[in] code LVGL 按压、释放或失焦事件码。
+ * @param[in] point 当前坐标；为空时忽略。
+ */
 static void tablet_panel_track_touch(lv_event_code_t code, const lv_point_t *point)
 {
     if (point == NULL) {
@@ -94,6 +110,12 @@ static void tablet_panel_track_touch(lv_event_code_t code, const lv_point_t *poi
     }
 }
 
+/**
+ * @brief 读取活动指针相对起点的位移，并要求超过手势最小距离。
+ * @param[out] drag_x 横向位移输出。
+ * @param[out] drag_y 纵向位移输出。
+ * @return 成功输出拖动返回 1；参数、指针或状态不满足返回 0。
+ */
 static int tablet_panel_get_drag(int16_t *drag_x, int16_t *drag_y)
 {
     lv_indev_t *indev;
@@ -124,6 +146,11 @@ static int tablet_panel_get_drag(int16_t *drag_x, int16_t *drag_y)
     return 1;
 }
 
+/**
+ * @brief 使用真实拖动位移判断上下手势，打开或关闭控制面板。
+ * @param[in] dir LVGL 兼容方向参数，当前使用位移重新判断而不读取它。
+ * @note 超过阈值的拖动先屏蔽点击，只有竖向占优才消费手势；成功后等待本次触摸释放。
+ */
 static void tablet_handle_panel_gesture(lv_dir_t dir)
 {
     lv_indev_t *indev;
@@ -155,6 +182,10 @@ static void tablet_handle_panel_gesture(lv_dir_t dir)
     }
 }
 
+/**
+ * @brief 提取按压或终止事件坐标并更新面板手势状态。
+ * @param[in] event LVGL 分发的事件，调用期间借用。
+ */
 static void tablet_panel_track_event(lv_event_t *event)
 {
     lv_event_code_t code;
@@ -181,6 +212,10 @@ static void tablet_panel_track_event(lv_event_t *event)
     tablet_panel_track_touch(code, &point);
 }
 
+/**
+ * @brief 只有未被拖动屏蔽的遮罩点击才关闭控制面板，再清空手势状态。
+ * @param[in] event LVGL 分发的事件，调用期间借用。
+ */
 static void tablet_panel_handle_click(lv_event_t *event)
 {
     lv_obj_t *target;
@@ -199,6 +234,10 @@ static void tablet_panel_handle_click(lv_event_t *event)
     s_panel_click_blocked = 0;
 }
 
+/**
+ * @brief 分发面板点击、按压轨迹与手势事件。
+ * @param[in] event LVGL 分发的事件，调用期间借用。
+ */
 static void tablet_panel_event_cb(lv_event_t *event)
 {
     lv_event_code_t code = lv_event_get_code(event);
@@ -215,6 +254,10 @@ static void tablet_panel_event_cb(lv_event_t *event)
     }
 }
 
+/**
+ * @brief 仅为设置应用点击切换设置面板，并停止该事件冒泡。
+ * @param[in] event LVGL 分发的事件，调用期间借用。
+ */
 static void tablet_app_event_cb(lv_event_t *event)
 {
     const tablet_app_t *app;
@@ -230,6 +273,10 @@ static void tablet_app_event_cb(lv_event_t *event)
     }
 }
 
+/**
+ * @brief 为根容器采集按下、移动、释放与失焦坐标。
+ * @param[in] event LVGL 分发的事件，调用期间借用。
+ */
 static void tablet_touch_event_cb(lv_event_t *event)
 {
     lv_event_code_t code;
@@ -255,6 +302,10 @@ static void tablet_touch_event_cb(lv_event_t *event)
     }
 }
 
+/**
+ * @brief 将根容器指针事件与手势交给面板交互处理。
+ * @param[in] event LVGL 分发的事件，调用期间借用。
+ */
 static void tablet_root_event_cb(lv_event_t *event)
 {
     lv_event_code_t code = lv_event_get_code(event);
@@ -268,6 +319,14 @@ static void tablet_root_event_cb(lv_event_t *event)
     }
 }
 
+/**
+ * @brief 创建带字体、颜色和事件冒泡的标签。
+ * @param[in,out] parent 承载新建子对象的父容器。
+ * @param[in] text 复制到标签的文本。
+ * @param[in] font 持续有效的借用字体。
+ * @param[in] color 文字颜色。
+ * @return 新标签或分配失败时的 NULL；生命周期归父容器。
+ */
 static lv_obj_t *tablet_make_label(lv_obj_t *parent, const char *text, const lv_font_t *font, lv_color_t color)
 {
     lv_obj_t *label = lv_label_create(parent);
@@ -285,6 +344,15 @@ static lv_obj_t *tablet_make_label(lv_obj_t *parent, const char *text, const lv_
     return label;
 }
 
+/**
+ * @brief 创建固定尺寸的演示按钮，并允许事件及手势冒泡。
+ * @param[in,out] parent 承载新建子对象的父容器。
+ * @param[in] w 按钮宽度。
+ * @param[in] h 按钮高度。
+ * @param[in] bg 背景颜色。
+ * @param[in] fg 文字颜色。
+ * @return 新按钮或分配失败时的 NULL。
+ */
 static lv_obj_t *tablet_make_button(lv_obj_t *parent, int32_t w, int32_t h, lv_color_t bg, lv_color_t fg)
 {
     lv_obj_t *button = lv_button_create(parent);
@@ -308,6 +376,11 @@ static lv_obj_t *tablet_make_button(lv_obj_t *parent, int32_t w, int32_t h, lv_c
     return button;
 }
 
+/**
+ * @brief 创建顶部状态栏与可打开控制面板的手势区域。
+ * @param[in,out] parent 承载新建子对象的父容器。
+ * @return 成功返回 0，子对象分配失败返回 -1。
+ */
 static int tablet_create_status_bar(lv_obj_t *parent)
 {
     lv_obj_t *bar;
@@ -352,6 +425,11 @@ static int tablet_create_status_bar(lv_obj_t *parent)
     return 0;
 }
 
+/**
+ * @brief 在顶部创建透明可点击的下拉手势区域。
+ * @param[in,out] parent 承载新建子对象的父容器。
+ * @return 成功返回 0，分配失败返回 -1。
+ */
 static int tablet_create_pull_zone(lv_obj_t *parent)
 {
     lv_obj_t *zone;
@@ -371,6 +449,11 @@ static int tablet_create_pull_zone(lv_obj_t *parent)
     return 0;
 }
 
+/**
+ * @brief 创建八个静态应用图标及文本按钮。
+ * @param[in,out] parent 承载新建子对象的父容器。
+ * @return 成功返回 0，任一子对象分配失败返回 -1。
+ */
 static int tablet_create_apps(lv_obj_t *parent)
 {
     lv_obj_t *grid;
@@ -414,6 +497,11 @@ static int tablet_create_apps(lv_obj_t *parent)
     return 0;
 }
 
+/**
+ * @brief 创建底部演示容器与横向移动扫描线。
+ * @param[in,out] parent 承载新建子对象的父容器。
+ * @return 成功返回 0，分配失败返回 -1。
+ */
 static int tablet_create_footer(lv_obj_t *parent)
 {
     lv_obj_t *footer;
@@ -448,6 +536,12 @@ static int tablet_create_footer(lv_obj_t *parent)
     return 0;
 }
 
+/**
+ * @brief 按状态栏、应用、底部、下拉区域和覆盖面板顺序创建外壳页。
+ * @param[in,out] parent 承载新建子对象的父容器。
+ * @return 成功返回 0；父对象无效或创建失败返回 -1。
+ * @note 失败仅清空本模块引用，已创建子对象随页面容器收尾。
+ */
 static int tablet_shell_create(lv_obj_t *parent)
 {
     tablet_shell_reset_runtime_state();
@@ -476,6 +570,10 @@ static int tablet_shell_create(lv_obj_t *parent)
     return 0;
 }
 
+/**
+ * @brief 按累计 50 ms 步数推进底部扫描线，并保留不足一步的余量。
+ * @param[in] elapsed_ms 本轮经过的毫秒数。
+ */
 static void tablet_shell_update(uint32_t elapsed_ms)
 {
     if (s_scan_line != NULL) {
@@ -503,11 +601,17 @@ static void tablet_shell_update(uint32_t elapsed_ms)
     }
 }
 
+/**
+ * @brief 记录外壳页进入事件。
+ */
 static void tablet_shell_enter(void)
 {
     printf(TABLET_LOG_TAG "enter\n");
 }
 
+/**
+ * @brief 页面退出时隐藏全部覆盖面板。
+ */
 static void tablet_shell_exit(void)
 {
     tablet_shell_panel_hide_all();
@@ -532,6 +636,9 @@ static const page_desc_t s_tablet_shell_desc = {
     .is_active  = 0,
 };
 
+/**
+ * @brief 注册静态页面描述；完整合同见 tablet_shell.h。
+ */
 int tablet_shell_register(void)
 {
     return page_manager_register(&s_tablet_shell_desc);

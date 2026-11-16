@@ -99,4 +99,13 @@ class CredentialTests(unittest.TestCase):
         self.assertEqual(clean,cert)
         self.assertEqual(report[0]['action'],'remove_private_pem_block')
 
+    def test_factory_record_in_arbitrary_text_is_rejected_without_value(self):
+        record=b'Q1|'+b'A'*16+b'|fixture_board'
+        findings=scan('handwritten-notes.txt',record,policy([]))
+        self.assertEqual([row['kind'] for row in findings],['factory_record_payload'])
+        self.assertNotIn(record.decode(),str(findings))
+
+    def test_factory_format_documentation_placeholder_is_allowed(self):
+        self.assertFalse(scan('guide.md',b'Q1|<activation-code>|<device-name>',policy([])))
+
 if __name__=='__main__':unittest.main(verbosity=2)

@@ -1,6 +1,6 @@
 /**
  * @file product_ui_color_icons.c
- * @brief Color UI icons from ui_pack (LVGL ARGB8888 BGRA). Generated.
+ * @brief 由 ui_pack 生成的 LVGL ARGB8888 彩色图标，按 BGRA 字节排列。
  */
 #include "modules/applications/product_ui/assets/product_ui_color_icons.h"
 
@@ -10039,6 +10039,7 @@ static const lv_image_dsc_t *const s_product_ui_color_icons[PRODUCT_UI_COLOR_ICO
     [PRODUCT_UI_COLOR_ICON_CAMERA] = &s_product_ui_color_icon_camera,
 };
 
+/** @brief 按合法枚举编号借用静态图像，编号上界检查失败返回 NULL。 */
 const lv_image_dsc_t *product_ui_color_icon_get(product_ui_color_icon_id_t icon_id)
 {
     if (icon_id >= PRODUCT_UI_COLOR_ICON_COUNT) {

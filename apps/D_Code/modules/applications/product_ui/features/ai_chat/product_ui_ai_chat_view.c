@@ -1,4 +1,4 @@
-/** @file product_ui_ai_chat_view.c @brief Scrollable subtitles with stable owned text. */
+/** @file product_ui_ai_chat_view.c @brief 有限句子字幕视图，文本由页面持有，呈现失败可重试。 */
 #include "config/app_config.h"
 #if defined(D_LVGL_ENABLE) && (D_UI_TARGET == D_UI_PRODUCT)
 #include "product_ui_ai_chat_view.h"
@@ -8,6 +8,11 @@
 #define PRODUCT_AI_FOLLOW_MARGIN 12
 #define PRODUCT_AI_SUBTITLE_HEIGHT 132
 
+/**
+ * @brief 识别用户滚动并按距底部距离更新自动跟随策略。
+ * @param[in] event LVGL 滚动事件，用户数据借用视图。
+ * @note 程序性滚动期间忽略此回调，避免自身更新误判为用户输入。
+ */
 static void product_ai_scroll(lv_event_t *event)
 {
     product_ui_ai_chat_view_t *view = lv_event_get_user_data(event);
@@ -18,6 +23,9 @@ static void product_ai_scroll(lv_event_t *event)
     view->auto_follow = lv_obj_get_scroll_bottom(view->panel) <= PRODUCT_AI_FOLLOW_MARGIN;
 }
 
+/**
+ * @brief 创建可竖向滚动的字幕面板并借用页面状态作为事件上下文。
+ */
 int product_ui_ai_chat_view_create(product_ui_ai_chat_view_t *view, lv_obj_t *parent)
 {
     if (view == NULL || parent == NULL) return -1;
@@ -42,6 +50,12 @@ int product_ui_ai_chat_view_create(product_ui_ai_chat_view_t *view, lv_obj_t *pa
     return 0;
 }
 
+/**
+ * @brief 创建并初始化一行标签，使标签借用行内持久文本。
+ * @param[in,out] view 已创建面板的视图。
+ * @param[in] index 调用方保证在 QWEN_SUBTITLE_SENTENCE_MAX 内的行下标。
+ * @return 成功返回 0；标签创建失败返回 -1。
+ */
 static int product_ai_row_create(product_ui_ai_chat_view_t *view, uint8_t index)
 {
     product_ui_ai_chat_row_t *row = &view->rows[index];
@@ -61,6 +75,13 @@ static int product_ai_row_create(product_ui_ai_chat_view_t *view, uint8_t index)
     return 0;
 }
 
+/**
+ * @brief 复制有界句子并仅在状态变化时更新行高亮。
+ * @param[in,out] row 已存在标签且由页面持有的行状态。
+ * @param[in] text 本次借用的 NUL 结尾句子。
+ * @param[in] current 非零表示当前句，驱动文字及背景高亮。
+ * @note 标签静态借用 row 内的文本缓冲区，不依赖本次输入的生命周期。
+ */
 static void product_ai_row_bind(product_ui_ai_chat_row_t *row, const char *text,
                                  uint8_t current)
 {
@@ -68,19 +89,22 @@ static void product_ai_row_bind(product_ui_ai_chat_row_t *row, const char *text,
     if (strcmp(row->text, text) != 0) {
         strncpy(row->text, text, sizeof(row->text) - 1U);
         row->text[sizeof(row->text) - 1U] = '\0';
-        /* Storage lives with the page; updates need no LVGL text allocation. */
+        /* 文本缓冲区与页面同寿命，更新时无需由 LVGL 分配文本。 */
         lv_label_set_text_static(row->label, row->text);
     }
     if (row->current != current) {
         lv_obj_set_style_text_color(row->label, product_ui_color(current ?
-            PRODUCT_UI_COLOR_ACCENT : PRODUCT_UI_COLOR_TEXT), 0);
+            PRODUCT_UI_COLOR_ACTION : PRODUCT_UI_COLOR_TEXT), 0);
         lv_obj_set_style_bg_color(row->label,
-            product_ui_color(PRODUCT_UI_COLOR_SURFACE_ALT), 0);
+            product_ui_color(PRODUCT_UI_COLOR_PRIMARY_SOFT), 0);
         lv_obj_set_style_bg_opa(row->label, current ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
         row->current = current;
     }
 }
 
+/**
+ * @brief 按需创建行标签、复制句子并更新高亮及自动跟随。
+ */
 int product_ui_ai_chat_view_render(product_ui_ai_chat_view_t *view,
                                    const qwen_subtitle_render_t *render)
 {

@@ -1,3 +1,8 @@
+/**
+ * @file d_board.c
+ * @brief 装配 WL82 板级设备与电源参数；引脚和硬件配置仅在板级集中定义。
+ */
+
 #include "config/app_config.h"
 #include "system/includes.h"
 #include "device/includes.h"
@@ -22,6 +27,9 @@
 #endif
 
 // *INDENT-OFF*
+
+/** @brief BOX功放MUTE脚：早期初始化输出低电平，DAC不接管该脚。 */
+#define D_BOARD_AMP_MUTE_PORT IO_PORTB_02
 
 #if defined CONFIG_BT_ENABLE || defined CONFIG_WIFI_ENABLE
 #include "wifi/wifi_connect.h"
@@ -52,16 +60,16 @@ UART2_PLATFORM_DATA_END();
 #if defined(D_LCD_ENABLE) && defined(D_LCD_BACKLIGHT_PWM_ENABLE)
 PWM_PLATFORM_DATA_BEGIN(pwm_lcd_bl_data)
 #if (D_BOARD_IS_GC9307)
-	.port = IO_PORTC_04, /* GC9307 active-high backlight enable / PWM */
+	.port = IO_PORTC_04, /* GC9307 背光使能及 PWM，高电平有效。 */
 #else
-	.port = IO_PORTB_08, /* EMI ILI948x active-low backlight PWM */
+	.port = IO_PORTB_08, /* EMI ILI948x 背光 PWM，低电平有效。 */
 #endif
 	.pwm_ch = PWM_TIMER2_OPCH2,
 	.freq = 20000,
 #ifdef D_LCD_BL_ACTIVE_LOW
 	.duty = 100,
 #else
-	.duty = 80, /* active-high: start near default product brightness */
+	.duty = 80, /* 高电平有效：启动占空比接近产品默认亮度。 */
 #endif
 	.point_bit = 1,
 PWM_PLATFORM_DATA_END()
@@ -84,12 +92,12 @@ static const struct emi_platform_data emi_data = {
 #endif
 
 // LCD 平台数据配置
-/* D++: Profile-gated LCD pdata keeps EMI/ILI948x panel and GC9307 LCD-SPI panel isolated. */
+/* D++: 按屏幕配置隔离 EMI/ILI948x 与 GC9307 LCD-SPI 平台参数。 */
 #if defined(D_LCD_ENABLE) && defined(D_LCD_GC9307_SDK_LCD_ENABLE)
 SPI1_PLATFORM_DATA_BEGIN(spi1_data)
-	.clk    = 80000000, /* D++: GC9307 LCD-SPI validated at 80MHz on SPI1 port B. */
+	.clk    = 80000000, /* D++: GC9307 已在 SPI1 B 组以 80 MHz 验证。 */
 	.mode   = SPI_1WIRE_MODE,
-	.port   = 'B', /* D++: SPI1 B group maps LCD CLK/MOSI to PC9/PC10 per AC7916A datasheet. */
+	.port   = 'B', /* D++: 根据 AC7916A 数据手册，SPI1 B 组将 LCD CLK/MOSI 映射至 PC9/PC10。 */
 	.attr   = SPI_SCLK_L_UPL_SMPH | SPI_UNIDIR_MODE,
 SPI1_PLATFORM_DATA_END()
 #endif
@@ -99,7 +107,7 @@ static const struct lcd_platform_data lcd_pdata_gc9307_hyn = {
     .rst_pin = IO_PORTC_07,
     .cs_pin = IO_PORTC_05,
     .rs_pin = IO_PORTC_06,
-    .bl_pin = IO_PORTC_04, /* D++: GC9307 backlight enable is rewired from 3.3V to active-high PC4. */
+    .bl_pin = IO_PORTC_04, /* D++: GC9307 背光使能已从固定 3.3 V 改接为高电平有效的 PC4。 */
     .te_pin = IO_PORTC_08,
     .check_pin_D6 = -1,
     .check_pin_D7 = -1,
@@ -131,7 +139,7 @@ static const struct lcd_platform_data lcd_pdata_emi_ili948x = {
 #endif
 
 #if D_BOARD_IS_GC9307 && !D_CAMERA_PREVIEW_ENABLE
-/* Camera-off GC9307 keeps the original touch device name and physical pins. */
+/* 相机关闭的 GC9307 配置沿用原触摸设备名和实体引脚。 */
 #define TCFG_IIC0_CLK			IO_PORTC_01
 #define TCFG_IIC0_DAT			IO_PORTC_02
 #else
@@ -250,6 +258,11 @@ const struct adkey_platform_data adkey_data = {
 };
 
 #ifdef D_BOARD_ADKEY_DEBUG_ENABLE
+/**
+ * @brief 按 ADC 阈值表查找按键诊断值。
+ * @param[in] ad_value 当前 ADC 采样值。
+ * @return 首个匹配阈值的 SDK 按键值；未命中时为 NO_KEY。
+ */
 static u8 d_board_adkey_map_value(u16 ad_value)
 {
 	u8 idx;
@@ -263,6 +276,11 @@ static u8 d_board_adkey_map_value(u16 ad_value)
 	return NO_KEY;
 }
 
+/**
+ * @brief 临时按键输入配置后采样数字电平，再关闭数字输入缓冲。
+ * @return SDK GPIO 读取转换后的字节电平值。
+ * @note 仅用于显式启用的板级诊断；会临时改变 ADKEY 引脚配置，不能与常规采样并发调用。
+ */
 static u8 d_board_read_adkey_gpio_level(void)
 {
 	u8 gpio_level;
@@ -282,6 +300,11 @@ static u8 d_board_read_adkey_gpio_level(void)
 	return gpio_level;
 }
 
+/**
+ * @brief 在板级诊断中直接启动 ADC 转换并读取原始采样。
+ * @return ADC 结果寄存器中的 16 位采样值。
+ * @note 含固定延时及无超时的转换等待；直接使用 ADC 寄存器，不能与正常 ADC 管理或中断采样并行使用。
+ */
 static u16 d_board_read_adkey_raw_adc(void)
 {
 	u16 raw_ad_value;
@@ -301,6 +324,11 @@ static u16 d_board_read_adkey_raw_adc(void)
 	return raw_ad_value;
 }
 
+/**
+ * @brief 按诊断周期读取 ADC，只在幅度或映射按键明显改变时打印。
+ * @param[in] priv SDK 定时器透传参数，当前未使用。
+ * @note 仅在 D_BOARD_ADKEY_DEBUG_ENABLE 下装配；不取代常规按键驱动。
+ */
 static void d_board_adkey_debug(void *priv)
 {
 	static u16 last_ad = 0xffff;
@@ -320,6 +348,10 @@ static void d_board_adkey_debug(void *priv)
 }
 #endif
 
+/**
+ * @brief 在常规 ADKEY 初始化前设置输入及板级上拉策略。
+ * @note 仅配置板级选定的 ADKEY 引脚，不绑定具体产品动作。
+ */
 static void d_board_prepare_adkey_pin(void)
 {
 	gpio_latch_en(adkey_data.adkey_pin, 0);
@@ -338,7 +370,7 @@ static void d_board_prepare_adkey_pin(void)
 #ifdef CONFIG_AUDIO_ENABLE
 static const struct dac_platform_data dac_data = {
     .sw_differ = 0,
-    .pa_auto_mute = 1,
+    .pa_auto_mute = 0, /* BOX功放MUTE电平由板级初始化持有。 */
     .pa_mute_port = TCFG_DAC_MUTE_PORT,
     .pa_mute_value = TCFG_DAC_MUTE_VALUE,
     .differ_output = TCFG_DAC_DIFF_OUTPUT,
@@ -372,6 +404,10 @@ static const struct iis_platform_data iis0_data = {
     .slave_mode = 0,
     .dump_points_num = 320,
 };
+/**
+ * @brief 按当前板级参数连接 PLNK0 数据输入及串行时钟输出复用。
+ * @note 由 SDK 音频端口生命周期调用；对应释放由 plnk0_port_unremap_cb 执行。
+ */
 static void plnk0_port_remap_cb(void)
 {
     extern int gpio_plnk_rx_input(u32 gpio, u8 index, u8 data_sel);
@@ -379,6 +415,10 @@ static void plnk0_port_remap_cb(void)
     gpio_output_channle(IO_PORTH_03, CH0_PLNK0_SCLK_OUT);
     JL_IOMAP->CON3 |= BIT(18);
 }
+/**
+ * @brief 解除 PLNK0 时钟输出复用并关闭数据引脚数字输入。
+ * @note 由 SDK 音频端口生命周期配对调用，不自行销毁音频服务。
+ */
 static void plnk0_port_unremap_cb(void)
 {
     JL_IOMAP->CON3 &= ~BIT(18);
@@ -488,11 +528,8 @@ static const struct low_power_param power_param = {
 	.vlvd_value     = VLVD_SEL_25V,
 };
 
-/*
- * Soft poweroff wakeup: PB1 is the ADKEY/power key shared pin.
- * The EMI board keeps the legacy runtime wakeup path. Other boards expose the
- * shared pin only when the power-control service is enabled.
- */
+/* 软件关机唤醒：PB1 与 ADKEY/电源键共用。EMI 保留原运行期唤醒路径；
+ * 其他板型仅在启用电源控制服务时使用该共享引脚。 */
 #if D_BOARD_IS_EMI_ILI948X || \
     (D_FEATURE_POWER_CONTROL)
 #define PORT_WAKEUP_IO			IO_PORTB_01
@@ -550,6 +587,10 @@ static const struct wakeup_param runtime_wk_param = {
 };
 #endif
 
+/**
+ * @brief 将非空唤醒配置交给 SDK，并清理既有唤醒源。
+ * @param[in] wakeup_param 持续有效的静态板级唤醒配置；NULL 时不处理。
+ */
 static void d_board_apply_wakeup_param(const struct wakeup_param *wakeup_param)
 {
     if (wakeup_param == NULL) {
@@ -563,11 +604,13 @@ static void d_board_apply_wakeup_param(const struct wakeup_param *wakeup_param)
     }
 }
 
+/** @brief 装配关机长按唤醒参数；完整调用合同见 d_board.h。 */
 void d_board_prepare_soft_poweroff_wakeup(void)
 {
     d_board_apply_wakeup_param(&soft_poweroff_wk_param);
 }
 #else
+/** @brief 不支持共享唤醒引脚的配置保留公开空入口，不改变硬件状态。 */
 void d_board_prepare_soft_poweroff_wakeup(void)
 {
 }
@@ -611,15 +654,30 @@ REGISTER_DEVICES(device_table) = {
 };
 
 #ifdef CONFIG_DEBUG_ENABLE
+/**
+ * @brief 用静态 uart2_data 初始化调试 UART。
+ * @note SDK 板级启动入口，仅在启用调试配置时编译；不归 UI 或业务服务调用。
+ */
 void debug_uart_init()
 {
 	uart_init(&uart2_data);
 }
 #endif
 
+/**
+ * @brief 执行 DAC 早期准备并注册初始化板级设备。
+ * @note SDK 板级早期启动入口；诊断日志由 D_DEBUG_BOARD_LOG 显式控制。
+ */
 void board_early_init()
 {
-	/* D++: Board bring-up logs are opt-in so normal LCD validation starts clean. */
+	/* BOX功放MUTE保持低电平；DAC启动或关闭都不切换PB2。 */
+	gpio_latch_en(D_BOARD_AMP_MUTE_PORT, 0);
+	gpio_set_pull_up(D_BOARD_AMP_MUTE_PORT, 0);
+	gpio_set_pull_down(D_BOARD_AMP_MUTE_PORT, 0);
+	gpio_set_die(D_BOARD_AMP_MUTE_PORT, 1);
+	gpio_direction_output(D_BOARD_AMP_MUTE_PORT, 0);
+
+	/* 板级启动日志按调试开关启用，避免干扰常规LCD验证。 */
 #if D_DEBUG_BOARD_LOG
 	printf("[BOARD_DEBUG] board_early_init start\n");
 #endif
@@ -634,6 +692,9 @@ void board_early_init()
 	printf("[BOARD_DEBUG] devices_init done\n");
 #endif
 }
+/**
+ * @brief 应用板级供电配置并保留复位状态，EMI 配置另装配运行期唤醒。
+ */
 static void board_power_init(void)
 {
 	power_init(&power_param);
@@ -643,6 +704,10 @@ static void board_power_init(void)
 #endif
 }
 
+/**
+ * @brief 装配板级电源、RTC、ADC 及常规按键驱动。
+ * @note 只初始化硬件能力，产品按键动作由应用层绑定。
+ */
 void board_init()
 {
 	board_power_init();
@@ -654,7 +719,7 @@ void board_init()
 	adc_init();
 #endif
 #if TCFG_ADKEY_ENABLE
-	/* D++: Keep ADKEY diagnostics opt-in; the key driver still owns regular sampling. */
+	/* D++: ADKEY 诊断须显式开启，常规采样仍由按键驱动持有。 */
 #ifdef D_BOARD_ADKEY_DEBUG_ENABLE
 	printf("[BOARD_DEBUG] adkey sample idx=%u\n", (unsigned)adc_add_sample_ch(adkey_data.ad_channel));
 #else
@@ -669,7 +734,10 @@ void board_init()
 }
 
 #ifdef D_LCD_ENABLE
-// 获取 LCD 平台数据
+/**
+ * @brief 按板型借用静态 LCD 平台参数。
+ * @return GC9307 或 EMI 配置的静态描述符，调用方不得释放。
+ */
 const struct lcd_platform_data* d_get_lcd_pdata(void)
 {
 #if D_BOARD_IS_GC9307

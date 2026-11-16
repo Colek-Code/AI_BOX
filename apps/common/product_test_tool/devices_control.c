@@ -560,7 +560,7 @@ static u8 led_control_handler(u8 id, cmd, json_object *args_obj)
 }
 
 
-#if(defined(CONFIG_WIFI_ENABLE) && !defined(PRODUCT_NET_CLIENT_ENABLE))
+#if(defined(CONFIG_WIFI_ENABLE) && !defined(PRODUCT_NET_CLIENT_ENABLE) && !D_QWEN_FACTORY_TEST_BUILD)
 
 static int wifi_event_callback(void *network_ctx, enum WIFI_EVENT event)
 {
@@ -853,7 +853,7 @@ static u8 wifi_control_handler(u8 id, cmd, json_object *args_obj)
         break;
 
     case CTL_NETWORK_PING_START:
-#if(defined(CONFIG_WIFI_ENABLE) && !defined(PRODUCT_NET_CLIENT_ENABLE))
+#if(defined(CONFIG_WIFI_ENABLE) && !defined(PRODUCT_NET_CLIENT_ENABLE) && !D_QWEN_FACTORY_TEST_BUILD)
 #if LWIP_RAW
         if (!__THIS->conn_status) {
             rscorr = ERR_NETWORK_DISCONNECT;
@@ -995,7 +995,7 @@ u8 devices_control_handler(json_object *params_obj)
         break;
 
     case DEV_TYPE_WIFI:
-#if(defined(CONFIG_WIFI_ENABLE) && !defined(PRODUCT_NET_CLIENT_ENABLE))
+#if(defined(CONFIG_WIFI_ENABLE) && !defined(PRODUCT_NET_CLIENT_ENABLE) && !D_QWEN_FACTORY_TEST_BUILD)
         rscorr = wifi_control_handler(id, cmd, args_obj);
 #else
         rscorr = ERR_NO_SUPPORT_DEV;
@@ -1033,7 +1033,7 @@ u8 devices_control_handler(json_object *params_obj)
 
 u8 devices_module_init(void)
 {
-    u8 rscorr;
+    u8 rscorr = ERR_NULL;
 
     if (!__THIS) {
         __THIS = zalloc(sizeof(struct dev_ctl_type));
@@ -1042,20 +1042,21 @@ u8 devices_module_init(void)
 
     product_port_init();
 
-#if(defined(CONFIG_WIFI_ENABLE) && !defined(PRODUCT_NET_CLIENT_ENABLE))
+#if(defined(CONFIG_WIFI_ENABLE) && !defined(PRODUCT_NET_CLIENT_ENABLE) && !D_QWEN_FACTORY_TEST_BUILD)
     os_sem_create(&__THIS->conn_sem, 0);
     //wifi_set_sta_connect_timeout(30);
     wifi_set_event_callback(wifi_event_callback);
     wifi_on();
 #endif
+#if !D_QWEN_FACTORY_TEST_BUILD
     rscorr = product_lcd_init();
     rscorr = product_pir_init();
     rscorr = product_motor_init();
     rscorr = product_gsensor_init();
     rscorr = product_touchpanel_init();
     ASSERT(rscorr == ERR_NULL);
-
     register_sys_event_handler(SYS_KEY_EVENT, 0, 1, product_key_event_handler);
+#endif
     return rscorr;
 }
 

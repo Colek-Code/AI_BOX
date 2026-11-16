@@ -1,7 +1,4 @@
-/**
- * @file product_ui_control_widgets.c
- * @brief Control-center solid dark chrome (JXY style). Status bar untouched.
- */
+/** @file product_ui_control_widgets.c @brief 控制中心深色实体控件构造与值呈现，不直接调用业务服务。 */
 
 #include "config/app_config.h"
 
@@ -14,23 +11,23 @@
 #include "modules/applications/product_ui/runtime/service_registry/product_ui_service_registry.h"
 #include <string.h>
 
-/* Media card content offsets (card shell size from PRODUCT_UI_CC_MEDIA_*). */
-#define PRODUCT_UI_MEDIA_ART_X                7
-#define PRODUCT_UI_MEDIA_ART_Y                8
+/* 媒体内容局部偏移；卡片壳体尺寸来自主题 PRODUCT_UI_CC_MEDIA_*。 */
+#define PRODUCT_UI_MEDIA_ART_X               10
+#define PRODUCT_UI_MEDIA_ART_Y               10
 #define PRODUCT_UI_MEDIA_ART_SIZE            24
 #define PRODUCT_UI_MEDIA_ART_RADIUS           5
-#define PRODUCT_UI_MEDIA_TITLE_X              7
-#define PRODUCT_UI_MEDIA_TITLE_Y             41
-#define PRODUCT_UI_MEDIA_SUB_Y               59
+#define PRODUCT_UI_MEDIA_TITLE_X             44
+#define PRODUCT_UI_MEDIA_TITLE_Y              8
+#define PRODUCT_UI_MEDIA_SUB_Y               28
 #define PRODUCT_UI_INFO_ICON_SIZE            16
 #define PRODUCT_UI_INFO_ICON_X                8
 #define PRODUCT_UI_INFO_TEXT_X               31
-#define PRODUCT_UI_INFO_TITLE_Y               8
-#define PRODUCT_UI_INFO_SUB_Y                27
+#define PRODUCT_UI_INFO_TITLE_Y              15
+#define PRODUCT_UI_INFO_SUB_Y                15
 #define PRODUCT_UI_SLIDER_ICON_THRESHOLD     18
 
-/* These controls all use absolute placement. Share the fixed reset properties
- * instead of storing the same zero padding in every long-lived widget. */
+/* 控件均使用绝对放置，共用固定重置属性，
+ * 避免每个长期控件重复保存相同零间距样式。 */
 static const lv_style_prop_t s_clean_properties[] = {
     LV_STYLE_LAYOUT, LV_STYLE_PAD_LEFT, LV_STYLE_PAD_RIGHT, LV_STYLE_PAD_TOP,
     LV_STYLE_PAD_BOTTOM, LV_STYLE_PAD_ROW, LV_STYLE_PAD_COLUMN, LV_STYLE_BORDER_WIDTH,
@@ -64,16 +61,25 @@ static LV_STYLE_CONST_INIT(s_image_style, (void *)s_image_geometry);
 static LV_STYLE_CONST_INIT(s_slider_indicator_style, (void *)s_slider_indicator_geometry);
 static LV_STYLE_CONST_INIT(s_slider_knob_style, (void *)s_slider_knob_geometry);
 
+/**
+ * @brief 清除默认样式及滚动／冒泡，安装共用绝对布局及零间距。
+ * @param[in,out] obj 有效对象。
+ */
 static void product_ui_widget_clean(lv_obj_t *obj)
 {
     lv_obj_remove_style_all(obj);
     lv_obj_clear_flag(obj, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_GESTURE_BUBBLE |
                       LV_OBJ_FLAG_EVENT_BUBBLE);
-    /* Absolute child coords require no flex/grid layout. */
+    /* 绝对子坐标不使用 flex／grid 布局。 */
     lv_obj_add_style(obj, &s_clean_style, 0);
 }
 
-/* Pin TOP_LEFT absolute coords. Never leave CENTER align (set_pos becomes offset). */
+/**
+ * @brief 固定左上对齐后设置绝对坐标，避免原居中对齐把坐标当作偏移。
+ * @param[in,out] obj 借用对象，NULL 时忽略。
+ * @param[in] x 父坐标系横坐标。
+ * @param[in] y 父坐标系纵坐标。
+ */
 static void product_ui_widget_place(lv_obj_t *obj, int32_t x, int32_t y)
 {
     if (obj == NULL) {
@@ -83,6 +89,13 @@ static void product_ui_widget_place(lv_obj_t *obj, int32_t x, int32_t y)
     lv_obj_set_pos(obj, x, y);
 }
 
+/**
+ * @brief 借用原生静态图像，清除缩放、旋转及额外图像间距。
+ * @param[in,out] img 借用图像对象。
+ * @param[in] src 持续有效的生成描述及像素。
+ * @param[in] box_w 正画布宽度。
+ * @param[in] box_h 正画布高度。
+ */
 static void product_ui_ctrl_image_bind(lv_obj_t *img, const lv_image_dsc_t *src,
                                        int32_t box_w, int32_t box_h)
 {
@@ -98,6 +111,13 @@ static void product_ui_ctrl_image_bind(lv_obj_t *img, const lv_image_dsc_t *src,
     lv_obj_set_style_image_recolor_opa(img, LV_OPA_TRANSP, 0);
 }
 
+/**
+ * @brief 创建控制中心主题标签并复制本次文字，关闭输入及冒泡。
+ * @param[in,out] parent 标签父容器。
+ * @param[in] text 本次复制的文字。
+ * @param[in] style 主题字体样式。
+ * @return 成功返回父树拥有的标签，失败为 NULL。
+ */
 static lv_obj_t *product_ui_widget_label(lv_obj_t *parent, const char *text,
                                          product_ui_style_e style)
 {
@@ -117,6 +137,13 @@ static lv_obj_t *product_ui_widget_label(lv_obj_t *parent, const char *text,
     return label;
 }
 
+/**
+ * @brief 查询十六像素原生图标并创建可重着色图像。
+ * @param[in,out] parent 图像父容器。
+ * @param[in] icon_id 生成图标编号。
+ * @param[in] color 目标重着色颜色。
+ * @return 成功返回父树拥有的图像，资源或创建失败为 NULL。
+ */
 static lv_obj_t *product_ui_widget_icon(lv_obj_t *parent,
                                         product_ui_icon_id_t icon_id,
                                         lv_color_t color)
@@ -140,6 +167,14 @@ static lv_obj_t *product_ui_widget_icon(lv_obj_t *parent,
     return icon;
 }
 
+/**
+ * @brief 创建指定实体表面色的绝对布局卡片并安装按压样式。
+ * @param[in,out] parent 卡片父容器。
+ * @param[in] width 主题给定宽度。
+ * @param[in] height 主题给定高度。
+ * @param[in] surface_color 主题表面色标记。
+ * @return 成功返回父树拥有的卡片，失败为 NULL。
+ */
 static lv_obj_t *product_ui_widget_card(lv_obj_t *parent, int16_t width,
                                         int16_t height,
                                         product_ui_color_e surface_color)
@@ -162,6 +197,15 @@ static lv_obj_t *product_ui_widget_card(lv_obj_t *parent, int16_t width,
     return card;
 }
 
+/**
+ * @brief 按指定原生尺寸创建主题重着色图像，并显式选择居中或左上对齐。
+ * @param[in,out] parent 图像父容器。
+ * @param[in] icon_id 生成图标编号。
+ * @param[in] box 已生成原生方形尺寸。
+ * @param[in] color 主题图标色标记。
+ * @param[in] center_in_parent 非零居中，零左上对齐供后续绝对放置。
+ * @return 成功返回父树拥有的图像，资源或创建失败为 NULL。
+ */
 static lv_obj_t *product_ui_cc_glyph(lv_obj_t *parent,
                                      product_ui_icon_id_t icon_id,
                                      int16_t box, product_ui_color_e color,
@@ -191,10 +235,18 @@ static lv_obj_t *product_ui_cc_glyph(lv_obj_t *parent,
     return icon;
 }
 
-/*
- * Outer hit = column size (inside card). Visual disc 21 centered.
- * No ext_click_area (must not spill outside music card).
- * Glyph create failure deletes the button and returns NULL.
+/**
+ * @brief 创建卡片内单个完整命中列，内含居中圆盘和静态图标。
+ * @param[in,out] parent 卡内传输条父容器。
+ * @param[in] x 局部横坐标。
+ * @param[in] y 局部纵坐标。
+ * @param[in] hit_w 命中宽度，不小于圆盘视觉尺寸。
+ * @param[in] hit_h 命中高度，不小于圆盘视觉尺寸。
+ * @param[in] command 存入对象用户数据供控制器解释的媒体命令。
+ * @param[in] icon_id 原生传输图标编号。
+ * @param[out] out_glyph 可为空，预清零，成功接收图标借用指针。
+ * @return 成功返回按钮，命中区太小或分配／图标失败返回 NULL，失败删除局部按钮。
+ * @note 不设置外扩点击区，控件本身不执行服务命令。
  */
 static lv_obj_t *product_ui_media_hit_button_create(
     lv_obj_t *parent, int16_t x, int16_t y, int16_t hit_w, int16_t hit_h,
@@ -229,7 +281,7 @@ static lv_obj_t *product_ui_media_hit_button_create(
     lv_obj_set_style_bg_opa(button, LV_OPA_COVER, LV_STATE_PRESSED);
     lv_obj_set_style_border_width(button, 0, 0);
     lv_obj_set_style_shadow_width(button, 0, 0);
-    /* Command id for controller bind; widgets never call services. */
+    /* 命令编号交控制器解释，控件不调用业务服务。 */
     lv_obj_set_user_data(button, (void *)(uintptr_t)command);
 
     disc = lv_obj_create(button);
@@ -245,7 +297,8 @@ static lv_obj_t *product_ui_media_hit_button_create(
     product_ui_widget_place(disc, disc_x, disc_y);
     lv_obj_set_style_radius(disc, LV_RADIUS_CIRCLE, 0);
     lv_obj_set_style_bg_color(
-        disc, product_ui_color(PRODUCT_UI_COLOR_SURFACE_MEDIA), 0);
+        disc, product_ui_color(command == PRODUCT_UI_MEDIA_CMD_TOGGLE_PLAY_PAUSE ?
+            PRODUCT_UI_COLOR_CONTROL_ACTIVE_TINT : PRODUCT_UI_COLOR_SURFACE_MEDIA), 0);
     lv_obj_set_style_bg_opa(disc, LV_OPA_COVER, 0);
     lv_obj_set_style_border_width(disc, 0, 0);
     lv_obj_clear_flag(disc, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE |
@@ -263,6 +316,9 @@ static lv_obj_t *product_ui_media_hit_button_create(
     return button;
 }
 
+/**
+ * @brief 创建封面、标题及副标题的媒体信息卡，传输控件由独立构造器提供。
+ */
 lv_obj_t *product_ui_media_card_create(
     lv_obj_t *parent, int16_t width, int16_t height,
     product_ui_media_controls_t *controls)
@@ -276,7 +332,7 @@ lv_obj_t *product_ui_media_card_create(
     if ((controls == NULL) || (width < 80) || (height < 80)) {
         return NULL;
     }
-    /* Preserve transport fields if transport was created first. */
+    /* 若传输条已先创建，保留其引用及播放投影字段。 */
     {
         lv_obj_t *transport = controls->transport;
         lv_obj_t *previous = controls->previous;
@@ -302,7 +358,7 @@ lv_obj_t *product_ui_media_card_create(
     lv_obj_clear_flag(card, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_set_style_bg_opa(card, LV_OPA_COVER, 0);
     lv_obj_set_style_layout(card, LV_LAYOUT_NONE, 0);
-    /* Clip children to rounded card — transport must stay inside shell. */
+    /* 子对象按圆角卡片裁剪，传输控件必须留在壳体内。 */
     lv_obj_set_style_clip_corner(card, true, 0);
 
     cover = lv_obj_create(card);
@@ -334,8 +390,8 @@ lv_obj_t *product_ui_media_card_create(
         lv_obj_delete(card);
         return NULL;
     }
-    lv_obj_set_width(title, width - 2 * PRODUCT_UI_MEDIA_TITLE_X);
-    lv_obj_set_height(title, product_ui_font(PRODUCT_UI_FONT_CAPTION)->line_height);
+    lv_obj_set_width(title, width - PRODUCT_UI_MEDIA_TITLE_X - 10);
+    lv_obj_set_height(title, product_ui_font(PRODUCT_UI_FONT_BODY)->line_height);
     product_ui_widget_place(title, PRODUCT_UI_MEDIA_TITLE_X,
                             PRODUCT_UI_MEDIA_TITLE_Y);
     lv_label_set_long_mode(title, LV_LABEL_LONG_DOT);
@@ -347,7 +403,7 @@ lv_obj_t *product_ui_media_card_create(
         controls->title = NULL;
         return NULL;
     }
-    lv_obj_set_width(subtitle, width - 2 * PRODUCT_UI_MEDIA_TITLE_X);
+    lv_obj_set_width(subtitle, width - PRODUCT_UI_MEDIA_TITLE_X - 10);
     lv_obj_set_height(subtitle, product_ui_font(PRODUCT_UI_FONT_CAPTION)->line_height);
     product_ui_widget_place(subtitle, PRODUCT_UI_MEDIA_TITLE_X,
                             PRODUCT_UI_MEDIA_SUB_Y);
@@ -358,6 +414,9 @@ lv_obj_t *product_ui_media_card_create(
     return card;
 }
 
+/**
+ * @brief 在媒体卡内部创建三个不重叠传输命中区及居中图标。
+ */
 lv_obj_t *product_ui_media_transport_create(
     lv_obj_t *parent, product_ui_media_controls_t *controls)
 {
@@ -378,10 +437,7 @@ lv_obj_t *product_ui_media_transport_create(
     controls->play_glyph = NULL;
     controls->is_playing = 0U;
 
-    /*
-     * Parent must be the media card. Local coords:
-     *   Three 36px hit regions remain inside the card-local transport.
-     */
+    /* 父对象必须是媒体卡，三个独立命中区均使用卡内传输条的局部坐标。 */
     root = lv_obj_create(parent);
     if (root == NULL) {
         return NULL;
@@ -427,6 +483,9 @@ lv_obj_t *product_ui_media_transport_create(
     return root;
 }
 
+/**
+ * @brief 向已有的上一首、播放及下一首按钮追加 CLICKED 回调。
+ */
 void product_ui_media_transport_bind(
     product_ui_media_controls_t *controls, lv_event_cb_t cb, void *user_data)
 {
@@ -444,6 +503,9 @@ void product_ui_media_transport_bind(
     }
 }
 
+/**
+ * @brief 复制更新已有媒体标题与副标题，空字段保持原文字。
+ */
 void product_ui_media_card_set_text(product_ui_media_controls_t *controls,
                                     const char *title,
                                     const char *subtitle)
@@ -459,6 +521,9 @@ void product_ui_media_card_set_text(product_ui_media_controls_t *controls,
     }
 }
 
+/**
+ * @brief 播放投影变化时重绑播放／暂停静态图标。
+ */
 void product_ui_media_card_set_playing(product_ui_media_controls_t *controls,
                                        uint8_t is_playing)
 {
@@ -487,6 +552,9 @@ void product_ui_media_card_set_playing(product_ui_media_controls_t *controls,
     controls->is_playing = is_playing;
 }
 
+/**
+ * @brief 创建图标、标题及右侧状态说明的信息卡，初始不绑定点击。
+ */
 lv_obj_t *product_ui_info_card_create(
     lv_obj_t *parent, int16_t width, int16_t height,
     product_ui_icon_id_t icon_id, const char *title,
@@ -497,7 +565,7 @@ lv_obj_t *product_ui_info_card_create(
     lv_obj_t *title_lbl;
     lv_obj_t *sub_lbl;
 
-    if ((view == NULL) || (title == NULL) || (width < 40) || (height < 32)) {
+    if ((view == NULL) || (title == NULL) || (width < 144) || (height < 32)) {
         return NULL;
     }
     memset(view, 0, sizeof(*view));
@@ -518,11 +586,8 @@ lv_obj_t *product_ui_info_card_create(
     lv_obj_clear_flag(card, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE |
                       LV_OBJ_FLAG_GESTURE_BUBBLE | LV_OBJ_FLAG_EVENT_BUBBLE);
 
-    /*
-     * Icon left, title+subtitle same right text column.
-     * Must use TOP_LEFT place — center align would make set_pos an offset
-     * (device bug: glyph sank under the labels).
-     */
+    /* 紧凑信息行左侧为图标／标题，右侧为连接状态；
+     * 使用左上对齐绝对放置，避免居中对齐把 set_pos 当偏移而使图标压入文字。 */
     icon = product_ui_cc_glyph(card, icon_id, PRODUCT_UI_INFO_ICON_SIZE,
                                PRODUCT_UI_COLOR_CONTROL_GLYPH, 0U);
     if (icon == NULL) {
@@ -537,7 +602,7 @@ lv_obj_t *product_ui_info_card_create(
         lv_obj_delete(card);
         return NULL;
     }
-    lv_obj_set_width(title_lbl, width - PRODUCT_UI_INFO_TEXT_X - 8);
+    lv_obj_set_width(title_lbl, 49);
     lv_obj_set_height(title_lbl, product_ui_font(PRODUCT_UI_FONT_CAPTION)->line_height);
     product_ui_widget_place(title_lbl, PRODUCT_UI_INFO_TEXT_X,
                             PRODUCT_UI_INFO_TITLE_Y);
@@ -548,9 +613,10 @@ lv_obj_t *product_ui_info_card_create(
         lv_obj_delete(card);
         return NULL;
     }
-    lv_obj_set_width(sub_lbl, width - PRODUCT_UI_INFO_TEXT_X - 8);
+    lv_obj_set_width(sub_lbl, width - 98);
     lv_obj_set_height(sub_lbl, product_ui_font(PRODUCT_UI_FONT_CAPTION)->line_height);
-    product_ui_widget_place(sub_lbl, PRODUCT_UI_INFO_TEXT_X,
+    lv_obj_set_style_text_align(sub_lbl, LV_TEXT_ALIGN_RIGHT, 0);
+    product_ui_widget_place(sub_lbl, 88,
                             PRODUCT_UI_INFO_SUB_Y);
     lv_obj_set_style_text_color(
         sub_lbl, product_ui_color(PRODUCT_UI_COLOR_CONTROL_TEXT_MUTED), 0);
@@ -564,6 +630,9 @@ lv_obj_t *product_ui_info_card_create(
     return card;
 }
 
+/**
+ * @brief 保持实体壳不透明，按激活／未激活／不可用更新内容色及可选副标题。
+ */
 void product_ui_info_card_set_state(product_ui_info_card_view_t *view,
                                     product_ui_control_state_e state,
                                     const char *subtitle)
@@ -571,7 +640,7 @@ void product_ui_info_card_set_state(product_ui_info_card_view_t *view,
     if ((view == NULL) || (view->root == NULL)) {
         return;
     }
-    /* Shell always full opacity — only content greys for UNAVAILABLE. */
+    /* 壳体始终不透明，不可用只弱化内容颜色。 */
     lv_obj_set_style_opa(view->root, LV_OPA_COVER, 0);
     if (state == PRODUCT_UI_CONTROL_ACTIVE) {
         lv_obj_set_style_bg_color(
@@ -622,6 +691,10 @@ void product_ui_info_card_set_state(product_ui_info_card_view_t *view,
     view->state = state;
 }
 
+/**
+ * @brief 根据控件当前范围、值及高度计算底部填充像素。
+ * @param[in,out] view 持久滑条引用，部分对象缺失时忽略。
+ */
 static void product_ui_slider_fill_sync(product_ui_slider_view_t *view)
 {
     int32_t value;
@@ -669,6 +742,10 @@ static void product_ui_slider_fill_sync(product_ui_slider_view_t *view)
     }
 }
 
+/**
+ * @brief 同步填充、图标对比色及只在拖动显示的数值说明。
+ * @param[in,out] view 持久滑条引用及本地拖动状态。
+ */
 static void product_ui_slider_visual_update(product_ui_slider_view_t *view)
 {
     product_ui_color_e color;
@@ -683,11 +760,15 @@ static void product_ui_slider_visual_update(product_ui_slider_view_t *view)
             PRODUCT_UI_COLOR_SLIDER_ICON : PRODUCT_UI_COLOR_CONTROL_GLYPH;
     lv_obj_set_style_image_recolor(view->icon, product_ui_color(color), 0);
     lv_obj_set_style_image_recolor_opa(view->icon, LV_OPA_COVER, 0);
-    /* Available path restores full glyph opacity after UNAVAILABLE mute. */
+    /* 能力恢复时撤销不可用弱化，图标恢复完全不透明。 */
     lv_obj_set_style_opa(view->icon, LV_OPA_COVER, 0);
     if (view->value_label != NULL) {
+        char text[24];
+        lv_snprintf(text, sizeof(text), "%s\n%ld%%", view->name, (long)value);
+        if (strcmp(lv_label_get_text(view->value_label), text) != 0)
+            lv_label_set_text(view->value_label, text);
+        lv_obj_set_style_opa(view->value_label, LV_OPA_COVER, 0);
         if (view->is_dragging) {
-            lv_label_set_text_fmt(view->value_label, "%ld", (long)value);
             lv_obj_clear_flag(view->value_label, LV_OBJ_FLAG_HIDDEN);
         } else {
             lv_obj_add_flag(view->value_label, LV_OBJ_FLAG_HIDDEN);
@@ -695,6 +776,10 @@ static void product_ui_slider_visual_update(product_ui_slider_view_t *view)
     }
 }
 
+/**
+ * @brief 按下时置本地拖动预览标志，并在值／尺寸变化时刷新视觉。
+ * @param[in] event 滑条事件，用户数据借用持久视图。
+ */
 static void product_ui_slider_value_cb(lv_event_t *event)
 {
     product_ui_slider_view_t *view = lv_event_get_user_data(event);
@@ -704,6 +789,9 @@ static void product_ui_slider_value_cb(lv_event_t *event)
     product_ui_slider_visual_update(view);
 }
 
+/**
+ * @brief 保存权威确认值，非拖动时再应用到滑条及本地视觉。
+ */
 void product_ui_slider_apply_value(product_ui_slider_view_t *view,
                                    int32_t value)
 {
@@ -718,6 +806,9 @@ void product_ui_slider_apply_value(product_ui_slider_view_t *view,
     product_ui_slider_visual_update(view);
 }
 
+/**
+ * @brief 创建零至一百的竖滑条、独立填充、图标及拖动时数值说明。
+ */
 lv_obj_t *product_ui_vertical_slider_create(
     lv_obj_t *parent, int16_t width, int16_t height,
     product_ui_icon_id_t icon_id, int32_t value,
@@ -736,6 +827,7 @@ lv_obj_t *product_ui_vertical_slider_create(
     view->fill = NULL;
     view->value_label = NULL;
     view->icon = NULL;
+    view->name = icon_id == PRODUCT_UI_ICON_CC_BRIGHTNESS ? "亮度" : "音量";
     view->is_dragging = 0U;
     view->confirmed_value = value;
     slider = lv_slider_create(parent);
@@ -780,12 +872,12 @@ lv_obj_t *product_ui_vertical_slider_create(
         lv_obj_delete(slider);
         return NULL;
     }
-    lv_obj_add_flag(value_label, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_set_width(value_label, 28);
+    lv_obj_set_width(value_label, width - 8);
     lv_obj_set_style_text_align(value_label, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_bg_color(value_label, lv_color_black(), 0);
     lv_obj_set_style_bg_opa(value_label, LV_OPA_60, 0);
     lv_obj_set_style_radius(value_label, PRODUCT_UI_RADIUS_SM, 0);
+    lv_obj_set_style_pad_ver(value_label, 2, 0);
     lv_obj_align(value_label, LV_ALIGN_TOP_MID, 0, 12);
     product_ui_ctrl_image_bind(icon, product_ui_icon_get_sized(icon_id, 16), 16, 16);
     lv_obj_set_style_image_recolor(
@@ -807,12 +899,15 @@ lv_obj_t *product_ui_vertical_slider_create(
     return slider;
 }
 
+/**
+ * @brief 把具名快捷项显式映射为生成图标。
+ * @param[in] tile_id 快捷项语义身份。
+ * @return 有效项返回对应图标，未知项为 ICON_COUNT 使创建失败，不回退设置图标。
+ */
 static product_ui_icon_id_t product_ui_quick_tile_icon(
     product_ui_quick_tile_e tile_id)
 {
     switch (tile_id) {
-    case PRODUCT_UI_QUICK_TILE_FOCUS:
-        return PRODUCT_UI_ICON_CC_FOCUS;
     case PRODUCT_UI_QUICK_TILE_ALARM:
         return PRODUCT_UI_ICON_CC_ALARM;
     case PRODUCT_UI_QUICK_TILE_ROTATION:
@@ -820,17 +915,21 @@ static product_ui_icon_id_t product_ui_quick_tile_icon(
     case PRODUCT_UI_QUICK_TILE_SETTINGS:
         return PRODUCT_UI_ICON_CC_SETTINGS;
     default:
-        /* No settings fallback — create fails cleanly via NULL glyph. */
+        /* 不回退为设置图标，未知项通过缺少图标直接让创建失败。 */
         return PRODUCT_UI_ICON_COUNT;
     }
 }
 
+/**
+ * @brief 按静态语义规格创建快捷卡，并投影为初始未激活。
+ */
 lv_obj_t *product_ui_quick_card_create(
     lv_obj_t *parent, const product_ui_quick_card_spec_t *spec,
     product_ui_quick_card_view_t *view)
 {
     lv_obj_t *card;
     lv_obj_t *glyph;
+    lv_obj_t *label;
     product_ui_icon_id_t icon_id;
 
     if ((spec == NULL) || (spec->semantic_name == NULL) || (view == NULL)) {
@@ -840,29 +939,38 @@ lv_obj_t *product_ui_quick_card_create(
     if (icon_id >= PRODUCT_UI_ICON_COUNT) {
         return NULL;
     }
-    card = product_ui_widget_card(parent, spec->diameter, spec->diameter,
+    card = product_ui_widget_card(parent, spec->width, spec->height,
                                   PRODUCT_UI_COLOR_SURFACE_QUICK);
     if (card == NULL) {
         return NULL;
     }
-    lv_obj_set_style_radius(card, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_radius(card, PRODUCT_UI_RADIUS_MD, 0);
     lv_obj_set_style_bg_opa(card, LV_OPA_COVER, 0);
     lv_obj_set_style_border_width(card, 0, 0);
     lv_obj_set_ext_click_area(card, PRODUCT_UI_CONTROL_QUICK_HIT_PAD);
     glyph = product_ui_cc_glyph(card, icon_id, 18,
-                                PRODUCT_UI_COLOR_CONTROL_GLYPH, 1U);
-    if (glyph == NULL) {
+                                PRODUCT_UI_COLOR_CONTROL_GLYPH, 0U);
+    label = product_ui_widget_label(card,
+        spec->tile_id == PRODUCT_UI_QUICK_TILE_ROTATION ? "翻转" : spec->semantic_name,
+        PRODUCT_UI_STYLE_CAPTION);
+    if (glyph == NULL || label == NULL) {
         lv_obj_delete(card);
         return NULL;
     }
+    lv_obj_align(glyph, LV_ALIGN_TOP_MID, 0, 4);
+    lv_obj_align(label, LV_ALIGN_BOTTOM_MID, 0, -3);
     view->root = card;
     view->icon = glyph;
+    view->label = label;
     view->tile_id = spec->tile_id;
     view->semantic_name = spec->semantic_name;
     product_ui_quick_card_set_state(view, PRODUCT_UI_CONTROL_INACTIVE);
     return card;
 }
 
+/**
+ * @brief 保持实体壳不透明，按状态更新背景及图标文字色，并记录显示状态。
+ */
 void product_ui_quick_card_set_state(product_ui_quick_card_view_t *view,
                                      product_ui_control_state_e state)
 {
@@ -870,9 +978,14 @@ void product_ui_quick_card_set_state(product_ui_quick_card_view_t *view,
         return;
     }
     lv_obj_remove_state(view->root, LV_STATE_DISABLED);
-    /* Full shell opacity always — greyscale content only for UNAVAILABLE. */
+    /* 壳体始终完全不透明，仅不可用内容使用灰色。 */
     lv_obj_set_style_opa(view->root, LV_OPA_COVER, 0);
     lv_obj_set_style_bg_opa(view->root, LV_OPA_COVER, 0);
+    if (view->label != NULL) {
+        lv_obj_set_style_text_color(view->label, product_ui_color(
+            state == PRODUCT_UI_CONTROL_UNAVAILABLE ? PRODUCT_UI_COLOR_CONTROL_TEXT_MUTED :
+            PRODUCT_UI_COLOR_CONTROL_TEXT), 0);
+    }
     if (state == PRODUCT_UI_CONTROL_ACTIVE) {
         lv_obj_set_style_bg_color(
             view->root, product_ui_color(PRODUCT_UI_COLOR_CONTROL_ACTIVE_TINT),

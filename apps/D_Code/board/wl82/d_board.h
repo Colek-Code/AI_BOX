@@ -1,6 +1,6 @@
 /**
  * @file d_board.h
- * @brief Board-level platform interface for D_Code (WL82 variant)
+ * @brief 声明 D_Code WL82 板级公开入口，不承担业务电源策略。
  * @author D_Code
  * @date 2026-06-04
  */
@@ -9,12 +9,9 @@
 #define D_BOARD_H
 
 /**
- * @brief Switch wakeup configuration to soft-poweroff mode.
- *
- * Must be called immediately before power_set_soft_poweroff().
- * Enables long-press wakeup on PORT_WAKEUP_IO and clears the plain
- * POWER_OFF_WAKEUP to prevent the device from re-waking instantly
- * while the key is still held down during shutdown.
+ * @brief 在软件关机前切换为板级长按唤醒配置，并清理 SDK 唤醒源。
+ * @note 由电源流程紧邻 power_set_soft_poweroff 调用；EMI 板或启用电源控制的配置执行，其他配置为空操作。
+ * @note 不在此执行关机或等待业务清理，也不承诺 SDK 之外的硬件唤醒行为。
  */
 void d_board_prepare_soft_poweroff_wakeup(void);
 

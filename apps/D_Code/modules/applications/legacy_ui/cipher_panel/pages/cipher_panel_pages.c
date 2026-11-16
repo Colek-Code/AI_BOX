@@ -1,7 +1,4 @@
-/**
- * @file cipher_panel_pages.c
- * @brief Sub pages for the cipher panel demo.
- */
+/** @file cipher_panel_pages.c @brief Cipher Panel 的页面辅助及显示／声音子页面，保留旧根 UI 的实际调用合同。 */
 #include "config/app_config.h"
 #if defined(D_LVGL_ENABLE) && (D_UI_TARGET == D_UI_CIPHER_PANEL)
 
@@ -13,6 +10,10 @@
 
 #define CIPHER_LOCK_TIMEOUT_OPTIONS  "30s\n1min\n5min\n15min\nNever"
 
+/**
+ * @brief 同步应用亮度值，按平台返回更新百分比或错误文字。
+ * @param[in] e 亮度 VALUE_CHANGED 事件，用户数据借用数值标签。
+ */
 static void cipher_lcd_brightness_event(lv_event_t *e)
 {
     lv_obj_t *slider = lv_event_get_target(e);
@@ -31,6 +32,10 @@ static void cipher_lcd_brightness_event(lv_event_t *e)
     }
 }
 
+/**
+ * @brief 调用同步兼容设备音量接口，并按返回更新数值或错误文字。
+ * @param[in] e 音量值变化事件，用户数据借用数值标签。
+ */
 static void cipher_volume_event(lv_event_t *e)
 {
     lv_obj_t *slider = lv_event_get_target(e);
@@ -49,6 +54,10 @@ static void cipher_volume_event(lv_event_t *e)
     }
 }
 
+/**
+ * @brief 将下拉选项下标交给屏幕电源期限设置。
+ * @param[in] e 下拉选择事件。
+ */
 static void cipher_lcd_timeout_event(lv_event_t *e)
 {
     lv_obj_t *dropdown = lv_event_get_target(e);
@@ -62,6 +71,10 @@ static void cipher_lcd_timeout_event(lv_event_t *e)
     d_screen_power_set_timeout_index((uint8_t)selected);
 }
 
+/**
+ * @brief 将开关选中态映射到触摸唤醒配置。
+ * @param[in] e 触摸唤醒开关事件。
+ */
 static void cipher_lcd_touch_wake_event(lv_event_t *e)
 {
     lv_obj_t *sw = lv_event_get_target(e);
@@ -74,11 +87,18 @@ static void cipher_lcd_touch_wake_event(lv_event_t *e)
         lv_obj_has_state(sw, LV_STATE_CHECKED) ? 1U : 0U);
 }
 
+/**
+ * @brief 初始化旧根 UI 所需的共用字幕订阅。
+ */
 void cipher_panel_pages_init(void)
 {
     cipher_panel_aichat_init();
 }
 
+/**
+ * @brief 设置旧根 UI 滑条轨道、填充、滑块及扩展触摸区。
+ * @param[in,out] slider 借用滑条，NULL 时忽略。
+ */
 static void cipher_style_slider(lv_obj_t *slider)
 {
     if (slider == NULL) {
@@ -102,6 +122,10 @@ static void cipher_style_slider(lv_obj_t *slider)
     lv_obj_set_ext_click_area(slider, 14);
 }
 
+/**
+ * @brief 设置灭屏期限下拉控件的旧根主题。
+ * @param[in,out] dropdown 借用下拉对象，NULL 时忽略。
+ */
 static void cipher_lcd_style_dropdown(lv_obj_t *dropdown)
 {
     if (dropdown == NULL) {
@@ -117,6 +141,10 @@ static void cipher_lcd_style_dropdown(lv_obj_t *dropdown)
     lv_obj_set_style_text_color(dropdown, lv_color_hex(CIPHER_TEXT), LV_PART_MAIN);
 }
 
+/**
+ * @brief 设置触摸唤醒开关的轨道、选中及滑块颜色。
+ * @param[in,out] sw 借用开关对象，NULL 时忽略。
+ */
 static void cipher_lcd_style_switch(lv_obj_t *sw)
 {
     if (sw == NULL) {
@@ -134,6 +162,12 @@ static void cipher_lcd_style_switch(lv_obj_t *sw)
     lv_obj_set_style_bg_opa(sw, LV_OPA_COVER, LV_PART_KNOB);
 }
 
+/**
+ * @brief 创建声音卡中的大号百分比标签。
+ * @param[in,out] card 有效父卡片。
+ * @param[in] volume 初始设备音量百分比。
+ * @return 成功返回卡片拥有的标签，失败为 NULL。
+ */
 static lv_obj_t *cipher_volume_value_label(lv_obj_t *card, uint8_t volume)
 {
     lv_obj_t *value_label = lv_label_create(card);
@@ -151,6 +185,12 @@ static lv_obj_t *cipher_volume_value_label(lv_obj_t *card, uint8_t volume)
     return value_label;
 }
 
+/**
+ * @brief 创建本地零至一百音量滑条并绑定兼容同步值变化回调。
+ * @param[in,out] card 滑条父卡片。
+ * @param[in,out] value_label 持续有效的数值标签，用作事件上下文。
+ * @param[in] volume 初始设备音量。
+ */
 static void cipher_volume_slider(lv_obj_t *card, lv_obj_t *value_label, uint8_t volume)
 {
     lv_obj_t *slider;
@@ -172,6 +212,9 @@ static void cipher_volume_slider(lv_obj_t *card, lv_obj_t *value_label, uint8_t 
                         LV_EVENT_VALUE_CHANGED, value_label);
 }
 
+/**
+ * @brief 创建亮度、灭屏期限及触摸唤醒控件，并读取当前平台值作为初值。
+ */
 void cipher_panel_show_lcd(lv_obj_t *parent)
 {
     lv_obj_t *card;
@@ -273,6 +316,9 @@ void cipher_panel_show_lcd(lv_obj_t *parent)
     }
 }
 
+/**
+ * @brief 创建 WiFi、显示及声音三个固定子页导航按钮。
+ */
 void cipher_panel_show_system(lv_obj_t *parent)
 {
     cipher_page_header(parent, "System menu");
@@ -284,6 +330,9 @@ void cipher_panel_show_system(lv_obj_t *parent)
                   CIPHER_PAGE_VOLUME, CIPHER_PURPLE);
 }
 
+/**
+ * @brief 创建设备音量滑条及数值，以当前兼容同步音量作为初值。
+ */
 void cipher_panel_show_volume(lv_obj_t *parent)
 {
     lv_obj_t *card;
@@ -319,11 +368,17 @@ void cipher_panel_show_volume(lv_obj_t *parent)
                 CIPHER_MUTED, LV_TEXT_ALIGN_RIGHT);
 }
 
+/**
+ * @brief 委托旧 Cipher 字幕视图创建当前 AIChat 页面。
+ */
 void cipher_panel_show_aichat(lv_obj_t *parent)
 {
     cipher_panel_aichat_show(parent);
 }
 
+/**
+ * @brief 只为当前字幕页或启用的 WiFi 页转发必要周期。
+ */
 void cipher_panel_pages_update(cipher_page_t page, uint32_t elapsed_ms)
 {
     if (page == CIPHER_PAGE_AICHAT) {

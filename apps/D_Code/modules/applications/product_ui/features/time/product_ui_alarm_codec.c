@@ -1,6 +1,6 @@
 /**
  * @file product_ui_alarm_codec.c
- * @brief Explicit little-endian 1536-byte A/B records; no ABI padding on Flash.
+ * @brief 固定 1536 字节小端 A/B 记录，不把结构体 ABI 填充写入 Flash。
  * @author D_Code
  * @date 2026-09-21
  */
@@ -14,6 +14,12 @@ typedef char product_ui_alarm_layout_check[
     PRODUCT_UI_ALARM_HEADER_BYTES + PRODUCT_UI_ALARM_COUNT * PRODUCT_UI_ALARM_ENTRY_BYTES + 4U ==
     PRODUCT_UI_ALARM_RECORD_SIZE ? 1 : -1];
 
+/**
+ * @brief 从有限记录片段读取小端无符号值。
+ * @param[in] bytes 至少 size 字节的输入片段。
+ * @param[in] size 调用链保证不超过八的字节数。
+ * @return 解码的 uint64_t 值。
+ */
 static uint64_t product_ui_alarm_read_le(const uint8_t *bytes, uint8_t size)
 {
     uint64_t value = 0U;
@@ -22,12 +28,23 @@ static uint64_t product_ui_alarm_read_le(const uint8_t *bytes, uint8_t size)
     return value;
 }
 
+/**
+ * @brief 把无符号值低字节按小端写入记录片段。
+ * @param[out] bytes 至少 size 字节的输出片段。
+ * @param[in] value 待编码无符号值。
+ * @param[in] size 调用链保证不超过八的字节数。
+ */
 static void product_ui_alarm_write_le(uint8_t *bytes, uint64_t value, uint8_t size)
 {
     uint8_t index;
     for (index = 0U; index < size; index++) bytes[index] = (uint8_t)(value >> (index * 8U));
 }
 
+/**
+ * @brief 计算记录 CRC 字段之前的反射 CRC32。
+ * @param[in] bytes 至少 RECORD_SIZE 字节的完整记录。
+ * @return 多项式 0xedb88320、初始及最终异或 UINT32_MAX 的校验值。
+ */
 static uint32_t product_ui_alarm_crc(const uint8_t *bytes)
 {
     uint32_t crc = UINT32_MAX;
@@ -40,11 +57,19 @@ static uint32_t product_ui_alarm_crc(const uint8_t *bytes)
     return crc ^ UINT32_MAX;
 }
 
+/**
+ * @brief 以半周期差比较相邻 A/B 保存序号，支持回绕。
+ */
 uint8_t product_ui_alarm_sequence_after(uint32_t left, uint32_t right)
 {
     return left != right && (uint32_t)(left - right) < 0x80000000U;
 }
 
+/**
+ * @brief 显式编码一个规则及实例的 V3 字段到八十八字节槽。
+ * @param[in] entry 已经验证的记录。
+ * @param[out] bytes 调用方已清零且至少 ENTRY_BYTES 字节的输出槽。
+ */
 static void product_ui_alarm_encode_entry(const product_ui_alarm_record_t *entry, uint8_t *bytes)
 {
     product_ui_alarm_write_le(bytes, entry->rule.id, 4U);
@@ -65,6 +90,9 @@ static void product_ui_alarm_encode_entry(const product_ui_alarm_record_t *entry
     bytes[82] = entry->rule.alternate_mask; bytes[83] = entry->rule.routine_template;
 }
 
+/**
+ * @brief 把已验证保存值编码为 V3 固定小端记录并追加 CRC32。
+ */
 void product_ui_alarm_encode(const product_ui_alarm_saved_t *saved, uint32_t sequence, uint8_t *record)
 {
     uint8_t index;
@@ -88,6 +116,11 @@ void product_ui_alarm_encode(const product_ui_alarm_saved_t *saved, uint32_t seq
     product_ui_alarm_write_le(record + PRODUCT_UI_ALARM_CRC_OFFSET, product_ui_alarm_crc(record), 4U);
 }
 
+/**
+ * @brief 从完整槽解码字段，不在此校验记录或保留字节。
+ * @param[in] bytes 至少 ENTRY_BYTES 可读字节。
+ * @param[out] entry 接收字段值，上层校验成功后才可消费。
+ */
 static void product_ui_alarm_decode_entry(const uint8_t *bytes, product_ui_alarm_record_t *entry)
 {
     entry->rule.id = (uint32_t)product_ui_alarm_read_le(bytes, 4U);
@@ -108,6 +141,12 @@ static void product_ui_alarm_decode_entry(const uint8_t *bytes, product_ui_alarm
     entry->rule.alternate_mask = bytes[82]; entry->rule.routine_template = bytes[83];
 }
 
+/**
+ * @brief 检查有限字节区间是否全部为零。
+ * @param[in] bytes 至少 length 字节的可读片段。
+ * @param[in] length 检查长度。
+ * @return 全部为零返回 1，发现任一非零返回 0。
+ */
 static uint8_t product_ui_alarm_zero(const uint8_t *bytes, uint16_t length)
 {
     uint16_t index;
@@ -115,6 +154,9 @@ static uint8_t product_ui_alarm_zero(const uint8_t *bytes, uint16_t length)
     return 1U;
 }
 
+/**
+ * @brief 验证 V1／V2／V3 记录，并按旧版本合同迁移双周字段及贪睡期限。
+ */
 d_err_t product_ui_alarm_decode(const uint8_t *record, product_ui_alarm_saved_t *saved, uint32_t *sequence)
 {
     uint8_t index, previous, count = 0U;
@@ -144,7 +186,7 @@ d_err_t product_ui_alarm_decode(const uint8_t *record, product_ui_alarm_saved_t 
         }
         count++;
         if (version < 3U) {
-            /* Check the old schema before applying the expanded V3 validator. */
+            /* 使用扩展 V3 校验前，先核实旧版本自身格式。 */
             if (entry->rule.schedule > PRODUCT_UI_ALARM_SCHEDULE_WEEKLY ||
                 !product_ui_alarm_zero(bytes + 82U, 6U)) return D_ERR_IO;
             entry->rule.alternate_mask = 0U;
@@ -153,8 +195,8 @@ d_err_t product_ui_alarm_decode(const uint8_t *record, product_ui_alarm_saved_t 
         }
         if (!product_ui_alarm_record_valid(entry) || !product_ui_alarm_zero(bytes + 84U, 4U)) return D_ERR_IO;
         if (version == 1U && entry->state == PRODUCT_UI_ALARM_SNOOZED) {
-            /* V1's ten-minute deadline becomes five minutes from the same
-             * accepted snooze, not five new minutes after every reboot. */
+            /* V1 十分钟截止改为同一次已受理贪睡起算的五分钟，
+             * 不能每次重启又新增五分钟。 */
             entry->snooze_utc -= (10 - (int64_t)PRODUCT_UI_ALARM_SNOOZE_MINUTES) * 60;
             if (entry->snooze_utc < PRODUCT_UI_CLOCK_MIN_UTC) {
                 entry->snooze_utc = 0;

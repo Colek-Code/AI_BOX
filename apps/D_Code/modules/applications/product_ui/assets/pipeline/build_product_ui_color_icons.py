@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Encode ui_pack PNGs to LVGL ARGB8888 (BGRA byte order) device assets."""
+"""将 ui_pack 图像编码为 LVGL ARGB8888 设备资源，像素使用 BGRA 字节顺序。"""
 
 from __future__ import annotations
 
@@ -29,7 +29,7 @@ class ColorIconSpec:
     height: int = CANVAS_SIZE
 
 
-# Home color pack only. Control-center uses monochrome CC_* A4 masters.
+# 仅供主屏彩色图标；控制中心使用单色 CC_* A4 母版。
 ICONS: tuple[ColorIconSpec, ...] = (
     ColorIconSpec("MUSIC", "source/ui_pack/home/music.png"),
     ColorIconSpec("CALENDAR", "source/ui_pack/home/calendar.png"),
@@ -46,6 +46,7 @@ ICONS: tuple[ColorIconSpec, ...] = (
 
 
 def load_rgba_full(path: Path) -> Image.Image:
+    """读取源图像并转换为 RGBA。"""
     if not path.is_file():
         raise FileNotFoundError(f"missing color icon source: {path}")
     return Image.open(path).convert("RGBA")
@@ -59,7 +60,7 @@ class DerivedIcon:
 
 
 def render_derived_icons(assets_dir: Path, geometry: dict) -> list[DerivedIcon]:
-    """Render only declared SVG masters; original PNG cutouts stay untouched."""
+    """仅渲染清单声明的 SVG 母版，原 PNG 抠图保持原样。"""
     from resvg_py import svg_to_bytes
 
     root = assets_dir.resolve()
@@ -85,6 +86,7 @@ def render_derived_icons(assets_dir: Path, geometry: dict) -> list[DerivedIcon]:
 
 
 def check_derived_icons(geometry: dict, rendered: list[DerivedIcon]) -> None:
+    """核对派生 SVG 摘要及已发布 PNG 像素。"""
     for icon in rendered:
         metadata = geometry["derived_sources"][icon.path.name]
         if icon.svg_sha256 != metadata.get("sha256"):
@@ -96,6 +98,7 @@ def check_derived_icons(geometry: dict, rendered: list[DerivedIcon]) -> None:
 
 def refresh_derived_icons(manifest_path: Path, manifest: dict,
                           rendered: list[DerivedIcon]) -> None:
+    """显式刷新已声明派生 PNG 及其清单摘要。"""
     geometry = manifest["home_color_icons"]
     for icon in rendered:
         staging = icon.path.with_name(icon.path.name + ".next")
@@ -107,6 +110,7 @@ def refresh_derived_icons(manifest_path: Path, manifest: dict,
 
 
 def resize_rgba(image: Image.Image, width: int, height: int) -> Image.Image:
+    """尺寸不同时以 Lanczos 缩放 RGBA 图像。"""
     if image.size == (width, height):
         return image
     return image.resize((width, height), Image.Resampling.LANCZOS)
@@ -114,7 +118,7 @@ def resize_rgba(image: Image.Image, width: int, height: int) -> Image.Image:
 
 def process_icon(image: Image.Image, spec: ColorIconSpec,
                  geometry: dict | None = None) -> Image.Image:
-    """Fit visible artwork, not transparent canvas, into the shared icon plate."""
+    """按可见内容边界而非透明画布适配统一图标板。"""
     geometry = geometry or HOME_GEOMETRY
     canvas = int(geometry["canvas_size"])
     optical = int(geometry["optical_size"])
@@ -141,8 +145,8 @@ def process_icon(image: Image.Image, spec: ColorIconSpec,
     artwork = image.crop((left, top, right, bottom))
     inset = round(min(artwork.size) * inset_fraction)
     if inset:
-        # Explicitly trim known matte-contaminated cutouts before resampling.
-        # RGB colour is never used to distinguish a white glyph from a fringe.
+        # 重采样前显式裁剪已知受底色污染的抠图边缘。
+        # 不能用 RGB 颜色区分白色字形与污染边缘。
         alpha = ImageOps.expand(artwork.getchannel("A"), border=inset, fill=0)
         alpha = alpha.filter(ImageFilter.MinFilter(inset * 2 + 1))
         alpha = alpha.crop((inset, inset, inset + artwork.width, inset + artwork.height))
@@ -159,7 +163,7 @@ def process_icon(image: Image.Image, spec: ColorIconSpec,
     if contour not in ("source", "rounded_rectangle"):
         raise ValueError(f"invalid icon contour: {spec.enum_name}")
     if contour == "rounded_rectangle":
-        # Legacy cutouts share a mask; clean vector masters own their precise outline.
+        # 旧抠图共用掩码；干净矢量母版保留其精确轮廓。
         mask = Image.new("L", (size[0] * 4, size[1] * 4), 0)
         ImageDraw.Draw(mask).rounded_rectangle(
             (0, 0, mask.width - 1, mask.height - 1),
@@ -172,12 +176,12 @@ def process_icon(image: Image.Image, spec: ColorIconSpec,
 
 
 def resolve_source(assets_dir: Path, rel_path: str) -> Path:
-    """Use ui_pack device-size working copies only."""
+    """定位 ui_pack 设备尺寸工作副本。"""
     return assets_dir / rel_path
 
 
 def rgba_to_bgra_bytes(image: Image.Image) -> bytes:
-    """LVGL ARGB8888 demo assets store Blue, Green, Red, Alpha per pixel."""
+    """按蓝、绿、红、透明度顺序编码每个像素。"""
     pixels = list(image.get_flattened_data())
     out = bytearray(len(pixels) * 4)
     offset = 0
@@ -191,6 +195,7 @@ def rgba_to_bgra_bytes(image: Image.Image) -> bytes:
 
 
 def format_c_array(data: bytes) -> str:
+    """将字节数据按既有行宽格式化为 C 数组。"""
     lines: list[str] = []
     for index in range(0, len(data), VALUES_PER_LINE):
         chunk = data[index : index + VALUES_PER_LINE]
@@ -200,7 +205,7 @@ def format_c_array(data: bytes) -> str:
 
 
 def write_generated(path: Path, text: str) -> None:
-    """Verify bounded writes before replacing generated text."""
+    """按现有分批校验规则写入生成文本。"""
     staging = path.with_name(path.name + ".next")
     lines = text.encode("utf-8").splitlines(keepends=True)
     with staging.open("w+b") as stream:
@@ -216,13 +221,14 @@ def write_generated(path: Path, text: str) -> None:
 
 
 def emit_header(path: Path, geometry: dict | None = None) -> None:
+    """生成彩色图标枚举及静态借用接口头文件。"""
     geometry = geometry or HOME_GEOMETRY
     enums = "\n".join(
         f"    PRODUCT_UI_COLOR_ICON_{spec.enum_name}," for spec in ICONS
     )
     text = f"""/**
  * @file product_ui_color_icons.h
- * @brief Color UI icons from ui_pack (LVGL ARGB8888). Generated — do not edit.
+ * @brief 由 ui_pack 生成的 LVGL ARGB8888 彩色图标；请修改生成器。
  */
 
 #ifndef __PRODUCT_UI_COLOR_ICONS_H__
@@ -238,6 +244,12 @@ typedef enum {{
     PRODUCT_UI_COLOR_ICON_COUNT
 }} product_ui_color_icon_id_t;
 
+/**
+ * @brief 按彩色图标编号借用静态图像描述符。
+ * @param[in] icon_id 合法枚举编号；须不为负且小于 PRODUCT_UI_COLOR_ICON_COUNT。
+ * @return 有效编号对应的静态只读描述符；达到或超过 COUNT 返回 NULL。
+ * @note 实现只检查上界；调用方须保证不传负值。返回值不由调用方释放。
+ */
 const lv_image_dsc_t *product_ui_color_icon_get(
     product_ui_color_icon_id_t icon_id);
 
@@ -247,11 +259,12 @@ const lv_image_dsc_t *product_ui_color_icon_get(
 
 
 def emit_source(assets_dir: Path, path: Path) -> None:
+    """编码图标并生成静态描述符及查询表。"""
     geometry = json.loads((assets_dir / "ASSET_MANIFEST").read_text(encoding="utf-8"))["home_color_icons"]
     chunks: list[str] = [
         "/**",
         " * @file product_ui_color_icons.c",
-        " * @brief Color UI icons from ui_pack (LVGL ARGB8888 BGRA). Generated.",
+        " * @brief 由 ui_pack 生成的 LVGL ARGB8888 彩色图标，按 BGRA 字节排列。",
         " */",
         '#include "modules/applications/product_ui/assets/product_ui_color_icons.h"',
         "",
@@ -262,7 +275,7 @@ def emit_source(assets_dir: Path, path: Path) -> None:
         spec = ColorIconSpec(source_spec.enum_name, source_spec.rel_path,
                              geometry["canvas_size"], geometry["canvas_size"])
         src_in = resolve_source(assets_dir, spec.rel_path)
-        # Process a copy for encode only — never overwrite HD masters by default.
+        # 只处理编码副本，默认绝不覆盖高清母版。
         image = process_icon(load_rgba_full(src_in), spec, geometry)
         data = rgba_to_bgra_bytes(image)
         transparent = sum(1 for px in image.get_flattened_data()
@@ -302,7 +315,7 @@ def emit_source(assets_dir: Path, path: Path) -> None:
     chunks.append("};")
     chunks.append("")
     chunks.append(
-        "const lv_image_dsc_t *product_ui_color_icon_get("
+        "/** @brief 按合法枚举编号借用静态图像，编号上界检查失败返回 NULL。 */\nconst lv_image_dsc_t *product_ui_color_icon_get("
         "product_ui_color_icon_id_t icon_id)"
     )
     chunks.append("{")
@@ -316,6 +329,7 @@ def emit_source(assets_dir: Path, path: Path) -> None:
 
 
 def main() -> None:
+    """将 ui_pack 图像编码为 LVGL ARGB8888 设备资源，像素使用 BGRA 字节顺序。"""
     import tempfile
 
     parser = argparse.ArgumentParser()

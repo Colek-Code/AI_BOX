@@ -1,4 +1,4 @@
-/** @file product_ui_pomodoro_notice.c @brief Nonmodal notice; navigation deferred beyond the caller's page update. */
+/** @file product_ui_pomodoro_notice.c @brief UI 线程全局非模态完成提示，导航延后到当前页面更新之外。 */
 #include "config/app_config.h"
 #if defined(D_LVGL_ENABLE) && (D_UI_TARGET == D_UI_PRODUCT)
 #include "product_ui_pomodoro_notice.h"
@@ -22,8 +22,16 @@ static uint32_t s_started_ms;
 static uint8_t s_pending;
 static uint8_t s_armed;
 
+/**
+ * @brief 读取最近周期观察到的未确认完成事件标志。
+ */
 uint8_t product_ui_pomodoro_notice_pending(void) { return s_pending; }
 
+/**
+ * @brief 在异步 UI 调用中复核完成事件，导航成功后显示计时视图并确认事件。
+ * @param[in] context 整数编码的完成事件编号，不是动态内存。
+ * @note 静默或当前事件已变化时忽略；导航失败保留服务事件并提示。
+ */
 static void product_ui_pomodoro_notice_open(void *context)
 {
     uint32_t event_id = (uint32_t)(uintptr_t)context;
@@ -37,6 +45,10 @@ static void product_ui_pomodoro_notice_open(void *context)
     } else product_ui_toast_show("无法打开番茄钟，请重试", 1500U);
 }
 
+/**
+ * @brief 校验完整点击后预约异步打开，删除或输入丢失时撤销资格。
+ * @param[in] event 全局提示按钮事件。
+ */
 static void product_ui_pomodoro_notice_event(lv_event_t *event)
 {
     lv_event_code_t code = lv_event_get_code(event);
@@ -51,19 +63,24 @@ static void product_ui_pomodoro_notice_event(lv_event_t *event)
     }
 }
 
+/**
+ * @brief 创建本事件的非模态完成按钮，成功后记录呈现编号及显示起点。
+ * @param[in] snapshot 本次借用的服务快照。
+ * @return 完整创建返回 1，分配失败返回 0，失败不标记事件已呈现。
+ */
 static uint8_t product_ui_pomodoro_notice_show(const product_ui_pomodoro_snapshot_t *snapshot)
 {
     lv_obj_t *label;
     lv_obj_t *button = lv_button_create(lv_layer_top());
     if (button == NULL) return 0U;
-    lv_obj_set_size(button, 296, 40);
-    lv_obj_align(button, LV_ALIGN_BOTTOM_MID, 0, -8);
     lv_obj_clear_flag(button, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_PRESS_LOCK);
-    lv_obj_add_style(button, product_ui_style(PRODUCT_UI_STYLE_INTERACTIVE), 0);
     label = lv_label_create(button);
     if (label == NULL) { lv_obj_delete(button); return 0U; }
     lv_obj_add_style(label, product_ui_style(PRODUCT_UI_STYLE_BODY), 0);
     lv_label_set_text_fmt(label, "%s完成 · 查看番茄钟", product_ui_pomodoro_phase_name(snapshot->model.completed_phase));
+    product_ui_dialog_button_style(button, PRODUCT_UI_DIALOG_PRIMARY);
+    lv_obj_set_size(button, 296, 40);
+    lv_obj_align(button, LV_ALIGN_BOTTOM_MID, 0, -8);
     lv_obj_center(label);
     s_notice = button;
     s_visible_event = snapshot->model.event_id;
@@ -74,6 +91,9 @@ static uint8_t product_ui_pomodoro_notice_show(const product_ui_pomodoro_snapsho
     return 1U;
 }
 
+/**
+ * @brief 观察未确认完成事件，按遮挡、静默及显示期限协调全局提示。
+ */
 void product_ui_pomodoro_notice_process(void)
 {
     product_ui_pomodoro_snapshot_t snapshot;

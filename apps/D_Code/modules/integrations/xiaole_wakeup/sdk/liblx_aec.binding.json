@@ -1,0 +1,32 @@
+{
+  "input_sha256": "f790869e879ebd71fcdfc63b776cfdbf46d2f0a9da2b7e5fd320ba3271e62df3",
+  "output_sha256": "bcf51234a2c781a0c66876d09c84319cd91545e1ec78ee3a5fc1ff719a78fca8",
+  "member": "WakeupApi.o",
+  "binding": {
+    "free": "xiaole_sdk_free"
+  },
+  "deferred_pointer_capture_allowed": true,
+  "member_sha256": {
+    "nul": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "AecApi.o": "5576b1279d8cd094da5a27df06320523536e5bb97ea3c7aa8a46c26d39667e0d",
+    "Laec.o": "1d1d8a9e17f0a240aaafa4fc0fe28918f6651bb125e602d0c3c451580f8327f8",
+    "lx_aec_limit.o": "b730d7c711372280f44ce771da585e117b77e9ca246a02bda0d3a95d534aeadf",
+    "net.o": "d18eb99dc3ba2d9dfc2de2fe89c67d7c056faa44367b9cf146a8ad5c8bd52cf4",
+    "params.o": "2c4ef6263c102ebd8a99505bfc9ae21473cf6635e0b38f219d68a94a6b6ac1ea",
+    "WakeupApi.o": "79185adc5c99192c04330c06dd5acc6d43f6940a786266919f98e11eedf884b1",
+    "xj_MPO.o": "559965812b328ab57becd17e65f5ed0fa721967ae27e2cd4e1a5686a8b6d3b0c"
+  },
+  "helper_sha256": "8d83c9e400568d6271c0fde377845d78477c05a0bb88d93b5306477f5d37a03c",
+  "tool_sha256": {
+    "llvm-ar": "fc5b72c4eb22380620c9b00ef280352c44d89239dc9f36e89748c6ea371eae4b",
+    "llvm-nm": "12eb85d0d2f890e7ee425ed50646910fd344ae311d4f7b9e9848594f74fcf519",
+    "clang": "d4bc97cf421c1ccc373dd8924ce88720ff7457b3f1478d15df4aeda6ae923bce"
+  },
+  "delivery": "prebuilt-direct",
+  "library": "liblx_aec.a",
+  "runtime_limit_changed": true,
+  "runtime_change": "media_Task always processes valid blocks; no budget decrement; startup banner updated",
+  "prior_binding_input_sha256": "b8472b701f4e37e833636cc92ac0d1685c165d8f5dfde2d1830b7740fba7e009",
+  "ordinary_build_generates_library": false,
+  "device_long_run_verified": false
+}

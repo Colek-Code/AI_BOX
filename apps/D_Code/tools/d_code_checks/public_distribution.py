@@ -4,7 +4,13 @@ import subprocess
 
 CALENDAR_LICENSE_ROOT = "apps/D_Code/modules/applications/product_ui/features/time/calendar_data"
 REQUIRED_NOTICES = tuple(f"{CALENDAR_LICENSE_ROOT}/{name}" for name in (
-    "LICENSE.isee15.txt", "LICENSE.sxtwl.txt", "NOTICE.md"))
+    "LICENSE.isee15.txt", "LICENSE.sxtwl.txt", "NOTICE.md")) + (
+    "apps/D_Code/modules/applications/product_ui/assets/ASSET_SOURCE.license",
+    "apps/D_Code/modules/applications/legacy_ui/cipher_panel/assets/ASSET_SOURCE.license",
+    "apps/common/example/third_party/ugfx/src/gdisp/fonts/DejaVuSans.license",
+    "apps/common/example/third_party/ugfx/src/gdisp/fonts/DejaVuSerif.license",
+    "apps/D_Code/modules/applications/product_ui/assets/fonts/source/LICENSE",
+)
 
 
 def check_public_distribution(root: Path) -> None:

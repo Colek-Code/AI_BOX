@@ -1,7 +1,9 @@
-/** @file digicert_global_root_g2.h @brief Public trust anchor for the configured backend.
- * Source: https://knowledge.digicert.com/general-information/digicert-trusted-root-authority-certificates
+/**
+ * @file digicert_global_root_g2.h
+ * @brief 为当前后端提供公开信任根，属于证书配置，不包含设备私钥。
+ * 来源：https://knowledge.digicert.com/general-information/digicert-trusted-root-authority-certificates
  * DER SHA-256: cb3ccbb76031e5e0138f8dd39a23f9de47ffc35e43c1144cea27d46a5ab1cb5f
- * Self-signed root, not a server leaf certificate. Recheck CA when changing backend.
+ * @note 这是自签名根证书，并非服务端叶证书；更换后端时须重新核对 CA。
  */
 #ifndef D_DIGICERT_GLOBAL_ROOT_G2_H
 #define D_DIGICERT_GLOBAL_ROOT_G2_H

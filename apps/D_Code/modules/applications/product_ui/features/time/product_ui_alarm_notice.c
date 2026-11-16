@@ -1,4 +1,4 @@
-/** @file product_ui_alarm_notice.c @brief Alarm overlay retains the page beneath it until audio release. */
+/** @file product_ui_alarm_notice.c @brief UI 线程全局闹铃浮层及导航屏障，直到音频资源释放才撤下。 */
 #include "config/app_config.h"
 #if defined(D_LVGL_ENABLE) && (D_UI_TARGET == D_UI_PRODUCT)
 #include "product_ui_alarm_notice.h"
@@ -17,9 +17,18 @@ static struct {
     uint8_t restore_control_center;
 } s_notice;
 
+/**
+ * @brief 查询全局闹铃浮层是否正在阻断普通导航。
+ */
 uint8_t product_ui_alarm_notice_blocking(void) { return s_notice.root != NULL; }
+/**
+ * @brief 读取最近周期观察到的错过提醒标志。
+ */
 uint8_t product_ui_alarm_notice_pending(void) { return s_notice.pending; }
 
+/**
+ * @brief 撤销浮层输入并重置全部设备，仍按下的输入等待真实松手。
+ */
 static void product_ui_alarm_notice_reset_touch(void)
 {
     lv_indev_t *input = NULL;
@@ -31,6 +40,11 @@ static void product_ui_alarm_notice_reset_touch(void)
     }
 }
 
+/**
+ * @brief 按当前组代次及完整点击捕获停止、贪睡或重试意图。
+ * @param[in] event 浮层操作按钮事件，用户数据编码动作。
+ * @note 前一按钮失焦不能撤销已经转移到新按钮的按压所有权。
+ */
 static void product_ui_alarm_notice_input(lv_event_t *event)
 {
     lv_obj_t *object = lv_event_get_current_target(event);
@@ -38,7 +52,7 @@ static void product_ui_alarm_notice_input(lv_event_t *event)
     if (code == LV_EVENT_PRESSED) {
         s_notice.pressed = object; s_notice.pressed_group = s_notice.group; s_notice.armed = 1U;
     } else if (code == LV_EVENT_PRESS_LOST || code == LV_EVENT_INDEV_RESET || code == LV_EVENT_DEFOCUSED) {
-        /* The previous button may lose focus after the new one was pressed. */
+        /* 新按钮已按下之后，前一按钮仍可能收到失焦事件。 */
         if (s_notice.pressed == object) s_notice.armed = 0U;
     } else if (code == LV_EVENT_CLICKED) {
         uint8_t accepted = s_notice.armed && s_notice.pressed == object && s_notice.pressed_group == s_notice.group;
@@ -50,17 +64,29 @@ static void product_ui_alarm_notice_input(lv_event_t *event)
     }
 }
 
+/**
+ * @brief 按真实组能力更新按钮禁用状态。
+ * @param[in,out] object 有效按钮对象。
+ * @param[in] enabled 非零使能，零禁用。
+ */
 static void product_ui_alarm_notice_enable(lv_obj_t *object, uint8_t enabled)
 {
     if (enabled) lv_obj_remove_state(object, LV_STATE_DISABLED);
     else lv_obj_add_state(object, LV_STATE_DISABLED);
-    lv_obj_set_style_text_color(lv_obj_get_child(object, 0),
-        product_ui_color(enabled ? PRODUCT_UI_COLOR_TEXT : PRODUCT_UI_COLOR_TEXT_MUTED), 0);
 }
 
+/**
+ * @brief 仅在文字不同的情况下复制更新标签。
+ * @param[in,out] object 有效标签。
+ * @param[in] text 本次借用的 NUL 结尾文字。
+ */
 static void product_ui_alarm_notice_text(lv_obj_t *object, const char *text)
 { if (strcmp(lv_label_get_text(object), text)) lv_label_set_text(object, text); }
 
+/**
+ * @brief 重置触摸、删除浮层并归还下拉及自动灭屏占用。
+ * @param[in] restore 非零时按原打开状态恢复控制中心，静默退出不恢复。
+ */
 static void product_ui_alarm_notice_hide(uint8_t restore)
 {
     if (!s_notice.root) return;
@@ -74,6 +100,10 @@ static void product_ui_alarm_notice_hide(uint8_t restore)
     d_screen_request_composed_frame();
 }
 
+/**
+ * @brief 完整创建全局闹铃浮层后才取得下拉及屏幕占用。
+ * @return 成功返回 0，任一对象失败删除局部根并返回 -1。
+ */
 static int product_ui_alarm_notice_show(void)
 {
     lv_obj_t *root = lv_obj_create(lv_layer_sys());
@@ -97,6 +127,9 @@ static int product_ui_alarm_notice_show(void)
     snooze = product_ui_time_button(root, "5 分钟后提醒", product_ui_alarm_notice_input, (void *)(uintptr_t)ALARM_NOTICE_SNOOZE);
     retry = product_ui_time_button(root, "重试", product_ui_alarm_notice_input, (void *)(uintptr_t)ALARM_NOTICE_RETRY);
     if (!items || !stop || !snooze || !retry) goto fail;
+    product_ui_dialog_button_style(stop, PRODUCT_UI_DIALOG_PRIMARY);
+    product_ui_dialog_button_style(snooze, PRODUCT_UI_DIALOG_SECONDARY);
+    product_ui_dialog_button_style(retry, PRODUCT_UI_DIALOG_PRIMARY);
     lv_obj_set_width(items, 292); lv_label_set_long_mode(items, LV_LABEL_LONG_WRAP);
     lv_obj_set_size(stop, 140, 44); lv_obj_set_pos(stop, 12, 190);
     lv_obj_set_size(snooze, 148, 44); lv_obj_set_pos(snooze, 160, 190);
@@ -114,6 +147,10 @@ fail:
     lv_obj_delete(root); return -1;
 }
 
+/**
+ * @brief 消费单个浮层动作，以按压捕获组代次向服务提交或重试。
+ * @note 仅受理停止／贪睡，不立即关闭浮层，后续真实快照决定声音是否已释放。
+ */
 static void product_ui_alarm_notice_command(void)
 {
     product_ui_alarm_command_t command = {0};
@@ -129,6 +166,9 @@ static void product_ui_alarm_notice_command(void)
         result == D_ERR_BUSY ? "提醒组已变化，请重新操作" : "操作失败，请重试");
 }
 
+/**
+ * @brief 投影全局闹铃与错过状态，消费组动作并在真实资源归还后撤下浮层。
+ */
 void product_ui_alarm_notice_process(void)
 {
     product_ui_alarm_snapshot_t snapshot;
@@ -165,7 +205,7 @@ void product_ui_alarm_notice_process(void)
         if (product_ui_alarm_get_at(index, &record) != D_OK) continue;
         if (record.state != PRODUCT_UI_ALARM_WAIT_AUDIO && record.state != PRODUCT_UI_ALARM_RINGING && record.state != PRODUCT_UI_ALARM_STOPPING) continue;
         if (record.snooze_count >= PRODUCT_UI_ALARM_SNOOZE_LIMIT) can_snooze = 0U;
-        /* At most 16 * (7-byte time prefix + 23-byte label + newline). */
+        /* 最多十六条，每条为七字节时间前缀、二十三字节标签及换行，受固定缓冲约束。 */
         length += (uint16_t)lv_snprintf(lines + length, sizeof(lines) - length, "%02u:%02u  %s\n",
             record.rule.hour, record.rule.minute, record.rule.label);
     }

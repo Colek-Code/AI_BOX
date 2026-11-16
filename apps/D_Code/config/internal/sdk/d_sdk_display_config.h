@@ -1,6 +1,6 @@
 /**
  * @file d_sdk_display_config.h
- * @brief JieLi display geometry and screen synchronization configuration.
+ * @brief 解析杰理显示几何与屏幕同步配置，运行方向由显示平台负责。
  */
 
 #ifndef D_SDK_DISPLAY_CONFIG_H
@@ -40,7 +40,7 @@
 #define USE_LCD_TE                          1
 #endif
 
-/* LVGL landscape rotation is performed by the CPU, not LCD MADCTL. */
+/* LVGL 横屏变换由 CPU 执行，不依赖修改面板 MADCTL。 */
 #define HORIZONTAL_SCREEN                   0
 
 #endif /* D_SDK_DISPLAY_CONFIG_H */

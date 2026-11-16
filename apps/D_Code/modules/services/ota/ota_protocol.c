@@ -1,7 +1,13 @@
-/** @file ota_protocol.c @brief Validate before any SDK/Flash side effect. */
+/** @file ota_protocol.c @brief 在 SDK 或 Flash 副作用发生前校验协议与包前缀。 */
 #include "ota_protocol.h"
 #include <string.h>
 
+/**
+ * @brief 在容量内寻找字符串结束位置。
+ * @param[in] text 可空输入字符串。
+ * @param[in] capacity 最多检查字节数。
+ * @return 字符串长度；空指针或未在容量内结束时返回 capacity。
+ */
 static unsigned ota_bounded_length(const char *text, unsigned capacity)
 {
     unsigned length = 0U;
@@ -10,6 +16,13 @@ static unsigned ota_bounded_length(const char *text, unsigned capacity)
     return length;
 }
 
+/**
+ * @brief 将输入段按 ASCII 小写规则与预期字段名比较。
+ * @param[in] text 待比较字符段。
+ * @param[in] length 字符段字节数。
+ * @param[in] expected 零结尾小写预期字符串。
+ * @return 完全匹配返回 1，否则为 0。
+ */
 static int ota_ascii_equal(const char *text, unsigned length, const char *expected)
 {
     unsigned index;
@@ -22,6 +35,9 @@ static int ota_ascii_equal(const char *text, unsigned length, const char *expect
     return 1;
 }
 
+/**
+ * @brief 解析有界 HTTPS URL，不接受用户信息、片段或 IPv6 字面量；完整合同见 ota_protocol.h。
+ */
 d_err_t ota_url_parse(const char *url, ota_url_t *out)
 {
     unsigned length = ota_bounded_length(url, OTA_URL_CAPACITY);
@@ -70,6 +86,13 @@ d_err_t ota_url_parse(const char *url, ota_url_t *out)
     return D_OK;
 }
 
+/**
+ * @brief 将固定长度十进制数字解析为 uint32_t。
+ * @param[in] text 输入数字段。
+ * @param[in] length 数字字节数。
+ * @param[out] out 非空结果输出，仅成功时写入。
+ * @return 成功写入并返回 1；空串、非法数字或溢出返回 0。
+ */
 static int ota_decimal(const char *text, unsigned length, uint32_t *out)
 {
     uint32_t value = 0U;
@@ -84,6 +107,9 @@ static int ota_decimal(const char *text, unsigned length, uint32_t *out)
     return 1;
 }
 
+/**
+ * @brief 解析完整 HTTP 响应头并校验长度与编码约束；完整合同见 ota_protocol.h。
+ */
 d_err_t ota_http_parse(const char *headers, ota_http_response_t *out)
 {
     unsigned length = ota_bounded_length(headers, OTA_HEADER_CAPACITY);
@@ -133,6 +159,9 @@ d_err_t ota_http_parse(const char *headers, ota_http_response_t *out)
     return D_OK;
 }
 
+/**
+ * @brief 以多项式 0x1021 增量计算 CRC16；完整合同见 ota_protocol.h。
+ */
 uint16_t ota_crc16(uint16_t initial, const uint8_t *bytes, uint32_t length)
 {
     uint32_t index;
@@ -145,11 +174,24 @@ uint16_t ota_crc16(uint16_t initial, const uint8_t *bytes, uint32_t length)
     return initial;
 }
 
+/**
+ * @brief 读取两字节小端无符号整数。
+ * @param[in] bytes 至少两字节输入。
+ * @return 解析出的 16 位值。
+ */
 static uint16_t ota_u16(const uint8_t *bytes)
 { return (uint16_t)(bytes[0] | ((uint16_t)bytes[1] << 8U)); }
+/**
+ * @brief 读取四字节小端无符号整数。
+ * @param[in] bytes 至少四字节输入。
+ * @return 解析出的 32 位值。
+ */
 static uint32_t ota_u32(const uint8_t *bytes)
 { return bytes[0] | ((uint32_t)bytes[1] << 8U) | ((uint32_t)bytes[2] << 16U) | ((uint32_t)bytes[3] << 24U); }
 
+/**
+ * @brief 校验 UFW 前缀记录、头 CRC 与声明长度；完整合同见 ota_protocol.h。
+ */
 d_err_t ota_package_parse(const uint8_t prefix[OTA_PACKAGE_PREFIX],
                           uint32_t received_length, ota_package_t *out)
 {

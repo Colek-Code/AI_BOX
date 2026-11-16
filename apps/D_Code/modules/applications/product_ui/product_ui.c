@@ -1,7 +1,4 @@
-/**
- * @file product_ui.c
- * @brief Product UI main-page registration anchor.
- */
+/** @file product_ui.c @brief Product UI 启动装配、有限导航栈及串行 UI 周期。 */
 
 #include "config/app_config.h"
 #include "modules/applications/product_ui/features/time/product_ui_pomodoro_notice.h"
@@ -21,6 +18,7 @@
 #include "modules/applications/product_ui/shell/home/product_ui_home.h"
 #include "modules/applications/product_ui/debug/product_ui_perf.h"
 #include "modules/applications/product_ui/runtime/service_registry/product_ui_service_registry.h"
+#include "modules/applications/product_ui/runtime/preferences/product_ui_orientation.h"
 #include "modules/applications/product_ui/features/time/product_ui_time_domain.h"
 #include "modules/applications/product_ui/features/time/product_ui_clock.h"
 #include "modules/applications/product_ui/features/media/product_ui_media_storage.h"
@@ -44,7 +42,7 @@
 static OS_MUTEX s_status_mutex;
 static uint8_t s_status_mutex_ready;
 static uint8_t s_status_dirty;
-/* Capabilities become visible only after a real service publishes them. */
+/* 能力只在真实服务发布之后才对 UI 可见。 */
 static product_ui_status_t s_status;
 
 #define PRODUCT_UI_NAVIGATION_DEPTH 8U
@@ -52,6 +50,11 @@ static product_ui_status_t s_status;
 static int s_navigation_stack[PRODUCT_UI_NAVIGATION_DEPTH];
 static uint8_t s_navigation_depth;
 
+/**
+ * @brief 遍历已注册模块，查找标识匹配且拥有页面的页类型。
+ * @param[in] module_id 调用链保证非空的模块标识。
+ * @return 找到返回页面类型，否则为 PAGE_TYPE_INVALID。
+ */
 static int product_ui_find_module_page(const char *module_id)
 {
     const d_ui_module_t *module;
@@ -68,6 +71,9 @@ static int product_ui_find_module_page(const char *module_id)
     return PAGE_TYPE_INVALID;
 }
 
+/**
+ * @brief 首页进入时重置导航起点并附着首页状态。
+ */
 static void product_ui_main_enter(void)
 {
     product_ui_navigation_reset();
@@ -88,6 +94,10 @@ static const page_desc_t s_product_ui_desc = {
     .ops = &s_product_ui_ops,
 };
 
+/**
+ * @brief 建立状态互斥量及可用的平台状态生产者，触发首次状态刷新。
+ * @return 成功返回 0；服务发布、互斥量或平台适配初始化失败返回 -1。
+ */
 static int product_ui_status_runtime_init(void)
 {
 #if !(D_BOARD_IS_GC9307)
@@ -112,6 +122,9 @@ static int product_ui_status_runtime_init(void)
     return 0;
 }
 
+/**
+ * @brief 串行装配主题、服务投影、业务域及平台适配并注册首页。
+ */
 int product_ui_register(void)
 {
     product_ui_navigation_reset();
@@ -132,17 +145,16 @@ int product_ui_register(void)
     if (product_ui_settings_service_init() != 0) {
         return -1;
     }
-    /* A storage/worker failure only disables saves; the desktop still opens. */
+    /* 存储或 worker 失败只禁用保存，桌面仍允许打开。 */
     (void)product_ui_appearance_init();
+    product_ui_orientation_init();
 #if (D_BOARD_IS_GC9307)
     if (product_ui_settings_gc9307_init() != 0) {
         return -1;
     }
 #if (D_FEATURE_WIFI)
-    /*
-     * Connection is independent of Settings. Failure only marks CONNECTION
-     * UNAVAILABLE — never rolls back Settings or aborts Product UI.
-     */
+    /* 连接域独立于设置域；失败只发布 CONNECTION 不可用，
+     * 不回滚设置服务，也不终止 Product UI。 */
     if (product_ui_connection_gc9307_init() != 0) {
         (void)product_ui_service_publish(PRODUCT_UI_SERVICE_CONNECTION,
                                          PRODUCT_UI_SERVICE_UNAVAILABLE, 0,
@@ -166,7 +178,7 @@ int product_ui_register(void)
                                PRODUCT_UI_SERVICE_UNAVAILABLE, 0, 0);
     product_ui_service_publish(PRODUCT_UI_SERVICE_MEDIA,
                                PRODUCT_UI_SERVICE_UNAVAILABLE, 0, 0);
-    /* Registers only when a real audio backend exists; no-op today. */
+    /* 本地音乐开启时注册传输控制命令。 */
     (void)product_ui_media_control_try_register();
     if (product_ui_status_runtime_init() != 0) {
         return -1;
@@ -174,6 +186,9 @@ int product_ui_register(void)
     return page_manager_register(&s_product_ui_desc);
 }
 
+/**
+ * @brief 核对设置模块已注册可用页面。
+ */
 int product_ui_prepare_pages(void)
 {
     int page_type;
@@ -186,10 +201,16 @@ int product_ui_prepare_pages(void)
     return 0;
 }
 
+/**
+ * @brief 切页前关闭浮层并收敛旧页面动效，成功后应用进入效果。
+ * @param[in] page_type 目标页面类型，合法性及准备由页面管理器校验。
+ * @param[in] is_back 非零标记返回导航，影响新页面进入效果。
+ * @return 原样返回页面管理器切换结果。
+ */
 static int product_ui_switch_to_page(int page_type, uint8_t is_back)
 {
     int result;
-    /* page_manager_switch_to owns target validation and preparation. */
+    /* 目标校验及准备由 page_manager_switch_to 负责。 */
     product_ui_control_center_close_for_page_transition();
     product_ui_feedback_clear();
     product_ui_motion_cancel_tree(page_manager_get_current_container());
@@ -199,12 +220,18 @@ static int product_ui_switch_to_page(int page_type, uint8_t is_back)
     return result;
 }
 
+/**
+ * @brief 清空有限导航栈，在首页进入或 UI 注册时建立导航起点。
+ */
 void product_ui_navigation_reset(void)
 {
     memset(s_navigation_stack, 0, sizeof(s_navigation_stack));
     s_navigation_depth = 0U;
 }
 
+/**
+ * @brief 在通知与维护允许时切到具名模块，成功后保存来源页面。
+ */
 int product_ui_navigate_to(const char *module_id)
 {
     int current_page;
@@ -245,6 +272,9 @@ int product_ui_navigate_to(const char *module_id)
     return 0;
 }
 
+/**
+ * @brief 返回导航栈顶页面，空栈时回首页。
+ */
 int product_ui_navigation_back(void)
 {
     int target_page;
@@ -272,11 +302,17 @@ int product_ui_navigation_back(void)
     return 0;
 }
 
+/**
+ * @brief 通过统一导航入口打开具名模块。
+ */
 int product_ui_open_module(const char *module_id)
 {
     return product_ui_navigate_to(module_id);
 }
 
+/**
+ * @brief 规范化状态输入，内容变化时保存值副本并置脏。
+ */
 product_ui_status_result_e product_ui_status_update(
     const product_ui_status_t *status)
 {
@@ -301,6 +337,9 @@ product_ui_status_result_e product_ui_status_update(
     return result;
 }
 
+/**
+ * @brief 复制当前规范化状态。
+ */
 void product_ui_status_snapshot(product_ui_status_t *status)
 {
     if (status == NULL) {
@@ -315,6 +354,9 @@ void product_ui_status_snapshot(product_ui_status_t *status)
     }
 }
 
+/**
+ * @brief 原子取走并清除状态脏标志。
+ */
 uint8_t product_ui_status_take_dirty(void)
 {
     uint8_t is_dirty;
@@ -330,6 +372,9 @@ uint8_t product_ui_status_take_dirty(void)
     return is_dirty;
 }
 
+/**
+ * @brief 查询模块注册表中是否存在指定且拥有页面的模块。
+ */
 uint8_t product_ui_module_available(const char *module_id)
 {
     if (module_id == NULL) {
@@ -338,12 +383,18 @@ uint8_t product_ui_module_available(const char *module_id)
     return product_ui_find_module_page(module_id) != PAGE_TYPE_INVALID;
 }
 
+/**
+ * @brief 在 UI 执行器中推进公共状态、方向事务、通知、控制中心及状态栏。
+ */
 void product_ui_process(uint32_t elapsed_ms)
 {
     product_ui_status_t status;
     uint8_t refresh_required;
+    product_ui_media_control_sync();
+    /* 维护期间仍须推进已经受理的方向／保存事务。 */
+    product_ui_orientation_process();
 #if (D_BOARD_IS_GC9307) && (D_FEATURE_WIFI)
-    /* Connection producer: independent of control-center open state. */
+    /* 连接状态生产者独立于控制中心打开状态。 */
     static uint32_t s_connection_sync_elapsed_ms;
     const uint32_t connection_sync_period_ms = 200U;
 #endif
@@ -353,11 +404,8 @@ void product_ui_process(uint32_t elapsed_ms)
     product_ui_status_gc9307_process(elapsed_ms);
     product_ui_settings_gc9307_process();
 #if (D_FEATURE_WIFI)
-    /*
-     * Publish CONNECTION snapshot on a short period so Settings and other
-     * consumers are not stale when the control center is closed. Adapter
-     * itself skips full wifi_service_get_status when version is unchanged.
-     */
+    /* 周期发布 CONNECTION 快照，让控制中心关闭时设置及其他消费者仍可更新；
+     * 版本未变时，适配层自行跳过完整 WiFi 状态采样。 */
     s_connection_sync_elapsed_ms += elapsed_ms;
     if (s_connection_sync_elapsed_ms >= connection_sync_period_ms) {
         s_connection_sync_elapsed_ms = 0U;
@@ -373,8 +421,7 @@ void product_ui_process(uint32_t elapsed_ms)
 #endif
     product_ui_alarm_notice_process();
 #if D_FEATURE_OTA
-    /* After maintenance releases, a due alarm takes precedence over the OTA
-     * result panel. The underlying settings page remains available afterward. */
+    /* 维护释放后，到期闹钟优先于 OTA 结果面板；下层设置页随后仍可使用。 */
     if (product_ui_alarm_notice_blocking()) product_ui_ota_notice_discard();
 #endif
     product_ui_control_center_refresh();

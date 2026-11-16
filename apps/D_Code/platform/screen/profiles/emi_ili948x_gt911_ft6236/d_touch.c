@@ -1,3 +1,8 @@
+/**
+ * @file d_touch.c
+ * @brief 在 EMI 触摸任务中探测并读取 GT911/FT6236，UI 读取端另执行屏幕唤醒过滤。
+ */
+
 #include "config/app_config.h"
 
 #if defined(D_LCD_ENABLE) && defined(D_LCD_EMI_ILI948X_ENABLE)
@@ -28,11 +33,19 @@ enum {
     TOUCH_TYPE_FT6236 = 2,
 };
 
+/**
+ * @brief 在中断中只通知触摸读取任务，不读取总线或调用 UI。
+ */
 static void touch_irq_cb(void)
 {
     os_sem_post(&s_touch_sem);
 }
 
+/**
+ * @brief 向已打开 IIC 提交候选写命令并检查地址应答。
+ * @param[in] wrcmd 候选写命令字节。
+ * @return 地址被 SDK 接受为 1，否则为 0；结束时发送 STOP。
+ */
 static int iic_probe_wrcmd(u8 wrcmd)
 {
     int ack = 0;
@@ -44,6 +57,10 @@ static int iic_probe_wrcmd(u8 wrcmd)
     return ack;
 }
 
+/**
+ * @brief 为有效触摸中断脚设置输入、上拉及数字输入。
+ * @param[in] pin 板级 GPIO；未配置的 -1 值不处理。
+ */
 static void touch_int_prepare_input(u32 pin)
 {
     if (pin == (u32)-1) {
@@ -55,6 +72,11 @@ static void touch_int_prepare_input(u32 pin)
     gpio_set_die(pin, 1);
 }
 
+/**
+ * @brief 沿 SDK 例程的 INT 电平时序复位 GT911 并恢复中断输入。
+ * @param[in] pdata 板级描述符；NULL 或缺少必需引脚时不执行。
+ * @note 包含任务延时，只在启动阶段调用；当前值决定既有候选地址选择，不在此改地址策略。
+ */
 static void gt911_reset_sequence(const struct lcd_platform_data *pdata)
 {
     if (!pdata) {
@@ -77,6 +99,11 @@ static void gt911_reset_sequence(const struct lcd_platform_data *pdata)
     touch_int_prepare_input(pdata->touch_int_pin);
 }
 
+/**
+ * @brief 按既有延时复位 FT6236，专用复位脚缺失时借用面板复位脚。
+ * @param[in] pdata 板级描述符；NULL 或无可用复位脚时不处理。
+ * @note 上层负责在共享复位的情形决定是否允许调用。
+ */
 static void ft6236_reset_sequence(const struct lcd_platform_data *pdata)
 {
     if (!pdata) {
@@ -92,6 +119,14 @@ static void ft6236_reset_sequence(const struct lcd_platform_data *pdata)
     os_time_dly(10);
 }
 
+/**
+ * @brief 以两字节地址提交一个寄存器字节并发送 STOP。
+ * @param[in] wrcmd 写命令字节。
+ * @param[in] reg 16 位寄存器地址，高字节在前。
+ * @param[in] val 待写字节。
+ * @return 各发送步骤未报告错误为 1，任一步报告错误为 0。
+ * @note 仅触摸任务/初始化路径串行使用已打开的 IIC，不在此处理业务状态。
+ */
 static int iic_write_u16addr_u8(u8 wrcmd, u16 reg, u8 val)
 {
     int ok = 1;
@@ -121,6 +156,14 @@ exit:
     return ok;
 }
 
+/**
+ * @brief 提交两字节寄存器地址及读命令，再读取一个字节。
+ * @param[in] wrcmd 写命令字节。
+ * @param[in] rdcmd 读命令字节。
+ * @param[in] reg 16 位寄存器地址。
+ * @param[out] val 有效的一字节输出；接收失败时不可据返回 1 推断该值已更新。
+ * @return 地址和读命令未报告发送错误为 1；发送失败为 0。接收 ioctl 返回值当前未纳入此结果。
+ */
 static int iic_read_u16addr_u8(u8 wrcmd, u8 rdcmd, u16 reg, u8 *val)
 {
     int ok = 1;
@@ -151,6 +194,13 @@ exit:
     return ok;
 }
 
+/**
+ * @brief 以单字节地址提交一个寄存器字节并发送 STOP。
+ * @param[in] wrcmd 写命令字节。
+ * @param[in] reg 8 位寄存器地址。
+ * @param[in] val 待写字节。
+ * @return 发送步骤未报告错误为 1，否则为 0。
+ */
 static int iic_write_u8addr_u8(u8 wrcmd, u8 reg, u8 val)
 {
     int ok = 1;
@@ -175,6 +225,14 @@ exit:
     return ok;
 }
 
+/**
+ * @brief 提交单字节寄存器地址及读命令，再读取一个字节。
+ * @param[in] wrcmd 写命令字节。
+ * @param[in] rdcmd 读命令字节。
+ * @param[in] reg 8 位寄存器地址。
+ * @param[out] val 有效的一字节输出，失败时可能保持旧值。
+ * @return 地址和读命令未报告发送错误为 1，否则为 0；接收 ioctl 错误未纳入现有返回。
+ */
 static int iic_read_u8addr_u8(u8 wrcmd, u8 rdcmd, u8 reg, u8 *val)
 {
     int ok = 1;
@@ -200,6 +258,12 @@ exit:
     return ok;
 }
 
+/**
+ * @brief 使用一组读写命令读取三个 PID 字节并匹配 911。
+ * @param[in] wrcmd 候选写命令。
+ * @param[in] rdcmd 候选读命令。
+ * @return 三个读取路径返回真且字节匹配时为 1，否则为 0。
+ */
 static int gt911_detect_with_addr(u8 wrcmd, u8 rdcmd)
 {
     u8 b0 = 0, b1 = 0, b2 = 0;
@@ -219,6 +283,10 @@ static int gt911_detect_with_addr(u8 wrcmd, u8 rdcmd)
     return 0;
 }
 
+/**
+ * @brief 依次试验既有 GT911 命令组，并保存首个匹配组。
+ * @return 识别成功为 1；两组均未匹配为 0。
+ */
 static int gt911_detect(void)
 {
     // SDK 例程常用 0x28/0x29；部分板子可能是 0xBA/0xBB
@@ -235,6 +303,10 @@ static int gt911_detect(void)
     return 0;
 }
 
+/**
+ * @brief 按既有命令读取 FT 芯片 ID 并匹配当前支持值。
+ * @return ID 为 0x64 或 0x36 且读取路径未报告发送错误时为 1，否则为 0。
+ */
 static int ft6236_detect(void)
 {
     const u8 FT_WRCMD = 0x70;
@@ -250,6 +322,10 @@ static int ft6236_detect(void)
     return 0;
 }
 
+/**
+ * @brief 执行原 FT6236 阈值、周期和中断模式寄存器序列并读回诊断。
+ * @note 保留所有配置值；当前忽略各写入/读回错误，不作为独立配置成功确认。
+ */
 static void ft6236_init_regs(void)
 {
     // 对齐 apps/common/ui/touch_panel/ft6236.c 的初始化写寄存器流程
@@ -273,6 +349,10 @@ static void ft6236_init_regs(void)
     printf("[TOUCH] FT MODE=%u\n", read_data);
 }
 
+/**
+ * @brief 读取 GT911 状态及首点，裁剪到已登记面板尺寸并更新缓存。
+ * @note 沿现有 bit7 判定接触路径，不额外检查低位点数；读取路径提前失败时保留旧缓存，不提供 HYN 式失效取消。
+ */
 static void gt911_read_and_print(void)
 {
     u8 status = 0;
@@ -312,6 +392,10 @@ static void gt911_read_and_print(void)
     }
 }
 
+/**
+ * @brief 按 FT 状态字节读取首点并更新裁剪后的原生缓存。
+ * @note 状态字节为零时清接触；读取提前失败保留旧状态，首次按下时才打印坐标。
+ */
 static void ft6236_read_and_print(void)
 {
     const u8 FT_WRCMD = 0x70;
@@ -352,10 +436,7 @@ static void ft6236_read_and_print(void)
 }
 
 /**
- * @brief LVGL 触摸接口：获取触摸坐标和状态
- * @param x 输出 X 坐标
- * @param y 输出 Y 坐标
- * @param status 输出触摸状态（1=按下，0=释放）
+ * @brief 读取最近原生坐标并执行唤醒过滤；完整合同见 d_touch.h。
  */
 void get_touch_x_y_status(s16 *x, s16 *y, unsigned char *status)
 {
@@ -367,6 +448,11 @@ void get_touch_x_y_status(s16 *x, s16 *y, unsigned char *status)
     if (status) *status = filtered_status;
 }
 
+/**
+ * @brief 在中断或既有超时唤醒后，按已识别型号读取触摸。
+ * @param[in] priv SDK 任务参数，当前未使用。
+ * @note 常驻任务；型号未识别时不读取，不在此调用 LVGL。
+ */
 static void d_touch_task(void *priv)
 {
     (void)priv;
@@ -381,6 +467,13 @@ static void d_touch_task(void *priv)
     }
 }
 
+/**
+ * @brief 在初始化失败且读取任务尚未建立时释放本次中断、信号量和 IIC。
+ * @param[in] err 要传播的初始化错误。
+ * @param[in] wakeup_hdl 本次取得的中断注册句柄，可为 NULL。
+ * @return 原样返回 err。
+ * @note 只用于初始化补偿，不提供运行期任务结束或回调在途排空确认。
+ */
 static d_err_t d_touch_cleanup(d_err_t err, void *wakeup_hdl)
 {
     if (wakeup_hdl != NULL) {
@@ -401,6 +494,9 @@ static d_err_t d_touch_cleanup(d_err_t err, void *wakeup_hdl)
     return err;
 }
 
+/**
+ * @brief 准备 EMI 触摸设备与常驻任务；完整合同见 d_touch.h。
+ */
 d_err_t d_touch_init(const struct lcd_platform_data *pdata)
 {
     void *touch_wakeup_hdl;

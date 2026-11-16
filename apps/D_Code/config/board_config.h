@@ -1,3 +1,8 @@
+/**
+ * @file board_config.h
+ * @brief 选择硬件板型与产品默认方向，不承载运行期页面或媒体策略。
+ */
+
 #ifndef D_BOARD_CONFIG_H
 #define D_BOARD_CONFIG_H
 
@@ -22,5 +27,8 @@
  *-------------------------------------------------------------------------*/
 
 #define D_BOARD_TARGET  D_BOARD_COPY_GC9307_HYN
+
+/* 产品默认方向：0 = 当前正常方向，180 = 上下翻转；用户保存值优先。 */
+#define D_SCREEN_DEFAULT_ROTATION_DEGREES  0
 
 #endif /* D_BOARD_CONFIG_H */

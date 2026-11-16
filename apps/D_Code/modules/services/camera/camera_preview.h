@@ -1,6 +1,6 @@
 /**
  * @file camera_preview.h
- * @brief Nonblocking camera requests; completion is independent of errors.
+ * @brief 非阻塞相机会话接口，分别确认受理、错误与清理完成。
  * @author D_Code
  * @date 2026-09-11
  */
@@ -71,51 +71,55 @@ typedef struct {
 
 /**
  * @brief 启动阶段串行调用一次，创建后台对象但不打开镜头。
- * @return 实际初始化结果；失败结果保留到重启，不循环创建线程或监督对象。
- * 读取 is_init_complete 判断初始化是否完成，不能用错误码充当完成标志。
+ * @return 实际初始化结果；失败保留到重启，不循环创建后台对象。
+ * @note 以 is_init_complete 判断是否完成，错误码不能充当完成标志。
  */
 d_err_t camera_preview_init(void);
 /**
- * @brief 非阻塞提交预览请求；同一有效请求重复调用返回原会话号。
- * @param session 非空输出；仅 D_OK 时写入。旧清理完成前不接受新会话。
- * @return D_OK 为已接受，不代表已经出图；BUSY 为清理/关机禁止，IO 为需重启的FAULT。
- * 未初始化返回 NOT_READY；实际阶段、错误及操作可用性通过快照读取。
+ * @brief 非阻塞受理预览请求，重复有效请求复用原会话。
+ * @param[out] session 非空输出，仅 D_OK 时写入非零会话编号。
+ * @return D_OK 表示受理；空输出、未初始化、清理或关机阻塞、FAULT 返回对应错误。
+ * @note 受理不等于出图；阶段和错误通过快照读取。
  */
 d_err_t camera_preview_request_start(uint32_t *session);
 /**
- * @brief 非阻塞撤销指定会话；过期会话号及重复停止不会取消后续新会话。
- * @param session 开始接口返回的会话号。
- * @param reason 首次停止的业务原因；重复请求不延长停止期限。
- * 返回只表示请求处理完毕，资源释放仍由后台完成。
+ * @brief 非阻塞撤销指定会话。
+ * @param[in] session 开始时返回的会话编号，旧会话不会撤销新会话。
+ * @param[in] reason 首次停止的业务原因，重复请求不延长期限。
+ * @note 函数返回不表示资源已释放，清理由后台完成。
  */
 void camera_preview_request_stop(uint32_t session, camera_preview_stop_e reason);
 /**
- * @brief 读取有界元数据及当前时刻的超时诊断，不调用SDK或等待。
- * @param snapshot 输出快照；NULL无操作。完成事实与错误/超时分别判断。
+ * @brief 复制有界元数据及当前时刻的期限诊断。
+ * @param[out] snapshot 接收快照；为空时不处理。
+ * @note 不调用 SDK 或等待；清理完成、错误与超时须分别判断。
  */
 void camera_preview_get_snapshot(camera_preview_snapshot_t *snapshot);
 /**
- * @brief 由LVGL线程的单个显示消费者取走最新帧，在临界区外复制。
- * @param session 当前页面持有的会话号。
- * @param destination 页面自有固定RGB565缓冲，不向后台交付LVGL对象。
- * @param capacity 至少 CAMERA_PREVIEW_RGB_BYTES 字节。
- * @param sequence 输入上次成功帧号，首次置0；仅D_OK时更新为本次帧号。
- * @return D_OK复制成功；NOT_READY表示无新帧、过期或复制途中取消；INVALID_ARG为参数/容量错误。
- * 失败时目标缓冲也可能已写入，不保证原内容；调用者必须忽略失败结果，并在绘制前
- * 再确认会话仍有效。函数不等待SDK，也不向多个消费者广播每一帧。
+ * @brief 由 LVGL 单个显示消费者领取最新帧，在临界区外复制。
+ * @param[in] session 当前页面持有的会话编号。
+ * @param[out] destination 页面自有的 RGB565 输出缓冲。
+ * @param[in] capacity 缓冲字节容量，至少 CAMERA_PREVIEW_RGB_BYTES。
+ * @param[in,out] sequence 上次成功帧号，首次置 0；仅成功时更新。
+ * @return D_OK 表示复制成功；无新帧、会话过期或复制中取消返回 D_ERR_NOT_READY；参数或容量无效返回 D_ERR_INVALID_ARG。
+ * @note 失败时目标可能已写入，调用者必须忽略结果并在绘制前确认会话仍有效；不等待 SDK，不向多个消费者广播每帧。
  */
 d_err_t camera_preview_copy_latest(uint32_t session, void *destination,
                                    uint32_t capacity, uint32_t *sequence);
 /**
- * @brief 后台等待服务整体停止；不自动提交停止，也不限定某个历史会话号。
- * @param timeout_ms 最多等待时间，0只检查一次。禁止在LVGL回调中调用。
- * @return D_OK为清理完成，TIMEOUT仍未完成，IO为FAULT。超时不回收在途对象。
- * 需要防止等待期间产生新会话时，先使用shutdown_begin设置启动禁止。
+ * @brief 在后台限时等待服务整体清理完成，不自动提交停止。
+ * @param[in] timeout_ms 最多等待毫秒数，0 仅检查一次。
+ * @return 清理完成返回 D_OK；FAULT 返回 D_ERR_IO；超时返回 D_ERR_TIMEOUT。
+ * @note 禁止在 LVGL 回调调用；超时不回收在途对象。防止等待时产生新会话需先调用 shutdown_begin。
  */
 d_err_t camera_preview_wait_stopped(uint32_t timeout_ms);
-/** @brief 关机编排入口：禁止新启动并撤销当前预览；本函数不等待。 */
+/**
+ * @brief 禁止新启动并撤销当前预览，不等待后台收尾。
+ */
 void camera_preview_shutdown_begin(void);
-/** @brief 关机取消时仅解除禁止；不重启预览，也不清除STOPPING/FAULT事实。 */
+/**
+ * @brief 取消关机禁止，不重新启动预览或清除 STOPPING、FAULT。
+ */
 void camera_preview_shutdown_abort(void);
 
 #endif

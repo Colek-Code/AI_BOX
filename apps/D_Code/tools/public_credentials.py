@@ -91,6 +91,11 @@ def sanitize(path: str, data: bytes, policy: dict) -> tuple[bytes, list[dict], s
 
 def scan(path: str, data: bytes, policy: dict) -> list[dict]:
     findings = []
+    # 手工命名的记录也必须拦截，不能只靠文件后缀或制造输入路径。
+    if b'Q1|' in data:
+        for match in re.finditer(rb'Q1\|[A-Za-z0-9]{16}\|[A-Za-z0-9_-]+', data):
+            findings.append({'path': path, 'line': data.count(b'\n', 0, match.start()) + 1,
+                             'kind': 'factory_record_payload'})
     lower = data.lower()
     signals = (any(p in data for p in (b'ghp_',b'gho_',b'ghu_',b'ghs_',b'ghr_')),
                b'github_pat_' in data,b'sk-' in data,b'AKIA' in data,b'bearer' in lower,

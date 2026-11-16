@@ -1,7 +1,4 @@
-/**
- * @file product_ui_time_domain.c
- * @brief Static implementation of the Product UI shared time domain.
- */
+/** @file product_ui_time_domain.c @brief UI 串行持有的墙钟与日程状态，闹钟记录仍由绑定运行时持有。 */
 
 #include "product_ui_time_domain.h"
 #include "modules/applications/product_ui/features/time/product_ui_time_domain_internal.h"
@@ -25,13 +22,34 @@ typedef struct {
 static product_ui_time_domain_state_t s_time_domain;
 static const product_ui_time_alarm_backend_t *s_alarm_backend;
 static uint32_t s_alarm_generation;
+/* 缓存代次位于可清零状态之外，防止显式 init／RESET 复用活页面的旧键；
+ * 这是运行时 UI 缓存身份，不是 VM 数据。 */
+static uint32_t s_event_revision;
 
+/**
+ * @brief 推进独立日程缓存代次并跳过零。
+ */
+static void product_ui_time_domain_mark_events_changed(void)
+{
+    s_event_revision++;
+    if (s_event_revision == 0U) {
+        s_event_revision = 1U;
+    }
+}
+
+/**
+ * @brief 绑定静态闹钟后端并重置已观察的闹钟代次。
+ */
 void product_ui_time_domain_bind_alarms(const product_ui_time_alarm_backend_t *backend)
 {
     s_alarm_backend = backend;
     s_alarm_generation = 0U;
 }
 
+/**
+ * @brief 清空 UI 自有域并设置总内容代次，同时推进独立日程缓存代次。
+ * @param[in] generation 调用方已经处理回绕的非零总内容代次。
+ */
 static void product_ui_time_domain_clear(uint32_t generation)
 {
     memset(&s_time_domain, 0, sizeof(s_time_domain));
@@ -40,13 +58,20 @@ static void product_ui_time_domain_clear(uint32_t generation)
     s_time_domain.next_event_id = 1U;
     s_time_domain.capability = PRODUCT_UI_TIME_CAPABILITY_UNKNOWN;
     s_time_domain.unavailable_reason = PRODUCT_UI_TIME_UNAVAILABLE_NOT_PROBED;
+    product_ui_time_domain_mark_events_changed();
 }
 
+/**
+ * @brief 重置 UI 拥有的墙钟能力及日程 RAM 缓存，保留已绑定的持久闹钟。
+ */
 void product_ui_time_domain_init(void)
 {
     product_ui_time_domain_clear(1U);
 }
 
+/**
+ * @brief 在首次访问时建立默认 UI 域，不重新初始化已有域。
+ */
 static void product_ui_time_domain_ensure_initialized(void)
 {
     if (!s_time_domain.initialized) {
@@ -54,6 +79,9 @@ static void product_ui_time_domain_ensure_initialized(void)
     }
 }
 
+/**
+ * @brief 推进域总内容代次并跳过零。
+ */
 static void product_ui_time_domain_mark_changed(void)
 {
     s_time_domain.generation++;
@@ -62,6 +90,11 @@ static void product_ui_time_domain_mark_changed(void)
     }
 }
 
+/**
+ * @brief 在已使用日程槽中查找编号。
+ * @param[in] id 待查日程编号。
+ * @return 找到返回物理槽下标，否则返回 -1。
+ */
 static int product_ui_time_find_event(uint32_t id)
 {
     uint32_t index;
@@ -74,6 +107,10 @@ static int product_ui_time_find_event(uint32_t id)
     return -1;
 }
 
+/**
+ * @brief 查找第一个未使用的日程槽。
+ * @return 空槽下标；全部占用返回 -1。
+ */
 static int product_ui_time_find_free_event(void)
 {
     uint32_t index;
@@ -85,6 +122,11 @@ static int product_ui_time_find_free_event(void)
     return -1;
 }
 
+/**
+ * @brief 在固定次数内分配未使用且非零的日程编号。
+ * @return 可用编号；找不到时为零。
+ * @note 候选计数会回绕并跳过零，不按编号大小表达时间顺序。
+ */
 static uint32_t product_ui_time_allocate_event_id(void)
 {
     uint32_t attempt;
@@ -101,6 +143,13 @@ static uint32_t product_ui_time_allocate_event_id(void)
     return 0U;
 }
 
+/**
+ * @brief 验证日程、分配编号及空槽，清洗有限文字后复制到 RAM。
+ * @param[in] input 借用日程值；编号为零请求新编号。
+ * @param[out] affected_id 调用方保证非空，成功时接收保存编号。
+ * @return 成功返回 TIME_OK；无效为 INVALID_ARGUMENT，编号或槽耗尽为 CAPACITY。
+ * @note 失败可能已消耗候选编号，但不发布记录及日程代次；调用方成功后统一推进代次。
+ */
 static product_ui_time_result_e product_ui_time_upsert_event(
     const product_ui_calendar_event_t *input, uint32_t *affected_id)
 {
@@ -133,6 +182,11 @@ static product_ui_time_result_e product_ui_time_upsert_event(
     return PRODUCT_UI_TIME_OK;
 }
 
+/**
+ * @brief 验证能力与原因组合，非可用状态下撤销墙钟值。
+ * @param[in] command 调用链保证非空的能力命令。
+ * @return 成功返回 TIME_OK；非法组合返回 INVALID_ARGUMENT 且不修改状态。
+ */
 static product_ui_time_result_e product_ui_time_set_capability(
     const product_ui_time_capability_command_t *command)
 {
@@ -167,6 +221,13 @@ static product_ui_time_result_e product_ui_time_set_capability(
     return PRODUCT_UI_TIME_OK;
 }
 
+/**
+ * @brief 在可选输出中记录命令返回值、当前代次及受影响编号。
+ * @param[out] result 可为空的命令结果。
+ * @param[in] status 已确定的执行结果。
+ * @param[in] affected_id 本次涉及的记录编号，无对应记录时为零。
+ * @return 原样返回 status。
+ */
 static product_ui_time_result_e product_ui_time_finish_command(
     product_ui_time_domain_command_result_t *result,
     product_ui_time_result_e status,
@@ -180,6 +241,12 @@ static product_ui_time_result_e product_ui_time_finish_command(
     return status;
 }
 
+/**
+ * @brief 处理重置、能力、墙钟设置及墙钟失效命令。
+ * @param[in] command 有效命令指针。
+ * @param[out] handled 是否由本分支识别该命令，与成功与否分开。
+ * @return 处理结果；非系统命令返回 TIME_OK 并清除 handled。
+ */
 static product_ui_time_result_e product_ui_time_execute_system(
     const product_ui_time_domain_command_t *command, uint8_t *handled)
 {
@@ -214,6 +281,13 @@ static product_ui_time_result_e product_ui_time_execute_system(
     }
 }
 
+/**
+ * @brief 将闹钟变更同步交给绑定运行时，域内不保存副本。
+ * @param[in] command 有效命令指针。
+ * @param[out] affected_id 供后端写入的记录编号。
+ * @param[out] handled 命令是否属于闹钟变更。
+ * @return 识别且有后端时返回后端结果；缺后端为 UNAVAILABLE；非闹钟命令为 TIME_OK。
+ */
 static product_ui_time_result_e product_ui_time_execute_alarm(
     const product_ui_time_domain_command_t *command, uint32_t *affected_id,
     uint8_t *handled)
@@ -226,6 +300,13 @@ static product_ui_time_result_e product_ui_time_execute_alarm(
         s_alarm_backend->execute(command, affected_id) : PRODUCT_UI_TIME_ERR_UNAVAILABLE;
 }
 
+/**
+ * @brief 处理日程新增更新、删除或完成位变更。
+ * @param[in] command 有效命令指针。
+ * @param[out] affected_id 受影响日程编号；失败时不保证为零。
+ * @param[out] handled 是否由日程分支识别命令。
+ * @return 对应执行结果；非日程命令返回 TIME_OK 并清除 handled。
+ */
 static product_ui_time_result_e product_ui_time_execute_event(
     const product_ui_time_domain_command_t *command, uint32_t *affected_id,
     uint8_t *handled)
@@ -263,6 +344,9 @@ static product_ui_time_result_e product_ui_time_execute_event(
     return PRODUCT_UI_TIME_OK;
 }
 
+/**
+ * @brief 同步执行一条有限状态变更并输出结果、当前代次及受影响编号。
+ */
 product_ui_time_result_e product_ui_time_domain_execute(
     const product_ui_time_domain_command_t *command,
     product_ui_time_domain_command_result_t *result)
@@ -282,6 +366,9 @@ product_ui_time_result_e product_ui_time_domain_execute(
     }
     if (!handled) {
         status = product_ui_time_execute_event(command, &affected_id, &handled);
+        if (handled && status == PRODUCT_UI_TIME_OK) {
+            product_ui_time_domain_mark_events_changed();
+        }
     }
     if (!handled) {
         status = PRODUCT_UI_TIME_ERR_INVALID_ARGUMENT;
@@ -297,6 +384,9 @@ product_ui_time_result_e product_ui_time_domain_execute(
     return product_ui_time_finish_command(result, status, affected_id);
 }
 
+/**
+ * @brief 读取不含记录数组的域摘要，并观察闹钟后端代次。
+ */
 product_ui_time_result_e product_ui_time_domain_get_summary(
     product_ui_time_domain_summary_t *summary)
 {
@@ -335,6 +425,9 @@ product_ui_time_result_e product_ui_time_domain_get_summary(
     return PRODUCT_UI_TIME_OK;
 }
 
+/**
+ * @brief 从绑定闹钟后端复制指定逻辑下标的记录。
+ */
 product_ui_time_result_e product_ui_time_domain_get_alarm(
     uint8_t logical_index, product_ui_alarm_t *alarm)
 {
@@ -346,6 +439,18 @@ product_ui_time_result_e product_ui_time_domain_get_alarm(
         s_alarm_backend->get(logical_index, alarm) : PRODUCT_UI_TIME_ERR_UNAVAILABLE;
 }
 
+/**
+ * @brief 读取仅由初始化／RESET 及成功日程变更推进的非零缓存代次。
+ */
+uint32_t product_ui_time_domain_get_event_revision(void)
+{
+    product_ui_time_domain_ensure_initialized();
+    return s_event_revision;
+}
+
+/**
+ * @brief 按有效槽顺序复制指定逻辑下标的日程。
+ */
 product_ui_time_result_e product_ui_time_domain_get_event(
     uint8_t logical_index, product_ui_calendar_event_t *event)
 {
@@ -369,6 +474,9 @@ product_ui_time_result_e product_ui_time_domain_get_event(
     return PRODUCT_UI_TIME_ERR_NOT_FOUND;
 }
 
+/**
+ * @brief 复制固定容量墙钟、闹钟与日程状态。
+ */
 product_ui_time_result_e product_ui_time_domain_get_snapshot(
     product_ui_time_domain_snapshot_t *snapshot)
 {

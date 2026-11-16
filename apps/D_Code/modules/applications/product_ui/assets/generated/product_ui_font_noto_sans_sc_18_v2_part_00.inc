@@ -1,7 +1,7 @@
 /*******************************************************************************
  * Size: 18 px
  * Bpp: 4
- * Opts: pinned-commit=523d033d6cb47f4a80c58a35753646f5c3608a78 symbols-sha256=c3107390e0eaef53d13709f46afd95dcf665cd66ecfef901660f01006b76e8d8 size=18 bpp=4
+ * Opts: pinned-commit=523d033d6cb47f4a80c58a35753646f5c3608a78 symbols-sha256=9527e35f88afcd25dfa1faa1238f7ce5575e6cb410136455d0fb0813f4bfc1fb size=18 bpp=4
  ******************************************************************************/
 
 #ifdef LV_LVGL_H_INCLUDE_SIMPLE

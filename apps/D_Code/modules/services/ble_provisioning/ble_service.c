@@ -1,6 +1,6 @@
 /**
  * @file    ble_service.c
- * @brief   BLE 配网服务 — 事件驱动桥接层
+ * @brief   BLE 配网事件桥接，广播依据当前 WiFi 事实控制。
  */
 
 #include "config/app_config.h"
@@ -23,19 +23,17 @@
 
 static volatile int s_wifi_notified = 0;  /* 防止重复通知 BLE 客户端 */
 
-/*
- * Defense-in-depth for SSID switch: wifi_service may suppress STA_DISCONNECT,
- * but if a suppress count is missed, DISCONNECTED still fires while a new
- * attempt is already CONNECTING/ASSOCIATED (or already CONNECTED).
- * Never re-open prov adv while the live wifi_service state is busy/online.
- * Explicit ble_service_enter_reconfig_mode() bypasses this gate.
+/**
+ * @brief 确认 WiFi 不在连接或在线状态后断开手机并请求配网广播。
+ * @param[in] reason 可空诊断原因，仅用于日志。
+ * @note SSID 切换中的迟到断连事件不能重开广播；显式重配入口独立于此检查。
  */
 static void ble_svc_open_prov_adv(const char *reason)
 {
-    wifi_service_status_t st;
+    wifi_service_connection_snapshot_t st;
 
     memset(&st, 0, sizeof(st));
-    wifi_service_get_status(&st);
+    wifi_service_get_connection_snapshot(&st);
     if ((st.state == WIFI_SERVICE_CONN_CONNECTING) ||
         (st.state == WIFI_SERVICE_CONN_ASSOCIATED) ||
         (st.state == WIFI_SERVICE_CONN_CONNECTED)) {
@@ -53,9 +51,22 @@ static void ble_svc_open_prov_adv(const char *reason)
     LOGI(TAG, "BLE prov adv on (%s)", (reason != NULL) ? reason : "?");
 }
 
+/**
+ * @brief 复核当前 WiFi 已在线，至多通知一次并关闭配网广播。
+ * @param[in] evt WiFi 已连接事件。
+ * @param[in] ctx 订阅上下文，本实现不使用。
+ */
 static void on_wifi_connected(const d_event_t *evt, void *ctx)
 {
+    wifi_service_connection_snapshot_t status;
+
     if ((evt == NULL) || (evt->id != EVT_WIFI_CONNECTED)) {
+        return;
+    }
+    /* 通知可能晚于其描述的连接，在线事实以 WiFi 当前快照为准。 */
+    memset(&status, 0, sizeof(status));
+    wifi_service_get_connection_snapshot(&status);
+    if (status.state != WIFI_SERVICE_CONN_CONNECTED) {
         return;
     }
     /* 始终关广播；notify 只做一次，避免切 SSID 重复刷 JSON */
@@ -70,6 +81,11 @@ static void on_wifi_connected(const d_event_t *evt, void *ctx)
     d_ble_net_cfg_set_adv(0);
 }
 
+/**
+ * @brief 收到断连事件后按当前 WiFi 状态评估配网广播。
+ * @param[in] evt WiFi 已断开事件。
+ * @param[in] ctx 订阅上下文，本实现不使用。
+ */
 static void on_wifi_disconnected(const d_event_t *evt, void *ctx)
 {
     if ((evt == NULL) || (evt->id != EVT_WIFI_DISCONNECTED)) {
@@ -79,6 +95,11 @@ static void on_wifi_disconnected(const d_event_t *evt, void *ctx)
     ble_svc_open_prov_adv("disconnected");
 }
 
+/**
+ * @brief 通知手机 SSID 未找到，并评估是否重开配网广播。
+ * @param[in] evt SSID 未找到事件。
+ * @param[in] ctx 订阅上下文，本实现不使用。
+ */
 static void on_wifi_ssid_not_found(const d_event_t *evt, void *ctx)
 {
     if ((evt == NULL) || (evt->id != EVT_WIFI_SSID_NOT_FOUND)) {
@@ -89,6 +110,11 @@ static void on_wifi_ssid_not_found(const d_event_t *evt, void *ctx)
     ble_svc_open_prov_adv("ssid_not_found");
 }
 
+/**
+ * @brief 通知手机连接失败，并评估是否重开配网广播。
+ * @param[in] evt WiFi 连接失败事件。
+ * @param[in] ctx 订阅上下文，本实现不使用。
+ */
 static void on_wifi_connect_fail(const d_event_t *evt, void *ctx)
 {
     if ((evt == NULL) || (evt->id != EVT_WIFI_CONNECT_FAIL)) {
@@ -104,25 +130,27 @@ static void on_wifi_connect_fail(const d_event_t *evt, void *ctx)
 //*********************************************************************************//
 
 /**
- * @brief 由 D_ble_net_cfg.c 中 JSON 处理回调调用
- * @param ssid WiFi SSID
- * @param pwd  WiFi 密码
- * @return 0=成功
+ * @brief 向 WiFi 执行器提交收到的 BLE 配网意图；完整合同见 ble_service.h。
  */
 int ble_service_on_wifi_cfg(const char *ssid, const char *pwd)
 {
+    if (!ssid || !pwd) return D_ERR_INVALID_ARG;
     if (wifi_service_configuration_is_held()) return D_ERR_BUSY;
     wifi_cfg_t cfg;
     memset(&cfg, 0, sizeof(cfg));
     strncpy(cfg.ssid, ssid, sizeof(cfg.ssid) - 1);
     strncpy(cfg.pwd,  pwd,  sizeof(cfg.pwd)  - 1);
 
-    LOGI(TAG, "发布 BLE 配网请求: ssid=%s", ssid);
-    /* 发布配网请求事件 */
-    d_event_publish(EVT_BLE_WIFI_CFG_REQUEST, &cfg, sizeof(cfg));
-    return 0;
+    /* 只有 WiFi 执行器检查并受理意图后才可返回 connecting；
+     * 无返回值事件发布会丢失受理错误。
+     * 兼容订阅保留给其他 SDK 调用者，
+     * 同一命令不再重复派发。 */
+    return wifi_service_connect_ui(cfg.ssid, cfg.pwd);
 }
 
+/**
+ * @brief 显式请求断开手机并重新开启配网广播；完整合同见 ble_service.h。
+ */
 d_err_t ble_service_enter_reconfig_mode(void)
 {
     s_wifi_notified = 0;
@@ -136,6 +164,9 @@ d_err_t ble_service_enter_reconfig_mode(void)
 //                              公共 API                                            //
 //*********************************************************************************//
 
+/**
+ * @brief 订阅 WiFi 状态事件，建立 BLE 配网的事件桥接；完整合同见 ble_service.h。
+ */
 d_err_t ble_service_init(void)
 {
     LOGI(TAG, "BLE 服务初始化");
@@ -160,6 +191,9 @@ d_err_t ble_service_init(void)
     return D_OK;
 }
 
+/**
+ * @brief 撤销本服务持有的四类 WiFi 事件订阅；完整合同见 ble_service.h。
+ */
 void ble_service_deinit(void)
 {
     d_event_unsubscribe(EVT_WIFI_CONNECTED,     on_wifi_connected);

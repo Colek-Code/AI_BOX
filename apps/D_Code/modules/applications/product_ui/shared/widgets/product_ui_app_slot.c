@@ -1,6 +1,4 @@
-/** @file product_ui_app_slot.c
- *  @brief One home tile owns its artwork, caption and complete press sequence.
- */
+/** @file product_ui_app_slot.c @brief 首页图标、标题及完整按压手势的对象所有权。 */
 #include "config/app_config.h"
 
 #if defined(D_LVGL_ENABLE) && (D_UI_TARGET == D_UI_PRODUCT)
@@ -13,6 +11,9 @@
 #define PRODUCT_UI_APP_CAPTION_Y 64
 #define PRODUCT_UI_APP_CAPTION_H 16
 
+/**
+ * @brief 按比例缩放借用图像，使其居中放入指定区域。
+ */
 int product_ui_image_fit(lv_obj_t *image, const lv_image_dsc_t *source,
                          int32_t width, int32_t height)
 {
@@ -43,6 +44,11 @@ int product_ui_image_fit(lv_obj_t *image, const lv_image_dsc_t *source,
     return 0;
 }
 
+/**
+ * @brief 按千分比进度更新图像缩放、重着色及标题透明度。
+ * @param[in,out] context 借用的应用槽状态。
+ * @param[in] progress 动画按压进度，调用链使用 0 至 1000。
+ */
 static void product_ui_app_slot_apply_press(void *context, int32_t progress)
 {
     product_ui_app_slot_t *slot = context;
@@ -56,12 +62,20 @@ static void product_ui_app_slot_apply_press(void *context, int32_t progress)
                               (lv_opa_t)(LV_OPA_COVER - progress * (LV_OPA_COVER - LV_OPA_80) / 1000), 0);
 }
 
+/**
+ * @brief 切换应用槽按下或松开的动画目标。
+ * @param[in,out] slot 有效应用槽。
+ * @param[in] is_pressed 非零进入按下状态，零回到松开状态。
+ */
 static void product_ui_app_slot_pressed(product_ui_app_slot_t *slot, uint8_t is_pressed)
 {
     product_ui_motion_start(&slot->press_motion, is_pressed ? 1000 : 0,
         is_pressed ? PRODUCT_UI_MOTION_PRESS_MS : PRODUCT_UI_MOTION_RELEASE_MS);
 }
 
+/**
+ * @brief 解除按压动画并撤销手势资格，不删除应用槽根对象。
+ */
 void product_ui_app_slot_dispose(product_ui_app_slot_t *slot)
 {
     if (slot == NULL) return;
@@ -69,6 +83,9 @@ void product_ui_app_slot_dispose(product_ui_app_slot_t *slot)
     slot->is_armed = 0U;
 }
 
+/**
+ * @brief 撤销本轮手势资格并立即清除按压视觉。
+ */
 void product_ui_app_slot_cancel(product_ui_app_slot_t *slot)
 {
     if ((slot == NULL) || (slot->root == NULL)) {
@@ -79,6 +96,11 @@ void product_ui_app_slot_cancel(product_ui_app_slot_t *slot)
     product_ui_motion_set(&slot->press_motion, 0);
 }
 
+/**
+ * @brief 校验完整按压序列，越界、丢失或输入重置时撤销点击资格。
+ * @param[in] event LVGL 事件，用户数据借用槽状态。
+ * @note 删除事件先解除动画再清空槽；不合格的 CLICKED 会终止后续事件处理。
+ */
 static void product_ui_app_slot_event(lv_event_t *event)
 {
     product_ui_app_slot_t *slot = lv_event_get_user_data(event);
@@ -114,6 +136,9 @@ static void product_ui_app_slot_event(lv_event_t *event)
     }
 }
 
+/**
+ * @brief 创建首页应用槽及其图像、标题、按压动画和点击处理。
+ */
 int product_ui_app_slot_create(lv_obj_t *parent, product_ui_app_slot_t *slot,
                                lv_event_cb_t action, void *user_data)
 {
@@ -126,7 +151,7 @@ int product_ui_app_slot_create(lv_obj_t *parent, product_ui_app_slot_t *slot,
         return -1;
     }
     lv_obj_remove_style_all(slot->root);
-    /* Retain pointer ownership so a sampled jump can still reach the pager. */
+    /* 保留指针事件归属，让离散采样中的跳动仍可交给分页器处理。 */
     lv_obj_clear_flag(slot->root, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_size(slot->root, PRODUCT_UI_APP_SLOT_SIZE, PRODUCT_UI_APP_SLOT_SIZE);
     lv_obj_add_flag(slot->root, LV_OBJ_FLAG_EVENT_BUBBLE);
@@ -159,6 +184,9 @@ int product_ui_app_slot_create(lv_obj_t *parent, product_ui_app_slot_t *slot,
     return 0;
 }
 
+/**
+ * @brief 验证图像后绑定槽内容，重置手势并更新使能和标题。
+ */
 int product_ui_app_slot_bind(product_ui_app_slot_t *slot,
                              const product_ui_app_slot_spec_t *spec)
 {

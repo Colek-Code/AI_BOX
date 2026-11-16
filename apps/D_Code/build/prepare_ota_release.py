@@ -1,4 +1,4 @@
-"""Prepare/audit OTA inputs. Never runs isd_download, flashes, erases VM or uploads."""
+"""准备和审计 OTA 输入；不执行下载器、烧录、擦 VM 或上传。"""
 from pathlib import Path
 import argparse
 import binascii
@@ -15,6 +15,7 @@ OUT = ROOT / "apps/D_Code/build/out/product_ui_ota"
 
 
 def owned(path, task=True):
+    """校验并解析本任务拥有的输出路径。"""
     path = path.resolve()
     boundary = OUT.resolve() if task else (ROOT / "apps/D_Code/build/out").resolve()
     if not path.is_relative_to(boundary) or path == boundary:
@@ -23,6 +24,7 @@ def owned(path, task=True):
 
 
 def replace_field(text, name, value):
+    """只替换唯一配置字段。"""
     text, count = re.subn(r"(?m)^(" + re.escape(name) + r"\s*=)[^;\r\n]+;", r"\g<1>" + value + ";", text)
     if count != 1:
         raise ValueError("expected one active field: " + name)
@@ -30,13 +32,14 @@ def replace_field(text, name, value):
 
 
 def normalize_config(path, board, bank, keep, boot_version=None):
+    """规范化本次生成配置并保留其他字段。"""
     path = owned(path, task=False)
     if boot_version is not None and not 0 <= boot_version <= 65535:
         raise ValueError("SDK boot version must fit uint16")
     text = path.read_text(encoding="utf-8")
     if board == 1001:
-        # Preserve the existing GC9307 post-build LSB80 setting; this is not
-        # an OTA clock change. The SDK template itself remains read-only.
+        # 保留既有 GC9307 构建后 LSB80 设置；此处
+        # 不改变 OTA 时钟，SDK 模板本身继续只读。
         text = replace_field(text, "LSB_DIV", "1")
     if bank:
         if board != 1001 or not re.search(r"(?m)^BR22_TWS_DB=YES;", text):
@@ -50,10 +53,12 @@ def normalize_config(path, board, bank, keep, boot_version=None):
 
 
 def digest(path):
+    """计算当前输入内容的 SHA-256 摘要。"""
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def validate_ufw(path):
+    """校验 UFW 结构、长度及内容一致性。"""
     raw = path.read_bytes()
     if len(raw) < 256 or len(raw) > 16 * 1024 * 1024:
         raise ValueError("invalid UFW length")
@@ -73,6 +78,7 @@ def validate_ufw(path):
 
 
 def validate_vm_candidate(address, length):
+    """核对候选 VM 策略及布局。"""
     if (address is None) != (length is None):
         raise ValueError("--vm-address and --vm-length must be supplied together")
     if address is None:
@@ -84,6 +90,7 @@ def validate_vm_candidate(address, length):
 
 
 def vm_config_values(text):
+    """读取配置中的有效 VM 字段。"""
     values = {}
     for name in ("VM_ADR", "VM_LEN", "VM_OPT"):
         matches = re.findall(r"(?m)^" + name + r"\s*=\s*([^;\r\n]+);", text)
@@ -102,7 +109,7 @@ def vm_config_values(text):
 
 
 def release_settings(config):
-    """Read effective C-preprocessed settings, never scrape commented macros."""
+    """通过 C 预处理读取有效发布设置，不扫描被注释宏。"""
     try:
         keep = int(config["D_BUILD_OTA_KEEP_VM"])
         boot = int(config["D_BUILD_OTA_BOOT_VERSION"], 0)
@@ -117,7 +124,8 @@ def release_settings(config):
 
 
 def prepare(args):
-    # Reject incomplete/invalid layout input before creating any output files.
+    # 创建任何输出文件之前拒绝不完整或无效的布局输入。
+    """先核对布局与成功构建回执，再冻结 OTA 输入并校验包结构；不执行下载器。"""
     validate_vm_candidate(args.vm_address, args.vm_length)
     output = owned(args.output)
     receipt_path = args.build_result.resolve()
@@ -165,7 +173,7 @@ def prepare(args):
         (effective_vm["VM_ADR"] != args.vm_address or effective_vm["VM_LEN"] != args.vm_length)):
         raise ValueError("generated VM configuration differs from requested policy/layout")
     vendor = ROOT / "cpu/wl82/tools"
-    # isd_download also reads these SDK inputs implicitly from its working directory.
+    # isd_download 还会从工作目录隐式读取这些 SDK 输入。
     for name in ("uboot.boot", "cfg_tool.bin", "ota.bin", "wl82loader.bin", "sd_update2.bin", "usb_update2.bin"):
         shutil.copyfile(vendor / name, output / name)
     for name in ("audlogo", "cfg"):
@@ -197,6 +205,7 @@ def prepare(args):
 
 
 def main():
+    """准备和审计 OTA 输入；不执行下载器、烧录、擦 VM 或上传。"""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--normalize-config", type=Path)
     parser.add_argument("--board", type=int, default=1001)

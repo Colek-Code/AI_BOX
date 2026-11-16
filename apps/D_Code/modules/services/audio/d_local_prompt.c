@@ -1,4 +1,4 @@
-/** @file d_local_prompt.c @brief Prioritized audio owner with confirmed stop and volume handoff. */
+/** @file d_local_prompt.c @brief 按优先级持有提示音资源，并确认停止与音量交接。 */
 #include "config/app_config.h"
 #if D_LOCAL_PROMPT_ENABLE
 #include "d_local_prompt.h"
@@ -9,7 +9,7 @@
 #include "system/spinlock.h"
 #include <string.h>
 
-/* Public requests may arrive from another core; callbacks/IO never run under this lock. */
+/* 公开请求可能来自另一核；回调与 I/O 均不在此锁内执行。 */
 static DEFINE_SPINLOCK(s_prompt_lock);
 
 #define D_LOCAL_PROMPT_WAIT_MS 30000U
@@ -42,6 +42,7 @@ typedef struct {
 } d_local_prompt_context_t;
 static d_local_prompt_context_t s_prompt;
 static uint8_t (*s_foreground_probe)(void);
+static uint32_t s_foreground_holds;
 typedef struct {
     d_local_prompt_request_t request;
     uint32_t canceled_generation;
@@ -65,17 +66,48 @@ static struct {
 static d_err_t d_local_prompt_apply_volume_kind(uint8_t percent, uint32_t timeout_ms, uint8_t alert);
 static void d_local_prompt_process_alert(void);
 
+/**
+ * @brief 按半区间规则比较环形代次先后。
+ * @param[in] left 待比较代次。
+ * @param[in] right 参考代次。
+ * @return left 严格新于 right 时返回非零。
+ */
 static uint8_t d_local_prompt_after(uint32_t left, uint32_t right)
 {
     return left != right && (uint32_t)(left - right) < 0x80000000U;
 }
 
+/**
+ * @brief 核对闹铃所有者的事件及代次是否仍对应当前来源槽。
+ * @param[in] source 待检查的试听或闹铃来源。
+ * @return 来源、事件和代次全部匹配时返回非零。
+ * @note 调用者持有 s_prompt_lock。
+ */
+static uint8_t d_local_prompt_alert_request_current_locked(d_local_prompt_source_e source)
+{
+    const d_local_prompt_request_t *request = &s_alert_owner.request;
+    const d_local_prompt_slot_t *slot;
+    if (!s_alert_owner.token || source < D_LOCAL_PROMPT_PREVIEW ||
+        source >= D_LOCAL_PROMPT_SOURCE_COUNT || source != request->source) return 0U;
+    slot = &s_sources[source];
+    return slot->request.generation == request->generation &&
+        slot->request.event_id == request->event_id;
+}
+
+/**
+ * @brief 服务就绪时尝试唤醒提示音任务。
+ * @note 队列满不会丢弃已保存意图，20 ms 队列超时继续核对。
+ */
 static void d_local_prompt_wake(void)
 {
-    /* A full queue does not lose intent: the 20 ms taskq timeout reconciles it. */
+    /* 队列满不丢弃意图，20 ms 任务队列超时会继续核对状态。 */
     if (s_prompt.state.ready) (void)os_taskq_post("local_prompt", 1, 1);
 }
 
+/**
+ * @brief 在锁外执行已注册的前台忙碌探针。
+ * @return 探针结果；未注册时返回 0。
+ */
 static uint8_t d_local_prompt_foreground_busy(void)
 {
     uint8_t (*probe)(void);
@@ -85,6 +117,9 @@ static uint8_t d_local_prompt_foreground_busy(void)
     return probe != NULL ? probe() : 0U;
 }
 
+/**
+ * @brief 注册用于检查上层音频忙碌状态的探针。；完整合同见 d_local_prompt.h。
+ */
 d_err_t d_local_prompt_register_foreground_probe(uint8_t (*probe)(void))
 {
     if (probe == NULL) return D_ERR_INVALID_ARG;
@@ -95,6 +130,11 @@ d_err_t d_local_prompt_register_foreground_probe(uint8_t (*probe)(void))
     return D_OK;
 }
 
+/**
+ * @brief 在解码 OPEN 后再次核对播放代次、取消意图与期限。
+ * @param[in] generation 解码器准备启动的播放代次。
+ * @return 允许 START 返回 D_OK；取消或冲突返回 D_ERR_BUSY；过期返回 D_ERR_TIMEOUT；其他错误透传所有者状态。
+ */
 static d_err_t d_local_prompt_start_permitted(uint32_t generation)
 {
     uint32_t now = (uint32_t)timer_get_ms();
@@ -118,6 +158,12 @@ static d_err_t d_local_prompt_start_permitted(uint32_t generation)
     return result;
 }
 
+/**
+ * @brief 记录 START 真实结果，并复查是否需立即停止。
+ * @param[in] generation 已提交启动的播放代次。
+ * @param[in] result 解码器启动返回值。
+ * @note 已启动后发生取消仍记录真实 started 状态，直到 STOP 确认才解除资源占用。
+ */
 static void d_local_prompt_start_completed(uint32_t generation, d_err_t result)
 {
     uint8_t started = result == D_OK;
@@ -133,12 +179,18 @@ static void d_local_prompt_start_completed(uint32_t generation, d_err_t result)
     if (s_prompt.active_source == D_LOCAL_PROMPT_POMODORO) s_prompt.state.error = canceled ? D_OK : result;
     else if (result != D_OK && !canceled) {
         s_alert_owner.error = result;
-        s_sources[s_prompt.active_source].error = result;
-        s_sources[s_prompt.active_source].pending = 0U;
+        if (d_local_prompt_alert_request_current_locked(s_prompt.active_source)) {
+            s_sources[s_prompt.active_source].error = result;
+            s_sources[s_prompt.active_source].pending = 0U;
+        }
     }
     spin_unlock(&s_prompt_lock);
 }
 
+/**
+ * @brief 按取消、前台占用、期限或解码事件执行受检停止。
+ * @note STOP 失败保留 decoder_owned 并发布错误；清理成功只证明静音，不证明播放成功。
+ */
 static void d_local_prompt_process_stop(void)
 {
     uint8_t stop;
@@ -156,13 +208,14 @@ static void d_local_prompt_process_stop(void)
     if (!stop) return;
     result = d_local_prompt_decoder_stop();
     spin_lock(&s_prompt_lock);
-    /* Successful cleanup proves silence, not successful playback. */
+    /* 清理成功只证明已静音，不证明播放过程成功。 */
     if (s_prompt.active_source == D_LOCAL_PROMPT_POMODORO) {
         if (result != D_OK) s_prompt.state.error = result;
         else if (d_local_prompt_decoder_result() != D_OK) s_prompt.state.error = d_local_prompt_decoder_result();
     } else if (result != D_OK || d_local_prompt_decoder_result() != D_OK) {
         s_alert_owner.error = result != D_OK ? result : d_local_prompt_decoder_result();
-        s_sources[s_prompt.active_source].error = s_alert_owner.error;
+        if (d_local_prompt_alert_request_current_locked(s_prompt.active_source))
+            s_sources[s_prompt.active_source].error = s_alert_owner.error;
     }
     s_prompt.stop_failed = result != D_OK;
     if (result == D_OK) {
@@ -177,6 +230,10 @@ static void d_local_prompt_process_stop(void)
     spin_unlock(&s_prompt_lock);
 }
 
+/**
+ * @brief 在提示音任务中消费媒体或闹铃音量请求并发布完成编号。
+ * @note 解码调用在锁外；超时请求不能因迟到成功变成成功结果。
+ */
 static void d_local_prompt_process_volume(void)
 {
     uint32_t request;
@@ -209,6 +266,10 @@ static void d_local_prompt_process_volume(void)
     spin_unlock(&s_prompt_lock);
 }
 
+/**
+ * @brief 满足优先级、前台、期限与音量条件时启动番茄钟提示音。
+ * @note 先声明解码所有权，再在锁外 OPEN/START；失败也经 STOP 收尾。
+ */
 static void d_local_prompt_process_start(void)
 {
     uint32_t generation;
@@ -231,7 +292,7 @@ static void d_local_prompt_process_start(void)
     s_prompt.state.generation++;
     if (s_prompt.state.generation == 0U) s_prompt.state.generation = 1U;
     generation = s_prompt.state.generation;
-    s_prompt.decoder_owned = 1U; /* OPEN/START in flight is also an owned resource. */
+    s_prompt.decoder_owned = 1U; /* OPEN/START 在途也属于已占用资源。 */
     s_prompt.decoder_started = 0U;
     s_prompt.playing_event = s_prompt.state.event_id;
     s_prompt.active_source = D_LOCAL_PROMPT_POMODORO;
@@ -243,17 +304,28 @@ static void d_local_prompt_process_start(void)
     d_local_prompt_process_stop();
 }
 
+/**
+ * @brief 只向匹配所有者及当前来源请求发布交接错误。
+ * @param[in] token 闹铃所有者占用票据。
+ * @param[in] result 交接或解码错误。
+ */
 static void d_local_prompt_alert_error(uint32_t token, d_err_t result)
 {
     spin_lock(&s_prompt_lock);
     if (s_alert_owner.token == token) {
         s_alert_owner.error = result;
-        s_sources[s_alert_owner.request.source].error = result;
-        s_sources[s_alert_owner.request.source].pending = 0U;
+        if (d_local_prompt_alert_request_current_locked(s_alert_owner.request.source)) {
+            s_sources[s_alert_owner.request.source].error = result;
+            s_sources[s_alert_owner.request.source].pending = 0U;
+        }
     }
     spin_unlock(&s_prompt_lock);
 }
 
+/**
+ * @brief 确认解码已停止后释放音量，再回调归还语音交接所有权。
+ * @note 音量仍 held 或 busy 时继续保留所有者；释放回调在锁外执行。
+ */
 static void d_local_prompt_alert_release(void)
 {
     d_device_volume_alert_snapshot_t volume;
@@ -285,8 +357,8 @@ static void d_local_prompt_alert_release(void)
     }
     spin_lock(&s_prompt_lock);
     next_token = s_alert_owner.next_token;
-    /* Physical audio and volume are already stopped. Keep the observable owner
-     * until the voice callback returns, while allowing it to restore standby. */
+    /* 物理播放与音量占用均已停止；语音释放回调返回前继续保留
+     * 可观察所有者，同时允许该回调恢复待机。 */
     s_alert_owner.releasing = 1U;
     spin_unlock(&s_prompt_lock);
     if (handoff_sent && handoff != NULL) handoff->release(token);
@@ -296,6 +368,11 @@ static void d_local_prompt_alert_release(void)
     spin_unlock(&s_prompt_lock);
 }
 
+/**
+ * @brief 优先选择闹铃，其次试听，并分配非零所有者占用票据。
+ * @return 已有或新选中所有者返回 1；当前不能选择返回 0。
+ * @note 调用者持有 s_prompt_lock；现有解码器未停止时仅提交停止意图。
+ */
 static uint8_t d_local_prompt_alert_select_locked(void)
 {
     d_local_prompt_source_e source;
@@ -315,6 +392,10 @@ static uint8_t d_local_prompt_alert_select_locked(void)
     return 1U;
 }
 
+/**
+ * @brief 推进闹铃或试听的交接、音量确认、启动和释放状态。
+ * @note 交接与解码调用在锁外；受理与完成确认分离，错误或过期不会宣称资源释放。
+ */
 static void d_local_prompt_process_alert(void)
 {
     d_local_prompt_request_t request;
@@ -350,7 +431,7 @@ static void d_local_prompt_process_alert(void)
         if (request.source == D_LOCAL_PROMPT_PREVIEW) d_local_prompt_cancel_source(request.source, request.generation);
         return;
     }
-#if D_FEATURE_QWEN
+#if D_FEATURE_QWEN || D_PRODUCT_MUSIC_ENABLE
     if (request.source == D_LOCAL_PROMPT_ALARM) {
         if (handoff == NULL) return;
         if (!handoff_sent) {
@@ -394,12 +475,16 @@ static void d_local_prompt_process_alert(void)
     d_local_prompt_process_stop();
 }
 
+/**
+ * @brief 在同一队列上下文处理解码事件、停止、音量及来源调度。
+ * @param[in] context 任务兼容参数，本实现不使用。
+ */
 static void d_local_prompt_worker(void *context)
 {
     int messages[16];
     (void)context;
     for (;;) {
-        /* SDK dispatches server callbacks inside this queue receive. */
+        /* SDK 在该队列接收内部派发服务回调。 */
         (void)__os_taskq_pend(messages, 16, 2);
         d_local_prompt_process_stop();
         d_local_prompt_process_volume();
@@ -408,7 +493,13 @@ static void d_local_prompt_worker(void *context)
     }
 }
 
-#if !D_FEATURE_QWEN
+#if !D_FEATURE_QWEN && !D_PRODUCT_MUSIC_ENABLE
+/**
+ * @brief 将设备媒体音量回调转交提示音任务处理。
+ * @param[in] percent 设备目标音量。
+ * @param[in] context 后端兼容参数，本实现不使用。
+ * @return 提示音音量请求的实际完成结果。
+ */
 static d_err_t d_local_prompt_volume_backend(uint8_t percent, void *context)
 {
     (void)context;
@@ -417,6 +508,12 @@ static d_err_t d_local_prompt_volume_backend(uint8_t percent, void *context)
 static const d_device_volume_backend_t s_prompt_volume_backend = {d_local_prompt_volume_backend, NULL};
 #endif
 
+/**
+ * @brief 将闹铃音量回调转交提示音任务处理。
+ * @param[in] percent 闹铃目标音量。
+ * @param[in] context 后端兼容参数，本实现不使用。
+ * @return 闹铃音量请求的实际完成结果。
+ */
 static d_err_t d_local_prompt_alert_volume_backend(uint8_t percent, void *context)
 {
     (void)context;
@@ -424,6 +521,9 @@ static d_err_t d_local_prompt_alert_volume_backend(uint8_t percent, void *contex
 }
 static const d_device_volume_backend_t s_alert_volume_backend = {d_local_prompt_alert_volume_backend, NULL};
 
+/**
+ * @brief 一次性创建持久提示音任务并注册所需音量后端。；完整合同见 d_local_prompt.h。
+ */
 d_err_t d_local_prompt_init(void)
 {
     d_err_t result;
@@ -448,7 +548,7 @@ d_err_t d_local_prompt_init(void)
         s_prompt.alert_backend_ready = alert_result == D_OK;
         spin_unlock(&s_prompt_lock);
     }
-#if !D_FEATURE_QWEN
+#if !D_FEATURE_QWEN && !D_PRODUCT_MUSIC_ENABLE
     if (result == D_OK) {
         result = d_device_volume_register_backend(&s_prompt_volume_backend);
         spin_lock(&s_prompt_lock);
@@ -460,6 +560,9 @@ d_err_t d_local_prompt_init(void)
     return result;
 }
 
+/**
+ * @brief 复制番茄钟提示音的当前状态。；完整合同见 d_local_prompt.h。
+ */
 void d_local_prompt_get_snapshot(d_local_prompt_snapshot_t *snapshot)
 {
     if (snapshot == NULL) return;
@@ -469,6 +572,13 @@ void d_local_prompt_get_snapshot(d_local_prompt_snapshot_t *snapshot)
     spin_unlock(&s_prompt_lock);
 }
 
+/**
+ * @brief 受理未取消且不旧于当前事件的番茄钟提示音。
+ * @param[in] event_id 非零事件编号。
+ * @param[in] created_ms 设备单调时钟上的创建时刻。
+ * @return 受理返回 D_OK；无效编号、未就绪或旧事件返回对应错误。
+ * @note 最新事件覆盖待播事件；已播放旧事件通过停止意图收尾。
+ */
 static d_err_t d_local_prompt_request_pomodoro(uint32_t event_id, uint32_t created_ms)
 {
     spin_lock(&s_prompt_lock);
@@ -492,9 +602,15 @@ static d_err_t d_local_prompt_request_pomodoro(uint32_t event_id, uint32_t creat
     return D_OK;
 }
 
+/**
+ * @brief 按最新事件优先策略提交番茄钟提示音。；完整合同见 d_local_prompt.h。
+ */
 void d_local_prompt_request(uint32_t event_id, uint32_t created_ms)
 { (void)d_local_prompt_request_pomodoro(event_id, created_ms); }
 
+/**
+ * @brief 取消不新于指定事件的番茄钟提示音。；完整合同见 d_local_prompt.h。
+ */
 void d_local_prompt_cancel(uint32_t event_id)
 {
     spin_lock(&s_prompt_lock);
@@ -509,12 +625,25 @@ void d_local_prompt_cancel(uint32_t event_id)
     d_local_prompt_wake();
 }
 
+/**
+ * @brief 使用兼容所有者位 1 请求前台占用。；完整合同见 d_local_prompt.h。
+ */
 void d_local_prompt_foreground_begin(void)
 {
+    d_local_prompt_foreground_set(1U, 1U);
+}
+
+/**
+ * @brief 独立设置或清除指定所有者的前台占用位。；完整合同见 d_local_prompt.h。
+ */
+void d_local_prompt_foreground_set(uint32_t owner_bit, uint8_t held)
+{
     spin_lock(&s_prompt_lock);
-    s_prompt.state.foreground = 1U;
-    s_sources[D_LOCAL_PROMPT_PREVIEW].wanted = s_sources[D_LOCAL_PROMPT_PREVIEW].pending = 0U;
-    if (s_prompt.active_source != D_LOCAL_PROMPT_ALARM) {
+    if (held) s_foreground_holds |= owner_bit;
+    else s_foreground_holds &= ~owner_bit;
+    s_prompt.state.foreground = s_foreground_holds != 0U;
+    if (held) s_sources[D_LOCAL_PROMPT_PREVIEW].wanted = s_sources[D_LOCAL_PROMPT_PREVIEW].pending = 0U;
+    if (held && s_prompt.active_source != D_LOCAL_PROMPT_ALARM) {
         s_prompt.stop_requested = 1U;
         s_prompt.stop_failed = 0U;
     }
@@ -522,14 +651,17 @@ void d_local_prompt_foreground_begin(void)
     d_local_prompt_wake();
 }
 
+/**
+ * @brief 释放兼容所有者位 1 的前台占用。；完整合同见 d_local_prompt.h。
+ */
 void d_local_prompt_foreground_end(void)
 {
-    spin_lock(&s_prompt_lock);
-    s_prompt.state.foreground = 0U;
-    spin_unlock(&s_prompt_lock);
-    d_local_prompt_wake();
+    d_local_prompt_foreground_set(1U, 0U);
 }
 
+/**
+ * @brief 在后台限时等待解码与闹铃所有权释放。；完整合同见 d_local_prompt.h。
+ */
 d_err_t d_local_prompt_wait_stopped(uint32_t timeout_ms)
 {
     uint32_t started = (uint32_t)timer_get_ms();
@@ -550,6 +682,14 @@ d_err_t d_local_prompt_wait_stopped(uint32_t timeout_ms)
     }
 }
 
+/**
+ * @brief 串行提交指定类别音量，并有界等待提示音任务的完成编号。
+ * @param[in] percent 0～100 的目标音量。
+ * @param[in] timeout_ms 最多等待毫秒数。
+ * @param[in] alert 非零更新闹铃音量，0 更新媒体音量。
+ * @return 实际音量执行结果；参数、就绪、忙或期限错误返回对应值。
+ * @note 超时保留未完成请求，标记过期并请求停止，不能提前复用该槽。
+ */
 static d_err_t d_local_prompt_apply_volume_kind(uint8_t percent, uint32_t timeout_ms, uint8_t alert)
 {
     uint32_t request;
@@ -593,9 +733,15 @@ static d_err_t d_local_prompt_apply_volume_kind(uint8_t percent, uint32_t timeou
     }
 }
 
+/**
+ * @brief 向提示音任务提交媒体音量并限时等待完成确认。；完整合同见 d_local_prompt.h。
+ */
 d_err_t d_local_prompt_apply_volume(uint8_t percent, uint32_t timeout_ms)
 { return d_local_prompt_apply_volume_kind(percent, timeout_ms, 0U); }
 
+/**
+ * @brief 禁止新播放，取消全部待执行来源并请求停止。；完整合同见 d_local_prompt.h。
+ */
 void d_local_prompt_quiesce_begin(void)
 {
     spin_lock(&s_prompt_lock);
@@ -610,6 +756,9 @@ void d_local_prompt_quiesce_begin(void)
     d_local_prompt_wake();
 }
 
+/**
+ * @brief 解除静默准入限制，不恢复已经取消的请求。；完整合同见 d_local_prompt.h。
+ */
 void d_local_prompt_quiesce_cancel(void)
 {
     spin_lock(&s_prompt_lock);
@@ -617,6 +766,9 @@ void d_local_prompt_quiesce_cancel(void)
     spin_unlock(&s_prompt_lock);
 }
 
+/**
+ * @brief 注册闹铃抢占语音与媒体的交接回调。；完整合同见 d_local_prompt.h。
+ */
 d_err_t d_local_prompt_register_alarm_handoff(const d_local_prompt_handoff_t *handoff)
 {
     if (handoff == NULL || handoff->begin == NULL || handoff->poll == NULL || handoff->release == NULL)
@@ -629,6 +781,9 @@ d_err_t d_local_prompt_register_alarm_handoff(const d_local_prompt_handoff_t *ha
     return D_OK;
 }
 
+/**
+ * @brief 检查是否存在闹铃请求或尚未进入释放阶段的闹铃所有者。；完整合同见 d_local_prompt.h。
+ */
 uint8_t d_local_prompt_alarm_requested(void)
 {
     uint8_t requested;
@@ -639,6 +794,9 @@ uint8_t d_local_prompt_alarm_requested(void)
     return requested;
 }
 
+/**
+ * @brief 按来源和代次受理提示音、试听或闹铃意图。；完整合同见 d_local_prompt.h。
+ */
 d_err_t d_local_prompt_request_source(const d_local_prompt_request_t *request)
 {
     d_local_prompt_slot_t *slot;
@@ -682,6 +840,9 @@ d_err_t d_local_prompt_request_source(const d_local_prompt_request_t *request)
     return D_OK;
 }
 
+/**
+ * @brief 取消某来源中不新于指定代次的请求。；完整合同见 d_local_prompt.h。
+ */
 void d_local_prompt_cancel_source(d_local_prompt_source_e source, uint32_t through_generation)
 {
     d_local_prompt_slot_t *slot;
@@ -703,6 +864,9 @@ void d_local_prompt_cancel_source(d_local_prompt_source_e source, uint32_t throu
     d_local_prompt_wake();
 }
 
+/**
+ * @brief 读取来源的请求、播放与资源占用状态。；完整合同见 d_local_prompt.h。
+ */
 void d_local_prompt_get_source_snapshot(d_local_prompt_source_e source, d_local_prompt_source_snapshot_t *snapshot)
 {
     d_device_volume_alert_snapshot_t volume;

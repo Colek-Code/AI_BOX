@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run every Product UI asset pipeline in deterministic check mode."""
+"""以确定性检查模式运行全部 Product UI 资源流水线。"""
 
 from __future__ import annotations
 
@@ -18,6 +18,7 @@ PIPELINES = (
 
 
 def main() -> int:
+    """以确定性检查模式运行全部 Product UI 资源流水线。"""
     import sys
     sys.dont_write_bytecode = True
     from product_ui_workspace import prepare_work_directory

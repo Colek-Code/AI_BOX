@@ -48,7 +48,7 @@ extern int d_lcd_init(const struct lcd_platform_data *pdata);
 extern void d_lcd_fill_color(u16 color);
 
 /**
- * @brief 获取 LCD 宽度
+ * @brief 读取 EMI 面板宽度；完整合同见 d_display.h。
  */
 uint16_t d_display_get_width(void)
 {
@@ -56,13 +56,18 @@ uint16_t d_display_get_width(void)
 }
 
 /**
- * @brief 获取 LCD 高度
+ * @brief 读取 EMI 面板高度；完整合同见 d_display.h。
  */
 uint16_t d_display_get_height(void)
 {
     return lcd_h;
 }
 
+/**
+ * @brief 限制 EMI 背光的百分比及非零可见下限。
+ * @param[in] percent 请求百分比。
+ * @return 零保留；1至4提升至5；超过100限制为100。
+ */
 static u8 d_display_emi_clamp_brightness(u8 percent)
 {
     if (percent > 100) {
@@ -76,6 +81,11 @@ static u8 d_display_emi_clamp_brightness(u8 percent)
     return percent;
 }
 
+/**
+ * @brief 按 EMI 板级有效电平换算占空比。
+ * @param[in] percent 已限制范围的亮度。
+ * @return 低有效返回 100-percent，否则返回 percent。
+ */
 static u8 d_display_emi_brightness_to_pwm_duty(u8 percent)
 {
 #ifdef D_LCD_BL_ACTIVE_LOW
@@ -85,6 +95,10 @@ static u8 d_display_emi_brightness_to_pwm_duty(u8 percent)
 #endif
 }
 
+/**
+ * @brief 按板级有效电平执行背光数字开关。
+ * @param[in] on 非零开启，零关闭。
+ */
 static void d_display_emi_set_gpio_backlight(u8 on)
 {
     const struct lcd_platform_data *pdata = d_get_lcd_pdata();
@@ -95,6 +109,13 @@ static void d_display_emi_set_gpio_backlight(u8 on)
 }
 
 #ifdef D_LCD_BACKLIGHT_PWM_ENABLE
+/**
+ * @brief 在显式诊断配置下报告 PWM 错误或达到阈值的亮度变化。
+ * @param[in] brightness 请求亮度。
+ * @param[in] duty 实际提交的占空比。
+ * @param[in] err PWM 写入结果。
+ * @note 诊断关闭时无输出，不改变写入结果或业务状态。
+ */
 static void d_display_emi_pwm_log_set_result(u8 brightness, u8 duty, d_err_t err)
 {
 #ifdef BSP_LCD_PWM_VERIFY_LOG_ENABLE
@@ -133,6 +154,10 @@ static void d_display_emi_pwm_log_set_result(u8 brightness, u8 duty, d_err_t err
 #endif
 }
 
+/**
+ * @brief 按需打开并启动本适配的背光 PWM。
+ * @return 已有句柄或启动成功为 D_OK；否则返回底层错误，启动失败会关闭新句柄。
+ */
 static d_err_t d_display_emi_pwm_ensure_open(void)
 {
     d_err_t err;
@@ -183,6 +208,11 @@ static d_err_t d_display_emi_pwm_ensure_open(void)
     return err;
 }
 
+/**
+ * @brief 准备 PWM 后写入 EMI 亮度占空比，并按配置诊断。
+ * @param[in] percent 已限制范围的目标亮度。
+ * @return PWM 打开、启动或占空比写入结果。
+ */
 static d_err_t d_display_emi_pwm_set_brightness(u8 percent)
 {
     d_err_t err;
@@ -205,6 +235,9 @@ static d_err_t d_display_emi_pwm_set_brightness(u8 percent)
 }
 #endif
 
+/**
+ * @brief 保存 EMI 请求亮度并应用背光；完整合同见 d_display.h。
+ */
 d_err_t d_display_set_brightness(uint8_t percent)
 {
     u8 brightness = d_display_emi_clamp_brightness(percent);
@@ -234,6 +267,9 @@ d_err_t d_display_set_brightness(uint8_t percent)
 #endif
 }
 
+/**
+ * @brief 读取 EMI 请求亮度缓存；完整合同见 d_display.h。
+ */
 uint8_t d_display_get_brightness(void)
 {
     return s_lcd_brightness;
@@ -241,7 +277,7 @@ uint8_t d_display_get_brightness(void)
 
 
 /**
- * @brief 背光控制
+ * @brief 关闭或恢复 EMI 背光；完整合同见 d_display.h。
  */
 d_err_t d_display_set_backlight(uint8_t on)
 {
@@ -256,7 +292,9 @@ d_err_t d_display_set_backlight(uint8_t on)
 
 
 /**
- * @brief LCD + 触摸初始化任务
+ * @brief 在独立任务中复位并初始化面板，随后尝试启动触摸及背光。
+ * @param[in] p SDK 任务参数，当前未使用。
+ * @note 任务创建成功并非本函数已完成；触摸失败只报告，仍继续清屏及背光路径。
  */
 static void d_display_emi_task(void *p)
 {
@@ -317,7 +355,7 @@ static void d_display_emi_task(void *p)
 }
 
 /**
- * @brief BSP LCD 初始化入口
+ * @brief 仅创建 EMI 显示初始化任务，不同步等待面板完成；完整合同见 d_display.h。
  */
 d_err_t d_display_init(void)
 {
@@ -334,4 +372,41 @@ d_err_t d_display_init(void)
 }
 
 
+/**
+ * @brief EMI 未提供运行期翻转，返回不可用并清可选请求编号；合同见 d_display.h。
+ */
+d_err_t d_display_request_rotation(uint16_t degrees, uint32_t *request_id)
+{
+    (void)degrees;
+    if (request_id) *request_id = 0U;
+    return D_ERR_NOT_READY;
+}
+
+/**
+ * @brief EMI 不提供启动方向切换，返回不可用；合同见 d_display.h。
+ */
+d_err_t d_display_set_initial_rotation(uint16_t degrees)
+{
+    (void)degrees;
+    return D_ERR_NOT_READY;
+}
+
+/**
+ * @brief 向调用方返回不可用的方向能力快照；合同见 d_display.h。
+ */
+void d_display_get_rotation_snapshot(d_display_rotation_snapshot_t *snapshot)
+{
+    if (snapshot) {
+        memset(snapshot, 0, sizeof(*snapshot));
+        snapshot->result = D_ERR_NOT_READY;
+    }
+}
+
+/**
+ * @brief EMI 没有方向后端，保留无操作的周期入口。
+ */
+void d_display_process_rotation(void)
+{
+    /* EMI 当前没有运行方向后端。 */
+}
 #endif /* D_LCD_ENABLE && D_LCD_EMI_ILI948X_ENABLE */

@@ -1,6 +1,6 @@
 /**
  * @file cipher_panel_demo.c
- * @brief Cyber control panel main page demo.
+ * @brief 旧 Cipher Panel 的主页面、共用绘制辅助及子页导航。
  */
 #include "config/app_config.h"
 #if defined(D_LVGL_ENABLE) && (D_UI_TARGET == D_UI_CIPHER_PANEL)
@@ -28,11 +28,12 @@
 #define CIPHER_STATUS_UPDATE_MS   2000U
 #define CIPHER_BATTERY_FULL_VALUE 420U
 
+/** @brief 静态首页卡片配置；字符串和字体符号在整个页面期有效。 */
 typedef struct {
-    const char *title;
-    const char *icon;
-    cipher_page_t page;
-    uint32_t accent;
+    const char *title; /**< 借用的卡片标题。 */
+    const char *icon; /**< 借用的 LVGL 图标文字。 */
+    cipher_page_t page; /**< 点击后请求的旧根子页。 */
+    uint32_t accent; /**< RGB888 强调色。 */
 } cipher_tile_t;
 
 static const cipher_tile_t s_tiles[] = {
@@ -68,6 +69,9 @@ static lv_style_t s_style_small_btn;
 
 static void cipher_show_page(cipher_page_t page);
 
+/**
+ * @brief 只初始化一次旧 Cipher 根页面及卡片共用的静态样式。
+ */
 static void cipher_style_init(void)
 {
     if (s_style_inited) {
@@ -159,6 +163,10 @@ static void cipher_style_init(void)
     lv_style_set_pad_all(&s_style_small_btn, 0);
 }
 
+/**
+ * @brief 移除对象全部样式并禁止滚动，空指针忽略。
+ * @param[in,out] obj 本轮修改的 LVGL 对象，可为 NULL。
+ */
 static void cipher_reset_obj(lv_obj_t *obj)
 {
     if (obj == NULL) {
@@ -168,6 +176,16 @@ static void cipher_reset_obj(lv_obj_t *obj)
     lv_obj_clear_flag(obj, LV_OBJ_FLAG_SCROLLABLE);
 }
 
+/**
+ * @brief 创建基础对象、清除默认样式并设置几何及可选借用样式。
+ * @param[in,out] parent 由 LVGL 所有的有效父对象，新对象随父对象销毁。
+ * @param[in] x 相对父对象左边的像素坐标。
+ * @param[in] y 相对父对象上边的像素坐标。
+ * @param[in] w 对象宽度，像素。
+ * @param[in] h 对象高度，像素。
+ * @param[in] style 可选静态样式指针；LVGL 保留该引用，须覆盖对象生存期。
+ * @return 返回已挂在父对象下的新对象；该对象分配失败为 NULL。子装饰分配失败不回滚已创建的父对象。
+ */
 static lv_obj_t *cipher_obj(lv_obj_t *parent, int x, int y, int w, int h, const lv_style_t *style)
 {
     lv_obj_t *obj = lv_obj_create(parent);
@@ -183,11 +201,17 @@ static lv_obj_t *cipher_obj(lv_obj_t *parent, int x, int y, int w, int h, const 
     return obj;
 }
 
+/**
+ * @brief 按共用行样式创建固定几何容器。
+ */
 lv_obj_t *cipher_row(lv_obj_t *parent, int x, int y, int w, int h)
 {
     return cipher_obj(parent, x, y, w, h, &s_style_row);
 }
 
+/**
+ * @brief 创建不响应点击的实色圆角矩形。
+ */
 lv_obj_t *cipher_rect(lv_obj_t *parent, int x, int y, int w, int h, uint32_t color, int radius)
 {
     lv_obj_t *obj = cipher_obj(parent, x, y, w, h, NULL);
@@ -201,6 +225,18 @@ lv_obj_t *cipher_rect(lv_obj_t *parent, int x, int y, int w, int h, uint32_t col
     return obj;
 }
 
+/**
+ * @brief 在实色矩形上设置指定背景透明度。
+ * @param[in,out] parent 由 LVGL 所有的有效父对象，新对象随父对象销毁。
+ * @param[in] x 相对父对象左边的像素坐标。
+ * @param[in] y 相对父对象上边的像素坐标。
+ * @param[in] w 对象宽度，像素。
+ * @param[in] h 对象高度，像素。
+ * @param[in] color RGB888 颜色值。
+ * @param[in] opa LVGL 背景透明度。
+ * @param[in] radius 圆角半径，像素。
+ * @return 返回已挂在父对象下的新对象；该对象分配失败为 NULL。子装饰分配失败不回滚已创建的父对象。
+ */
 static lv_obj_t *cipher_opa_rect(lv_obj_t *parent, int x, int y, int w, int h,
                                  uint32_t color, lv_opa_t opa, int radius)
 {
@@ -212,6 +248,20 @@ static lv_obj_t *cipher_opa_rect(lv_obj_t *parent, int x, int y, int w, int h,
     return obj;
 }
 
+/**
+ * @brief 创建起止颜色及方向固定的渐变圆角矩形。
+ * @param[in,out] parent 由 LVGL 所有的有效父对象，新对象随父对象销毁。
+ * @param[in] x 相对父对象左边的像素坐标。
+ * @param[in] y 相对父对象上边的像素坐标。
+ * @param[in] w 对象宽度，像素。
+ * @param[in] h 对象高度，像素。
+ * @param[in] color 起始 RGB888 颜色。
+ * @param[in] grad_color 末端 RGB888 颜色。
+ * @param[in] opa 起止背景透明度。
+ * @param[in] radius 圆角半径，像素。
+ * @param[in] dir LVGL 渐变方向。
+ * @return 返回已挂在父对象下的新对象；该对象分配失败为 NULL。子装饰分配失败不回滚已创建的父对象。
+ */
 static lv_obj_t *cipher_grad_rect(lv_obj_t *parent, int x, int y, int w, int h,
                                   uint32_t color, uint32_t grad_color,
                                   lv_opa_t opa, int radius, lv_grad_dir_t dir)
@@ -227,6 +277,18 @@ static lv_obj_t *cipher_grad_rect(lv_obj_t *parent, int x, int y, int w, int h,
     return obj;
 }
 
+/**
+ * @brief 创建背景透明且不响应点击的一像素圆角边框。
+ * @param[in,out] parent 由 LVGL 所有的有效父对象，新对象随父对象销毁。
+ * @param[in] x 相对父对象左边的像素坐标。
+ * @param[in] y 相对父对象上边的像素坐标。
+ * @param[in] w 对象宽度，像素。
+ * @param[in] h 对象高度，像素。
+ * @param[in] color 边框 RGB888 颜色。
+ * @param[in] opa 边框透明度。
+ * @param[in] radius 圆角半径，像素。
+ * @return 返回已挂在父对象下的新对象；该对象分配失败为 NULL。子装饰分配失败不回滚已创建的父对象。
+ */
 static lv_obj_t *cipher_border_rect(lv_obj_t *parent, int x, int y, int w, int h,
                                     uint32_t color, lv_opa_t opa, int radius)
 {
@@ -243,6 +305,13 @@ static lv_obj_t *cipher_border_rect(lv_obj_t *parent, int x, int y, int w, int h
     return obj;
 }
 
+/**
+ * @brief 用数个子矩形组成玻璃卡片背景，分配失败允许局部装饰缺失。
+ * @param[in,out] parent 由 LVGL 所有的有效父对象，新对象随父对象销毁。
+ * @param[in] w 对象宽度，像素。
+ * @param[in] h 对象高度，像素。
+ * @param[in] accent 装饰高光的 RGB888 颜色。
+ */
 static void cipher_glass_backdrop(lv_obj_t *parent, int w, int h, uint32_t accent)
 {
     cipher_grad_rect(parent, 6, 7, w - 12, h - 14, 0x041321, 0x0C2E48,
@@ -252,6 +321,13 @@ static void cipher_glass_backdrop(lv_obj_t *parent, int w, int h, uint32_t accen
     cipher_opa_rect(parent, 18, h - 9, w - 36, 4, accent, LV_OPA_10, 2);
 }
 
+/**
+ * @brief 在给定原点叠加镜头装饰，子对象由父对象持有。
+ * @param[in,out] parent 由 LVGL 所有的有效父对象，新对象随父对象销毁。
+ * @param[in] x 相对父对象左边的像素坐标。
+ * @param[in] y 相对父对象上边的像素坐标。
+ * @param[in] accent 镜头装饰强调色。
+ */
 static void cipher_lens_stack(lv_obj_t *parent, int x, int y, uint32_t accent)
 {
     cipher_opa_rect(parent, x + 4, y + 5, 36, 36, CIPHER_PURPLE, LV_OPA_20, 18);
@@ -269,6 +345,9 @@ static void cipher_lens_stack(lv_obj_t *parent, int x, int y, uint32_t accent)
     cipher_opa_rect(parent, x + 11, y + 8, 8, 2, 0xE8FDFF, LV_OPA_30, 1);
 }
 
+/**
+ * @brief 创建裁剪模式标签并复制文字，字体由调用方保持有效。
+ */
 lv_obj_t *cipher_text(lv_obj_t *parent, const char *text, int x, int y, int w,
                       const lv_font_t *font, uint32_t color, lv_text_align_t align)
 {
@@ -287,6 +366,9 @@ lv_obj_t *cipher_text(lv_obj_t *parent, const char *text, int x, int y, int w,
     return label;
 }
 
+/**
+ * @brief 创建固定二十像素高的小标签卡片，内层文字失败不撤销卡片。
+ */
 lv_obj_t *cipher_chip(lv_obj_t *parent, const char *text, int x, int y, int w, uint32_t accent)
 {
     lv_obj_t *chip = cipher_obj(parent, x, y, w, 20, &s_style_small_btn);
@@ -298,6 +380,10 @@ lv_obj_t *cipher_chip(lv_obj_t *parent, const char *text, int x, int y, int w, u
     return chip;
 }
 
+/**
+ * @brief 仅在 WiFi 已完成 DHCP 时将 RSSI 分为四档。
+ * @return 信号档位 0～4；关闭、未联网或弱于最低阈值均为 0。
+ */
 static int cipher_wifi_signal_level(void)
 {
 #if D_FEATURE_WIFI
@@ -333,6 +419,10 @@ static int cipher_wifi_signal_level(void)
     return 0;
 }
 
+/**
+ * @brief 从 VBAT 电压作线性百分比估算，不引入系统电源事件处理。
+ * @return 裁剪后的 0～100；未启用 ADKEY 采样时为 0。
+ */
 static int cipher_battery_percent(void)
 {
 #if defined(TCFG_ADKEY_ENABLE) && TCFG_ADKEY_ENABLE
@@ -360,6 +450,13 @@ static int cipher_battery_percent(void)
 #endif
 }
 
+/**
+ * @brief 创建四条固定高度信号柱并裁剪点亮级别。
+ * @param[in,out] parent 由 LVGL 所有的有效父对象，新对象随父对象销毁。
+ * @param[in] x 相对父对象左边的像素坐标。
+ * @param[in] y 相对父对象上边的像素坐标。
+ * @param[in] level 点亮柱数，内部裁剪至 0～4。
+ */
 static void cipher_signal_icon(lv_obj_t *parent, int x, int y, int level)
 {
     const int bar_w = 3;
@@ -378,6 +475,13 @@ static void cipher_signal_icon(lv_obj_t *parent, int x, int y, int level)
     }
 }
 
+/**
+ * @brief 按裁剪百分比创建电池轮廓、填充及电极，低电量使用警示色。
+ * @param[in,out] parent 由 LVGL 所有的有效父对象，新对象随父对象销毁。
+ * @param[in] x 相对父对象左边的像素坐标。
+ * @param[in] y 相对父对象上边的像素坐标。
+ * @param[in] pct 电量百分比，内部裁剪至 0～100。
+ */
 static void cipher_battery_icon(lv_obj_t *parent, int x, int y, int pct)
 {
     lv_obj_t *body = cipher_obj(parent, x, y, 26, 14, NULL);
@@ -407,6 +511,9 @@ static void cipher_battery_icon(lv_obj_t *parent, int x, int y, int pct)
     cipher_rect(parent, x + 27, y + 4, 2, 6, fill_color, 1);
 }
 
+/**
+ * @brief 状态栏存在时删除旧子对象，再按当前信号与电量重建图标。
+ */
 static void cipher_status_bar_update(void)
 {
     int wifi_level;
@@ -423,6 +530,10 @@ static void cipher_status_bar_update(void)
     cipher_battery_icon(s_status_bar, 282, 10, battery_pct);
 }
 
+/**
+ * @brief 向父容器追加根背景和分区装饰。
+ * @param[in,out] parent 由 LVGL 所有的有效父对象，新对象随父对象销毁。
+ */
 static void cipher_background(lv_obj_t *parent)
 {
     cipher_rect(parent, 0, CIPHER_TOP_H, MY_DISP_HOR_RES, 112, 0x04101B, 0);
@@ -431,6 +542,10 @@ static void cipher_background(lv_obj_t *parent)
     cipher_rect(parent, 0, CIPHER_TOP_H, MY_DISP_HOR_RES, 1, CIPHER_ACCENT, 0);
 }
 
+/**
+ * @brief 创建并保存当前页状态栏，成功后立即更新其图标。
+ * @param[in,out] parent 由 LVGL 所有的有效父对象，新对象随父对象销毁。
+ */
 static void cipher_status_bar(lv_obj_t *parent)
 {
     lv_obj_t *bar = cipher_obj(parent, 0, 0, MY_DISP_HOR_RES, CIPHER_TOP_H, &s_style_status);
@@ -441,6 +556,9 @@ static void cipher_status_bar(lv_obj_t *parent)
     cipher_status_bar_update();
 }
 
+/**
+ * @brief 清空页面期时钟对象借用引用及刷新累计值，不删除 LVGL 对象。
+ */
 static void cipher_clock_reset(void)
 {
     s_clock_shadow = NULL;
@@ -450,6 +568,11 @@ static void cipher_clock_reset(void)
     s_clock_update_ms = 0;
 }
 
+/**
+ * @brief 将旧页面枚举映射为日志使用的固定英文名称。
+ * @param[in] page 旧根 UI 页面编号。
+ * @return 静态借用字符串；未知枚举返回 Unknown。
+ */
 static const char *cipher_page_name(cipher_page_t page)
 {
     switch (page) {
@@ -470,6 +593,12 @@ static const char *cipher_page_name(cipher_page_t page)
     }
 }
 
+/**
+ * @brief 读取系统秒数，先加固定八小时时差再调用 localtime_r。
+ * @param[out] timeinfo 成功时写入转换后的分解时间；失败不保证完整内容。
+ * @return 转换成功为 0，空输出、取时或转换失败为 -1。
+ * @note 固定偏移由本模块实现，不等同 Product UI 时间域的时区配置。
+ */
 static int cipher_get_local_time(struct tm *timeinfo)
 {
     time_t timestamp;
@@ -490,6 +619,9 @@ static int cipher_get_local_time(struct tm *timeinfo)
     return 0;
 }
 
+/**
+ * @brief 时钟及日期标签存在时写入当前时分秒，取时失败写入既有占位文字。
+ */
 static void cipher_clock_update(void)
 {
     struct tm timeinfo;
@@ -526,6 +658,10 @@ static void cipher_clock_update(void)
                           weekday, timeinfo.tm_mon + 1, timeinfo.tm_mday);
 }
 
+/**
+ * @brief 创建主时钟面板及周围强调色装饰。
+ * @param[in,out] parent 由 LVGL 所有的有效父对象，新对象随父对象销毁。
+ */
 static void cipher_title_panel(lv_obj_t *parent)
 {
     lv_obj_t *panel = cipher_obj(parent, 24, 54, 272, 112, &s_style_row);
@@ -547,6 +683,11 @@ static void cipher_title_panel(lv_obj_t *parent)
     cipher_rect(parent, 282, 130, 2, 26, CIPHER_PURPLE, 0);
 }
 
+/**
+ * @brief 创建时钟影子、主值、秒与日期，并保存借用引用立即刷新。
+ * @param[in,out] parent 由 LVGL 所有的有效父对象，新对象随父对象销毁。
+ * @note 各标签独立分配，允许部分失败；页面切换先清引用再清理父容器。
+ */
 static void cipher_title_lockup(lv_obj_t *parent)
 {
     lv_obj_t *shadow;
@@ -605,6 +746,10 @@ static void cipher_title_lockup(lv_obj_t *parent)
                 &lv_font_montserrat_12, CIPHER_MUTED, LV_TEXT_ALIGN_CENTER);
 }
 
+/**
+ * @brief 记录返回日志并切换到旧根首页。
+ * @param[in] e LVGL 点击事件，当前未读取载荷。
+ */
 static void cipher_back_event(lv_event_t *e)
 {
     (void)e;
@@ -613,6 +758,10 @@ static void cipher_back_event(lv_event_t *e)
     cipher_show_page(CIPHER_PAGE_HOME);
 }
 
+/**
+ * @brief 创建返回首页按钮及箭头，按钮分配失败直接返回。
+ * @param[in,out] parent 由 LVGL 所有的有效父对象，新对象随父对象销毁。
+ */
 static void cipher_add_back(lv_obj_t *parent)
 {
     lv_obj_t *btn = lv_btn_create(parent);
@@ -628,6 +777,10 @@ static void cipher_add_back(lv_obj_t *parent)
     cipher_text(btn, LV_SYMBOL_LEFT, 0, 8, 38, &lv_font_montserrat_18, CIPHER_ACCENT, LV_TEXT_ALIGN_CENTER);
 }
 
+/**
+ * @brief 从事件 user_data 取页面枚举并同步重建目标页。
+ * @param[in] e 有效点击事件；user_data 按 intptr_t 保存页面值。
+ */
 static void cipher_nav_event(lv_event_t *e)
 {
     cipher_page_t page = (cipher_page_t)(intptr_t)lv_event_get_user_data(e);
@@ -637,6 +790,9 @@ static void cipher_nav_event(lv_event_t *e)
     cipher_show_page(page);
 }
 
+/**
+ * @brief 创建导航卡片，以事件 user_data 保存目标页面值。
+ */
 lv_obj_t *cipher_button(lv_obj_t *parent, const char *text, const char *icon,
                         int x, int y, int w, int h, cipher_page_t page, uint32_t accent)
 {
@@ -667,6 +823,16 @@ lv_obj_t *cipher_button(lv_obj_t *parent, const char *text, const char *icon,
     return btn;
 }
 
+/**
+ * @brief 创建首页玻璃导航卡及镜头装饰，不持有 tile 指针。
+ * @param[in,out] parent 由 LVGL 所有的有效父对象，新对象随父对象销毁。
+ * @param[in] x 相对父对象左边的像素坐标。
+ * @param[in] y 相对父对象上边的像素坐标。
+ * @param[in] w 对象宽度，像素。
+ * @param[in] h 对象高度，像素。
+ * @param[in] tile 本次借用的卡片配置，NULL 时返回 NULL。
+ * @return 返回已挂在父对象下的新对象；该对象分配失败为 NULL。子装饰分配失败不回滚已创建的父对象。
+ */
 static lv_obj_t *cipher_home_glass_button(lv_obj_t *parent, const cipher_tile_t *tile,
                                           int x, int y, int w, int h)
 {
@@ -706,6 +872,10 @@ static lv_obj_t *cipher_home_glass_button(lv_obj_t *parent, const cipher_tile_t 
     return btn;
 }
 
+/**
+ * @brief 重建首页背景、状态与时钟，并按固定列表追加导航卡。
+ * @param[in,out] parent 由 LVGL 所有的有效父对象，新对象随父对象销毁。
+ */
 static void cipher_home(lv_obj_t *parent)
 {
     cipher_background(parent);
@@ -719,6 +889,9 @@ static void cipher_home(lv_obj_t *parent)
     }
 }
 
+/**
+ * @brief 追加子页背景、状态栏、返回按钮及标题装饰。
+ */
 void cipher_page_header(lv_obj_t *parent, const char *title)
 {
     cipher_background(parent);
@@ -730,6 +903,11 @@ void cipher_page_header(lv_obj_t *parent, const char *title)
     cipher_rect(parent, 146, 78, 34, 2, CIPHER_PURPLE, 0);
 }
 
+/**
+ * @brief 清空旧页面借用引用并删除根子对象，再同步创建目标子页。
+ * @param[in] page 目标页面枚举，越界回退首页。
+ * @note 根容器不存在时忽略；这是旧根内部导航，不向页面管理器另建页面实例。
+ */
 static void cipher_show_page(cipher_page_t page)
 {
     cipher_page_t next_page = page;
@@ -770,6 +948,11 @@ static void cipher_show_page(cipher_page_t page)
     }
 }
 
+/**
+ * @brief 初始化样式与依赖，在管理器根容器创建旧 Cipher 首页。
+ * @param[in,out] parent 页面管理器持有的根容器，本模块借用至页面生命周期结束。
+ * @return 父对象为空为 -1；其余路径为 0，未统一传播各子对象分配失败。
+ */
 static int cipher_panel_demo_create(lv_obj_t *parent)
 {
     if (parent == NULL) {
@@ -788,11 +971,19 @@ static int cipher_panel_demo_create(lv_obj_t *parent)
     return 0;
 }
 
+/**
+ * @brief 记录旧 Cipher 页面进入日志。
+ */
 static void cipher_panel_demo_enter(void)
 {
     printf(LOG_TAG "Cipher panel demo enter\n");
 }
 
+/**
+ * @brief 转发电源周期并按累计毫秒刷新时钟、状态栏及当前子页。
+ * @param[in] elapsed_ms 本轮 UI 更新间隔毫秒数。
+ * @note 达到阈值后清零，不补发跨过的多个周期；页面对象只在 UI 调用上下文访问。
+ */
 static void cipher_panel_demo_update(uint32_t elapsed_ms)
 {
     d_screen_power_update(elapsed_ms);
@@ -831,6 +1022,10 @@ static const page_desc_t s_cipher_panel_demo_desc = {
     .is_active  = 0,
 };
 
+/**
+ * @brief 将静态 Cipher 根页面描述注册为主页面。
+ * @return 原样返回 page_manager_register 的结果。
+ */
 int cipher_panel_demo_register(void)
 {
     return page_manager_register(&s_cipher_panel_demo_desc);

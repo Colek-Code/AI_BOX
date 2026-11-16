@@ -1,4 +1,4 @@
-/** @file product_ui_pomodoro_service.c @brief Background timing; IO acknowledgements never replace live data. */
+/** @file product_ui_pomodoro_service.c @brief 独立计时及保存所有者；持久化完成确认不覆盖仍在更新的活动数据。 */
 #include "config/app_config.h"
 #if defined(D_LVGL_ENABLE) && (D_UI_TARGET == D_UI_PRODUCT)
 #include "product_ui_pomodoro_service.h"
@@ -36,6 +36,11 @@ typedef struct {
     uint8_t blocked;
 } product_ui_pomodoro_load_t;
 
+/**
+ * @brief 读取两槽并选择最新有效记录，任一不可判读或较新版本均保护整个初始加载。
+ * @param[out] loaded 接收记录、序号、槽位及加载错误分类。
+ * @note 可读旧槽不能证明另一个不可读槽无新数据；保护时以会话数据启动，留给显式重试合并。
+ */
 static void product_ui_pomodoro_read_saved(product_ui_pomodoro_load_t *loaded)
 {
     product_ui_pomodoro_saved_t candidate;
@@ -53,7 +58,7 @@ static void product_ui_pomodoro_read_saved(product_ui_pomodoro_load_t *loaded)
             }
             continue;
         }
-        /* A newer format must not be replaced with this firmware's defaults. */
+        /* 本固件不能用默认值覆盖较新的记录格式。 */
         if (memcmp(record, "POMO", 4U) == 0 && (record[4] != 1U || record[5] != 0U)) {
             loaded->blocked = 1U;
             loaded->error = D_ERR_NOT_READY;
@@ -70,18 +75,25 @@ static void product_ui_pomodoro_read_saved(product_ui_pomodoro_load_t *loaded)
             loaded->has_record = 1U;
         }
     }
-    /* A readable older slot does not establish what an unread slot contains.
-     * Start session-only data so a later retry can merge without double count. */
+    /* 可读旧槽不能证明不可读槽中没有新数据；先使用会话数据，
+     * 以便显式重试后合并且不重复计数。 */
     if (loaded->blocked) loaded->has_record = 0U;
     else loaded->error = loaded->has_record ? D_OK : damaged ? D_ERR_INVALID_ARG : D_ERR_NOT_FOUND;
 }
 
+/**
+ * @brief 在持有服务临界区时推进非零保存请求编号。
+ */
 static void product_ui_pomodoro_dirty_locked(void)
 {
     s_pomodoro.state.request_id++;
     if (s_pomodoro.state.request_id == 0U) s_pomodoro.state.request_id = 1U;
 }
 
+/**
+ * @brief 独立结算计时及统计，在临界区外按新事件提交或取消提示音。
+ * @param[in] context 计时器上下文，当前未使用。
+ */
 static void product_ui_pomodoro_tick(void *context)
 {
     uint32_t date = product_ui_pomodoro_today();
@@ -110,6 +122,13 @@ static void product_ui_pomodoro_tick(void *context)
     }
 }
 
+/**
+ * @brief 编码到另一保存槽，完整写入并逐字节读回确认。
+ * @param[in] saved 本次冻结的保存值副本。
+ * @param[in] slot 目标 A/B 槽。
+ * @param[in] sequence 本次记录序号。
+ * @return 完整写入且读回一致为 D_OK，短写、短读或内容不符为 IO。
+ */
 static d_err_t product_ui_pomodoro_write(const product_ui_pomodoro_saved_t *saved,
                                          uint8_t slot, uint32_t sequence)
 {
@@ -122,6 +141,11 @@ static d_err_t product_ui_pomodoro_write(const product_ui_pomodoro_saved_t *save
     return D_OK;
 }
 
+/**
+ * @brief 锁外重新读取初始记录，锁内只合并一次并保留本次设置／清空意图。
+ * @param[in] request 本次重试读取所属的请求编号。
+ * @note 保存关闭声音的恢复设置也在锁外执行取消，不将 IO 完成覆盖为旧活动阶段。
+ */
 static void product_ui_pomodoro_recover_load(uint32_t request)
 {
     product_ui_pomodoro_load_t loaded;
@@ -151,11 +175,16 @@ static void product_ui_pomodoro_recover_load(uint32_t request)
     if (loaded.blocked || !session_dirty) s_pomodoro.state.completed_id = request;
     s_pomodoro.state.saving = 0U;
     OS_EXIT_CRITICAL();
-    /* Restoring a saved sound-off setting has the same cancellation contract
-     * as an explicit settings save. Audio ownership is always touched unlocked. */
+    /* 恢复已保存的关闭声音设置也遵循显式保存时的取消合同；
+     * 始终在服务临界区外操作音频所有者。 */
     if (cancel_sound && event_id != 0U) d_local_prompt_cancel(event_id);
 }
 
+/**
+ * @brief 串行恢复初始加载或冻结保存副本，按请求编号确认完成。
+ * @param[in] context 任务上下文，当前未使用。
+ * @note IO 在临界区外执行；保存成功只确认相应 saved_revision，不覆盖同时更新的活动数据。相同失败代次等显式重试。
+ */
 static void product_ui_pomodoro_save_worker(void *context)
 {
     (void)context;
@@ -214,6 +243,9 @@ static void product_ui_pomodoro_save_worker(void *context)
     }
 }
 
+/**
+ * @brief 初始化前读取 A/B 记录及保护状态，建立不触发默认写入的活动模型。
+ */
 static void product_ui_pomodoro_load(void)
 {
     product_ui_pomodoro_load_t loaded;
@@ -224,10 +256,13 @@ static void product_ui_pomodoro_load(void)
     s_pomodoro.active_slot = loaded.has_record ? loaded.slot : 0U;
     product_ui_pomodoro_model_init(&s_pomodoro.state.model, loaded.has_record ? &loaded.saved : NULL);
     s_pomodoro.state.load_error = loaded.error;
-    /* Empty/default startup is not a write request. */
+    /* 空记录／默认值启动不是写入请求。 */
     s_pomodoro.state.persisted_revision = s_pomodoro.state.model.saved_revision;
 }
 
+/**
+ * @brief 一次性读取 A/B 记录，建立后台保存及独立计时。
+ */
 d_err_t product_ui_pomodoro_init(void)
 {
     OS_ENTER_CRITICAL();
@@ -255,6 +290,9 @@ d_err_t product_ui_pomodoro_init(void)
     return s_pomodoro.state.timer_error;
 }
 
+/**
+ * @brief 复制服务值快照并附带共享提示音当前错误。
+ */
 void product_ui_pomodoro_get_snapshot(product_ui_pomodoro_snapshot_t *snapshot)
 {
     d_local_prompt_snapshot_t audio;
@@ -266,6 +304,9 @@ void product_ui_pomodoro_get_snapshot(product_ui_pomodoro_snapshot_t *snapshot)
     snapshot->audio_error = audio.ready ? audio.error : D_ERR_NOT_READY;
 }
 
+/**
+ * @brief 先结算单调时间，再按操作代次执行计时命令。
+ */
 d_err_t product_ui_pomodoro_execute(product_ui_pomodoro_command_e command, uint32_t generation)
 {
     d_err_t result;
@@ -284,6 +325,11 @@ d_err_t product_ui_pomodoro_execute(product_ui_pomodoro_command_e command, uint3
     return result;
 }
 
+/**
+ * @brief 在服务临界区内登记保存请求，再报告存储或初始加载准入。
+ * @param[out] request 可为空，接收已推进的请求编号，即使之后报告不可保存。
+ * @return 可保存为 D_OK，无 worker 为 NOT_READY，加载保护时返回 load_error。
+ */
 static d_err_t product_ui_pomodoro_request_locked(uint32_t *request)
 {
     product_ui_pomodoro_dirty_locked();
@@ -292,6 +338,9 @@ static d_err_t product_ui_pomodoro_request_locked(uint32_t *request)
     return s_pomodoro.load_blocked ? s_pomodoro.state.load_error : D_OK;
 }
 
+/**
+ * @brief 立即更新活动设置并生成后台保存请求。
+ */
 d_err_t product_ui_pomodoro_save_settings(const product_ui_pomodoro_settings_t *settings, uint32_t *request)
 {
     d_err_t result;
@@ -309,6 +358,9 @@ d_err_t product_ui_pomodoro_save_settings(const product_ui_pomodoro_settings_t *
     return result;
 }
 
+/**
+ * @brief 立即清空活动统计并生成保存请求，不改变当前阶段。
+ */
 d_err_t product_ui_pomodoro_clear_stats(uint32_t *request)
 {
     d_err_t result;
@@ -323,6 +375,9 @@ d_err_t product_ui_pomodoro_clear_stats(uint32_t *request)
     return result;
 }
 
+/**
+ * @brief 显式重试受保护的首次读取或失败保存，同步返回受理情况。
+ */
 d_err_t product_ui_pomodoro_retry_save(uint32_t *request)
 {
     d_err_t result;
@@ -337,11 +392,14 @@ d_err_t product_ui_pomodoro_retry_save(uint32_t *request)
     }
     s_pomodoro.retry = 1U;
     result = product_ui_pomodoro_request_locked(request);
-    if (s_pomodoro.state.storage_ready) result = D_OK; /* Retry accepted, not yet recovered/saved. */
+    if (s_pomodoro.state.storage_ready) result = D_OK; /* 只确认重试受理，尚未恢复或保存。 */
     OS_EXIT_CRITICAL();
     return result;
 }
 
+/**
+ * @brief 匹配当前事件时确认其提示，并取消不晚于指定事件的声音。
+ */
 void product_ui_pomodoro_acknowledge(uint32_t event_id)
 {
     OS_ENTER_CRITICAL();
@@ -351,6 +409,9 @@ void product_ui_pomodoro_acknowledge(uint32_t event_id)
     if (event_id != 0U) d_local_prompt_cancel(event_id);
 }
 
+/**
+ * @brief 先结算当前计时，再暂停运行阶段、关闭新操作并静默共享提示音。
+ */
 void product_ui_pomodoro_quiesce_begin(void)
 {
     product_ui_pomodoro_tick(NULL);
@@ -363,6 +424,9 @@ void product_ui_pomodoro_quiesce_begin(void)
     d_local_prompt_quiesce_begin();
 }
 
+/**
+ * @brief 解除业务及提示音静默，已暂停阶段仍需用户显式继续。
+ */
 void product_ui_pomodoro_quiesce_cancel(void)
 {
     OS_ENTER_CRITICAL();
@@ -371,6 +435,9 @@ void product_ui_pomodoro_quiesce_cancel(void)
     d_local_prompt_quiesce_cancel();
 }
 
+/**
+ * @brief 限时等待脏保存数据及在途 IO 收敛。
+ */
 d_err_t product_ui_pomodoro_wait_idle(uint32_t timeout_ms)
 {
     uint32_t start = product_ui_pomodoro_clock_ms();
@@ -390,6 +457,9 @@ d_err_t product_ui_pomodoro_wait_idle(uint32_t timeout_ms)
     }
 }
 
+/**
+ * @brief 静默并停止计时器，要求保存 worker 在工作结束后退出。
+ */
 d_err_t product_ui_pomodoro_service_stop(uint32_t timeout_ms)
 {
     uint32_t start = product_ui_pomodoro_clock_ms();

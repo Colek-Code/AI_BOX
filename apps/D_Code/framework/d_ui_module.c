@@ -1,6 +1,6 @@
 /**
  * @file d_ui_module.c
- * @brief Static UI page-module registry.
+ * @brief 实现静态 UI 模块注册表，不拥有模块指针指向的对象。
  */
 
 #include "config/app_config.h"
@@ -26,6 +26,9 @@ static int s_next_page_type = 1;  /* 从1开始，0保留给主页面 */
 //                              公共接口                                            //
 //*********************************************************************************//
 
+/**
+ * @brief 清空静态模块目录及自动分配的页面编号。 完整合同见 d_ui_module.h。
+ */
 void d_ui_module_init(void)
 {
     s_module_count = 0;
@@ -36,6 +39,9 @@ void d_ui_module_init(void)
            D_MODULE_MAX_COUNT);
 }
 
+/**
+ * @brief 借用模块描述符并为其注册页面，成功后登记到模块目录。 完整合同见 d_ui_module.h。
+ */
 int d_ui_module_register(const d_ui_module_t *module)
 {
     int page_type = PAGE_TYPE_INVALID;
@@ -79,11 +85,17 @@ int d_ui_module_register(const d_ui_module_t *module)
     return page_type;
 }
 
+/**
+ * @brief 读取已成功登记的模块数量。 完整合同见 d_ui_module.h。
+ */
 int d_ui_module_get_count(void)
 {
     return s_module_count;
 }
 
+/**
+ * @brief 按目录索引借用模块描述符。 完整合同见 d_ui_module.h。
+ */
 const d_ui_module_t *d_ui_module_get(int index)
 {
     if (index < 0 || index >= s_module_count) {
@@ -92,6 +104,9 @@ const d_ui_module_t *d_ui_module_get(int index)
     return s_modules[index];
 }
 
+/**
+ * @brief 按目录索引查询自动分配的页面编号。 完整合同见 d_ui_module.h。
+ */
 int d_ui_module_get_page_type(int index)
 {
     if (index < 0 || index >= s_module_count) {
@@ -100,6 +115,9 @@ int d_ui_module_get_page_type(int index)
     return s_page_types[index];
 }
 
+/**
+ * @brief 按注册顺序调用各模块的可选初始化回调。 完整合同见 d_ui_module.h。
+ */
 d_err_t d_ui_module_init_all(void)
 {
     const d_ui_module_t *module;
@@ -124,6 +142,9 @@ d_err_t d_ui_module_init_all(void)
     return D_OK;
 }
 
+/**
+ * @brief 判断模块是否提供页面注册回调。 完整合同见 d_ui_module.h。
+ */
 int d_ui_module_has_page(const d_ui_module_t *module)
 {
     return (module && module->register_page) ? 1 : 0;

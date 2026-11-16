@@ -1,6 +1,6 @@
 /**
  * @file d_sdk_peripheral_config.h
- * @brief JieLi key, storage and USB configuration owned by board peripherals.
+ * @brief 解析归属板级外设的按键、存储及 USB 配置。
  */
 
 #ifndef D_SDK_PERIPHERAL_CONFIG_H
@@ -13,12 +13,19 @@
 #endif
 #define TCFG_IRKEY_ENABLE                    0
 
-#if D_BOARD_IS_EMI_ILI948X
+#if D_BOARD_IS_EMI_ILI948X || (D_BOARD_IS_GC9307 && D_PRODUCT_MUSIC_ENABLE)
 #define TCFG_SD0_ENABLE                      1
 #define TCFG_SD1_ENABLE                      0
 #else
 #define TCFG_SD0_ENABLE                      0
 #define TCFG_SD1_ENABLE                      0
+#endif
+
+/* GC9307 开发板 PB8 用作 SDGAT；EMI 板的 PB8 用于背光，不能混用。 */
+#if D_BOARD_IS_GC9307 && D_PRODUCT_MUSIC_ENABLE
+#define TCFG_SD_POWER_ENABLE                 1
+#else
+#define TCFG_SD_POWER_ENABLE                 0
 #endif
 
 #if TCFG_SD0_ENABLE
@@ -69,7 +76,7 @@
 #define TCFG_SD_CLK                          20000000
 #endif
 
-#if TCFG_EQ_ONLINE_ENABLE
+#if TCFG_EQ_ONLINE_ENABLE || D_QWEN_FACTORY_TEST_BUILD
 #define TCFG_PC_ENABLE                       1
 #define USB_DEVICE_CLASS_CONFIG              (CDC_CLASS)
 #else

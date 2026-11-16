@@ -1,4 +1,4 @@
-/** @file ota_service.c @brief Request acceptance is distinct from Flash completion. */
+/** @file ota_service.c @brief 区分请求受理与 Flash 完成，保持升级事务所有权至受检收尾。 */
 #include "ota_port.h"
 #include <string.h>
 
@@ -13,12 +13,23 @@ static struct {
     uint8_t expired;
     uint8_t sdk_owned;
     uint8_t shutdown;
-    uint8_t is_upgrade; /* Transaction identity survives uncertain/timeout states. */
+    uint8_t is_upgrade; /* 事务身份跨不确定或超时状态持续保留。 */
     uint8_t buffer[OTA_PACKET_SIZE];
 } s_ota;
 
+/**
+ * @brief 推进环形非零请求编号或代次。
+ * @param[in] value 当前值。
+ * @return 下一非零值。
+ */
 static uint32_t ota_next(uint32_t value) { return value + 1U ? value + 1U : 1U; }
 
+/**
+ * @brief 在锁内发布状态及版本，再在锁外通知事件。
+ * @param[in] state 新事务状态。
+ * @param[in] error 业务错误分类。
+ * @param[in] detail 实际错误细节。
+ */
 static void ota_state(ota_state_e state, ota_error_e error, d_err_t detail)
 {
     ota_port_lock();
@@ -30,6 +41,10 @@ static void ota_state(ota_state_e state, ota_error_e error, d_err_t detail)
     ota_port_notify(state);
 }
 
+/**
+ * @brief 核对取消与十分钟事务总期限，必要时锁存过期。
+ * @return 已取消或过期返回非零。
+ */
 static uint8_t ota_stopped(void)
 {
     uint8_t stopped;
@@ -40,6 +55,9 @@ static uint8_t ota_stopped(void)
     return stopped;
 }
 
+/**
+ * @brief 独立观察阻塞任务的绝对期限并发布 UNCERTAIN 诊断；完整合同见 ota_service.h。
+ */
 void ota_service_observe_deadline(void)
 {
     ota_port_lock();
@@ -54,6 +72,13 @@ void ota_service_observe_deadline(void)
     ota_port_unlock();
 }
 
+/**
+ * @brief 打开当前候选传输，仅对网络错误最多尝试三次。
+ * @param[in] head 非零使用 HEAD，否则 GET。
+ * @param[in] etag 可选 If-Match 值。
+ * @param[out] response HTTP 响应摘要输出。
+ * @return 打开结果；取消或总期限到期返回 D_ERR_TIMEOUT。
+ */
 static d_err_t ota_open(uint8_t head, const char *etag, ota_http_response_t *response)
 {
     unsigned attempt;
@@ -67,10 +92,16 @@ static d_err_t ota_open(uint8_t head, const char *etag, ota_http_response_t *res
     return result;
 }
 
+/**
+ * @brief 在交给 SDK 前检查 200、确定长度和传输大小上限。
+ * @param[in] response 已解析 HTTP 响应。
+ * @return 符合约束返回 D_OK，否则 D_ERR_INVALID_ARG。
+ * @note 非活动分区实际大小仍由 SDK 根据 app_core 检查。
+ */
 static d_err_t ota_response_check(const ota_http_response_t *response)
 {
-    /* SDK checks the actual inactive-bank size from app_core. Bound transport
-     * input here before handing a header to the SDK. */
+    /* SDK 根据 app_core 检查实际非活动分区大小；
+     * 交给 SDK 前先在本层限制传输输入。 */
     if (response->status != 200U || !response->has_length ||
         response->length <= OTA_PACKAGE_PREFIX || response->length > 16U * 1024U * 1024U ||
         (s_ota.candidate.expected_size && response->length != s_ota.candidate.expected_size))
@@ -78,6 +109,11 @@ static d_err_t ota_response_check(const ota_http_response_t *response)
     return D_OK;
 }
 
+/**
+ * @brief 从传输中读满当前静态包缓冲的指定长度。
+ * @param[in] length 待读字节数，调用者保证不超过 OTA_PACKET_SIZE。
+ * @return 读满返回 D_OK；取消、超时或网络异常返回对应错误。
+ */
 static d_err_t ota_read_exact(uint32_t length)
 {
     uint32_t offset = 0U;
@@ -91,6 +127,11 @@ static d_err_t ota_read_exact(uint32_t length)
     return D_OK;
 }
 
+/**
+ * @brief 通过 HEAD 元数据与 GET 固定前缀检查候选对象。
+ * @return 核验成功返回 D_OK；传输、包头或期限错误返回对应值。
+ * @note HEAD 不支持时退到 GET；此过程不申请维护或写 Flash。
+ */
 static d_err_t ota_check_candidate(void)
 {
     ota_http_response_t response;
@@ -106,8 +147,8 @@ static d_err_t ota_check_candidate(void)
         metadata = response;
     }
     ota_transport_close();
-    /* HEAD alone can describe an HTML error page. Inspect only the fixed UFW
-     * prefix before offering confirmation; no Flash/maintenance side effect. */
+    /* 仅 HEAD 也可能描述 HTML 错误页；提供确认前先检查固定 UFW 前缀，
+     * 此阶段没有 Flash 写入或维护占用副作用。 */
     result = ota_open(0U, metadata.etag, &response);
     if (result != D_OK) return result;
     result = ota_response_check(&response);
@@ -125,6 +166,11 @@ static d_err_t ota_check_candidate(void)
     return result == D_OK ? D_ERR_TIMEOUT : result;
 }
 
+/**
+ * @brief 关闭传输，受检释放 SDK，最后归还产品维护占用。
+ * @return 全部收尾完成返回 1；任一步仍未确认返回 0。
+ * @note 未完成时保留工作任务与占用，调用者继续重试同一收尾。
+ */
 static uint8_t ota_cleanup(void)
 {
     ota_transport_close();
@@ -141,6 +187,12 @@ static uint8_t ota_cleanup(void)
     return 1U;
 }
 
+/**
+ * @brief 下载并流式写入、校验包正文与摘要，最后提交 SDK 升级信息。
+ * @param[out] error 当前失败所属业务阶段分类输出。
+ * @return 完整提交结果；传输、包、写入、校验或提交失败返回实际错误。
+ * @note 提交前始终检查事务期限；写入开始前先保留 SDK 所有权标记，失败不能推定无资源。
+ */
 static d_err_t ota_download(ota_error_e *error)
 {
     ota_http_response_t response;
@@ -168,8 +220,8 @@ static d_err_t ota_download(ota_error_e *error)
     chunk = ota_sdk_first_size();
     if (chunk < 256U || chunk > OTA_PACKET_SIZE) return D_ERR_IO;
     if (chunk > response.length) chunk = response.length;
-    /* Preserve the inspected prefix. Fill the remainder without a second
-     * download buffer; all following reads start at buffer offset zero. */
+    /* 保留已检查的前缀，继续填满首包而不增加第二个下载缓冲；
+     * 后续各次读取均从缓冲偏移零开始。 */
     {
         uint32_t offset = OTA_PACKAGE_PREFIX;
         while (offset < chunk) {
@@ -220,6 +272,11 @@ static d_err_t ota_download(ota_error_e *error)
     return ota_sdk_commit();
 }
 
+/**
+ * @brief 执行检查或已确认升级，并在资源收尾后发布最终任务状态。
+ * @param[in] context 以指针值编码的升级标志，非零表示已确认升级。
+ * @note 提交成功保留维护至重启；不确定收尾持续保留原任务，禁止新事务进入。
+ */
 static void ota_worker(void *context)
 {
     uint8_t upgrading = (uintptr_t)context != 0U;
@@ -244,8 +301,8 @@ static void ota_worker(void *context)
     }
     ota_transport_close();
     if (upgrading && result == D_OK) {
-        /* Commit is irreversible. A late success still belongs to this
-         * transaction; retain maintenance until reboot instead of resuming. */
+        /* 提交已经生效，迟到成功仍属于当前事务；
+         * 保留维护至重启，不恢复业务运行。 */
         if (ota_sdk_close() != D_OK) {
             ota_state(OTA_UNCERTAIN, OTA_ERROR_CLEANUP, D_ERR_BUSY);
             while (ota_sdk_close() != D_OK) ota_port_wait(100U);
@@ -259,8 +316,8 @@ static void ota_worker(void *context)
     clean = ota_cleanup();
     if (!clean) {
         ota_state(OTA_UNCERTAIN, OTA_ERROR_CLEANUP, result == D_OK ? D_ERR_BUSY : result);
-        /* Keep ownership, but continue observing late stop/save completion.
-         * No retry or new Flash operation is admitted during this wait. */
+        /* 保留所有权并持续观察迟到的停止或保存完成；
+         * 等待期间不受理重试或新的 Flash 操作。 */
         do { ota_port_wait(100U); clean = ota_cleanup(); } while (!clean);
     }
     if (ota_stopped()) result = D_ERR_TIMEOUT;
@@ -274,10 +331,13 @@ static void ota_worker(void *context)
     s_ota.snapshot.revision = ota_next(s_ota.snapshot.revision);
     finished = s_ota.snapshot.state;
     ota_port_unlock();
-    /* Do not touch mutable transaction data after publishing worker completion. */
+    /* 发布工作任务完成后不再访问可变事务数据。 */
     ota_port_notify(finished);
 }
 
+/**
+ * @brief 一次性建立 OTA 状态，并在有效时复制默认发布 URL；完整合同见 ota_service.h。
+ */
 d_err_t ota_service_init(void)
 {
     const char *source = ota_port_default_url();
@@ -296,6 +356,9 @@ d_err_t ota_service_init(void)
     return D_OK;
 }
 
+/**
+ * @brief 在没有工作任务或其他维护占用时复制候选升级信息；完整合同见 ota_service.h。
+ */
 d_err_t ota_service_set_candidate(const ota_candidate_t *candidate, uint32_t *generation)
 {
     ota_url_t parsed;
@@ -310,7 +373,8 @@ d_err_t ota_service_set_candidate(const ota_candidate_t *candidate, uint32_t *ge
         if ((unsigned char)candidate->version[index] < 0x20U) return D_ERR_INVALID_ARG;
     ota_port_lock();
     if (!s_ota.initialized) { ota_port_unlock(); return D_ERR_NOT_READY; }
-    if (s_ota.snapshot.worker_active || s_ota.snapshot.maintenance || s_ota.shutdown) {
+    if (s_ota.snapshot.worker_active || s_ota.snapshot.maintenance || s_ota.shutdown
+        ) {
         ota_port_unlock(); return D_ERR_BUSY;
     }
     s_ota.candidate = *candidate;
@@ -329,6 +393,9 @@ d_err_t ota_service_set_candidate(const ota_candidate_t *candidate, uint32_t *ge
     return D_OK;
 }
 
+/**
+ * @brief 空闲时复制产品维护回调描述，允许检查或失败完成后替换；完整合同见 ota_service.h。
+ */
 d_err_t ota_service_register_maintenance(const ota_maintenance_backend_t *backend)
 {
     if (!backend || !backend->begin || !backend->wait || !backend->release) return D_ERR_INVALID_ARG;
@@ -339,6 +406,14 @@ d_err_t ota_service_register_maintenance(const ota_maintenance_backend_t *backen
     return D_OK;
 }
 
+/**
+ * @brief 原子受理一次检查或升级，再创建后台工作任务。
+ * @param[in] upgrade 非零表示确认升级，0 表示重新检查。
+ * @param[in] generation 确认升级时要求匹配的已检查代次。
+ * @param[out] request 可选输出，记录本次受理编号。
+ * @return 创建成功返回 D_OK；准入或创建失败返回对应错误。
+ * @note 重查更新代次，防止同一 URL 下的新对象继承旧确认。
+ */
 static d_err_t ota_start(uint8_t upgrade, uint32_t generation, uint32_t *request)
 {
     d_err_t result;
@@ -347,7 +422,8 @@ static d_err_t ota_start(uint8_t upgrade, uint32_t generation, uint32_t *request
     if (!s_ota.initialized || !s_ota.snapshot.configured) {
         ota_port_unlock(); return D_ERR_NOT_READY;
     }
-    if (s_ota.snapshot.worker_active || s_ota.snapshot.maintenance || s_ota.shutdown) {
+    if (s_ota.snapshot.worker_active || s_ota.snapshot.maintenance || s_ota.shutdown
+        ) {
         ota_port_unlock(); return D_ERR_BUSY;
     }
     if (upgrade && (generation != s_ota.snapshot.generation ||
@@ -356,8 +432,8 @@ static d_err_t ota_start(uint8_t upgrade, uint32_t generation, uint32_t *request
     }
     s_ota.snapshot.request = ota_next(s_ota.snapshot.request);
     if (!upgrade) {
-        /* Revalidation can observe a different object at the same URL. A
-         * confirmation belongs to the completed check, not merely the URL. */
+        /* 同一 URL 重新核验可能得到不同对象；
+         * 确认必须绑定已完成的本次检查，不能只绑定 URL。 */
         s_ota.snapshot.generation = ota_next(s_ota.snapshot.generation);
         s_ota.snapshot.total = 0U;
     }
@@ -387,10 +463,19 @@ static d_err_t ota_start(uint8_t upgrade, uint32_t generation, uint32_t *request
     return result;
 }
 
+/**
+ * @brief 受理候选检查并为此次重新核验更新代次；完整合同见 ota_service.h。
+ */
 d_err_t ota_service_check(uint32_t *request) { return ota_start(0U, 0U, request); }
+/**
+ * @brief 基于已完成检查的代次，受理真实升级事务；完整合同见 ota_service.h。
+ */
 d_err_t ota_service_confirm(uint32_t generation, uint32_t *request)
 { return ota_start(1U, generation, request); }
 
+/**
+ * @brief 请求取消仍处于 CHECKING 的匹配检查任务；完整合同见 ota_service.h。
+ */
 d_err_t ota_service_cancel_check(uint32_t request)
 {
     d_err_t result = D_ERR_BUSY;
@@ -401,6 +486,9 @@ d_err_t ota_service_cancel_check(uint32_t request)
     return result;
 }
 
+/**
+ * @brief 先观察事务期限，再复制状态快照；完整合同见 ota_service.h。
+ */
 void ota_service_get_snapshot(ota_snapshot_t *out)
 {
     if (!out) return;
@@ -410,6 +498,9 @@ void ota_service_get_snapshot(ota_snapshot_t *out)
     ota_port_unlock();
 }
 
+/**
+ * @brief 读取 OTA 工作任务是否仍在途；完整合同见 ota_service.h。
+ */
 int ota_service_is_busy(void)
 {
     int busy;
@@ -417,6 +508,9 @@ int ota_service_is_busy(void)
     return busy;
 }
 
+/**
+ * @brief 检查已确认升级是否持有维护准入；完整合同见 ota_service.h。
+ */
 int ota_service_maintenance_active(void)
 {
     int active;
@@ -426,15 +520,23 @@ int ota_service_maintenance_active(void)
     return active;
 }
 
+/**
+ * @brief 与 OTA 和外部维护原子互斥地申请软件关机准入；完整合同见 ota_service.h。
+ */
 d_err_t ota_service_shutdown_begin(void)
 {
     ota_port_lock();
-    if (s_ota.shutdown || s_ota.snapshot.worker_active || s_ota.snapshot.maintenance) {
+    if (s_ota.shutdown || s_ota.snapshot.worker_active || s_ota.snapshot.maintenance
+        ) {
         ota_port_unlock(); return D_ERR_BUSY;
     }
     s_ota.shutdown = 1U;
     ota_port_unlock();
     return D_OK;
 }
+/**
+ * @brief 解除软件关机准入占用；完整合同见 ota_service.h。
+ */
 void ota_service_shutdown_cancel(void)
 { ota_port_lock(); s_ota.shutdown = 0U; ota_port_unlock(); }
+

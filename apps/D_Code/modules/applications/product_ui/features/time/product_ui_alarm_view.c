@@ -1,6 +1,6 @@
 /**
  * @file product_ui_alarm_view.c
- * @brief Bounded virtual list, editor and sound settings; structural changes are transactional.
+ * @brief 有限闹钟列表、编辑及音量视图，结构替换与不可变输入身份分开。
  * @author D_Code
  * @date 2026-09-22
  */
@@ -25,6 +25,10 @@ typedef struct {
     uint8_t enabled, armed, toggle;
 } product_ui_alarm_row_t;
 static product_ui_alarm_render_t s_view;
+/* 候选创建不能清空当前仍可用视图的显示缓存。 */
+static struct {
+    product_ui_label_cache_t status, repeat, enabled, volume, preview;
+} s_text;
 static product_ui_virtual_list_t s_list;
 static product_ui_alarm_row_t s_rows[PRODUCT_UI_VIRTUAL_LIST_SLOT_COUNT];
 static uint32_t s_order[PRODUCT_UI_ALARM_COUNT];
@@ -41,8 +45,8 @@ static lv_point_t s_matrix_origin;
 
 static const char *s_label_map[] = {"闹钟", "起床", "午休", "\n", "吃药", "学习", "运动", ""};
 
-/* One matrix owns the routine's controls. Per-control objects/styles would
- * exceed the heap budget while a settings page is prepared transactionally. */
+/* 作息控件由一个矩阵承载；事务式准备设置页时，
+ * 为每项创建独立对象及样式会超出堆预算。 */
 enum {
     PRODUCT_UI_ROUTINE_LEGEND = PRODUCT_UI_ALARM_REPEAT_COUNT,
     PRODUCT_UI_ROUTINE_WEEK_TITLE = 7,
@@ -73,21 +77,21 @@ static const char *s_routine_fortnight_map[] = {PRODUCT_UI_ROUTINE_CHOICES
 #undef PRODUCT_UI_ROUTINE_CHOICES
 #undef PRODUCT_UI_ROUTINE_DAYS
 
-/* Every virtual row has the same geometry. Const styles avoid a local style
- * allocation per child while the old editor and replacement list coexist. */
+/* 复用行使用同一几何；只读共用样式避免旧编辑器与替换列表共存时，
+ * 给每个子对象额外分配本地样式。 */
 static const lv_style_prop_t s_row_geometry_props[] = {LV_STYLE_X, LV_STYLE_Y, LV_STYLE_WIDTH, LV_STYLE_HEIGHT};
 static const lv_style_const_prop_t s_row_title_geometry[] = {
-    {&s_row_geometry_props[0], {.num = 8}}, {&s_row_geometry_props[1], {.num = 3}},
-    {&s_row_geometry_props[2], {.num = 226}}, {&s_row_geometry_props[3], {.num = 18}},
+    {&s_row_geometry_props[0], {.num = PRODUCT_UI_SPACE_MD}}, {&s_row_geometry_props[1], {.num = 3}},
+    {&s_row_geometry_props[2], {.num = 218}}, {&s_row_geometry_props[3], {.num = 18}},
     LV_STYLE_CONST_PROPS_END
 };
 static const lv_style_const_prop_t s_row_subtitle_geometry[] = {
-    {&s_row_geometry_props[0], {.num = 8}}, {&s_row_geometry_props[1], {.num = 25}},
-    {&s_row_geometry_props[2], {.num = 240}}, {&s_row_geometry_props[3], {.num = 16}},
+    {&s_row_geometry_props[0], {.num = PRODUCT_UI_SPACE_MD}}, {&s_row_geometry_props[1], {.num = 25}},
+    {&s_row_geometry_props[2], {.num = 232}}, {&s_row_geometry_props[3], {.num = 16}},
     LV_STYLE_CONST_PROPS_END
 };
 static const lv_style_const_prop_t s_row_toggle_geometry[] = {
-    {&s_row_geometry_props[0], {.num = 256}}, {&s_row_geometry_props[1], {.num = 13}},
+    {&s_row_geometry_props[0], {.num = 296 - PRODUCT_UI_SPACE_MD - 32}}, {&s_row_geometry_props[1], {.num = 13}},
     {&s_row_geometry_props[2], {.num = 32}}, {&s_row_geometry_props[3], {.num = 18}},
     LV_STYLE_CONST_PROPS_END
 };
@@ -101,12 +105,22 @@ static const lv_style_const_prop_t s_matrix_spacing[] = {
 };
 static LV_STYLE_CONST_INIT(s_matrix_spacing_style, (void *)s_matrix_spacing);
 
+/**
+ * @brief 用当前视图代次组织完整动作值并同步交给控制器排队。
+ * @param[in] action 页面动作。
+ * @param[in] value 动作携带数值。
+ * @param[in] id 有记录身份时的稳定规则编号，否则为零。
+ * @param[in] revision 按下时观察到的规则版本，否则为零。
+ */
 static void product_ui_alarm_emit(product_ui_alarm_ui_action_e action, uint16_t value, uint32_t id, uint32_t revision)
 {
     product_ui_alarm_ui_event_t event = {action, id, revision, s_generation, value};
     if (s_action != NULL) s_action(&event);
 }
 
+/**
+ * @brief 推进非零视图代次，取消滚轮／行手势并恢复活跃音量滑条原值。
+ */
 void product_ui_alarm_view_cancel_input(void)
 {
     uint8_t index;
@@ -119,8 +133,15 @@ void product_ui_alarm_view_cancel_input(void)
     for (index = 0U; index < PRODUCT_UI_VIRTUAL_LIST_SLOT_COUNT; index++) s_rows[index].armed = 0U;
 }
 
+/**
+ * @brief 读取当前 UI 视图的非零输入代次。
+ */
 uint32_t product_ui_alarm_view_generation(void) { return s_generation; }
 
+/**
+ * @brief 以对象、视图代次和使能状态校验完整按钮点击。
+ * @param[in] event 按钮事件，用户数据低字节编码动作，高位编码数值。
+ */
 static void product_ui_alarm_button_event(lv_event_t *event)
 {
     lv_event_code_t code = lv_event_get_code(event);
@@ -139,12 +160,29 @@ static void product_ui_alarm_button_event(lv_event_t *event)
     }
 }
 
+/**
+ * @brief 创建具有动作／数值身份、静态借用文字及共用按压校验的主题按钮。
+ * @param[in,out] parent 按钮父容器。
+ * @param[in] text 覆盖按钮寿命的不可变文字。
+ * @param[in] action 页面动作编号。
+ * @param[in] value 动作携带的数值。
+ * @return 成功返回父树拥有的按钮，失败返回 NULL。
+ */
 static lv_obj_t *product_ui_alarm_button(lv_obj_t *parent, const char *text, product_ui_alarm_ui_action_e action, uint16_t value)
 {
-    return product_ui_time_button(parent, text, product_ui_alarm_button_event,
-        (void *)(uintptr_t)((uint32_t)action | ((uint32_t)value << 8)));
+    const product_ui_time_button_spec_t spec = {
+        .text = text,
+        .role = action == PRODUCT_UI_ALARM_UI_SAVE ? PRODUCT_UI_BUTTON_PRIMARY :
+            action == PRODUCT_UI_ALARM_UI_DELETE ? PRODUCT_UI_BUTTON_DANGER : PRODUCT_UI_BUTTON_SECONDARY,
+        .callback = product_ui_alarm_button_event,
+        .context = (void *)(uintptr_t)((uint32_t)action | ((uint32_t)value << 8)),
+    };
+    return product_ui_time_button_create(parent, &spec);
 }
 
+/**
+ * @brief 创建有稳定动作身份及按压校验的窄导航按钮。
+ */
 lv_obj_t *product_ui_alarm_view_nav_button(lv_obj_t *parent, const char *text, product_ui_alarm_ui_action_e action)
 {
     lv_obj_t *button = product_ui_alarm_button(parent, text, action, 0U);
@@ -152,9 +190,18 @@ lv_obj_t *product_ui_alarm_view_nav_button(lv_obj_t *parent, const char *text, p
     return button;
 }
 
+/**
+ * @brief 把小时或分钟滚轮的有效松手结果转换为页面动作。
+ * @param[in] binding 持久滚轮绑定，field 为零表示小时，非零为分钟。
+ * @param[in] selected 已选择的时分选项下标。
+ */
 static void product_ui_alarm_roller_changed(product_ui_time_roller_t *binding, uint16_t selected)
 { product_ui_alarm_emit(binding->field ? PRODUCT_UI_ALARM_UI_MINUTE : PRODUCT_UI_ALARM_UI_HOUR, selected, 0U, 0U); }
 
+/**
+ * @brief 只处理本对象滚动阶段，开始时取消输入并请求组合帧。
+ * @param[in] event 列表或编辑根的滚动事件。
+ */
 static void product_ui_alarm_scroll_event(lv_event_t *event)
 {
     lv_event_code_t code = lv_event_get_code(event);
@@ -164,6 +211,12 @@ static void product_ui_alarm_scroll_event(lv_event_t *event)
     d_screen_request_composed_frame();
 }
 
+/**
+ * @brief 按计划、作息模板及掩码写入有限重复说明。
+ * @param[in] rule 已验证规则。
+ * @param[out] text 调用方输出缓冲，须容纳至少“每周”及终止符。
+ * @param[in] size 输出总容量。
+ */
 static void product_ui_alarm_repeat_text(const product_ui_alarm_t *rule, char *text, uint16_t size)
 {
     static const char *const days[] = {"日", "一", "二", "三", "四", "五", "六"};
@@ -184,6 +237,15 @@ static void product_ui_alarm_repeat_text(const product_ui_alarm_t *rule, char *t
     }
 }
 
+/**
+ * @brief 读取当前规则版本并在固定槽格式化标题、下次／错过状态及开关。
+ * @param[in] item 排序后的逻辑行下标。
+ * @param[in] slot 固定复用槽下标。
+ * @param[out] spec 接收借用槽内持久文字的行规格。
+ * @param[in] context 列表绑定上下文，当前未使用。
+ * @return 成功返回 0，槽／逻辑下标或规则读取失败返回 -1。
+ * @note 编号或规则版本变化撤销旧槽按压，虚拟列表拥有带校验的动作分发。
+ */
 static int product_ui_alarm_row_bind(uint16_t item, uint8_t slot, product_ui_row_spec_t *spec, void *context)
 {
     product_ui_alarm_record_t record;
@@ -218,11 +280,16 @@ static int product_ui_alarm_row_bind(uint16_t item, uint8_t slot, product_ui_row
         .icon_id = PRODUCT_UI_ICON_ALARM, .accent = PRODUCT_UI_COLOR_DANGER};
     *spec = (product_ui_row_spec_t){.item_key = row->id, .item = &row->item, .subtitle = row->subtitle,
         .interaction = PRODUCT_UI_ROW_INTERACTION_ACTION, .trailing = PRODUCT_UI_ROW_TRAILING_SWITCH,
-        /* PRODUCT_UI_VIRTUAL_ACTION_INJECTED: the list owns guarded dispatch. */
+        /* PRODUCT_UI_VIRTUAL_ACTION_INJECTED: 虚拟列表拥有带校验的动作分发。 */
         .is_enabled = 1U, .is_checked = record.rule.enabled};
     return 0;
 }
 
+/**
+ * @brief 依据当前输入点是否位于行右侧六十像素区判断开关动作。
+ * @param[in] row 有效行对象。
+ * @return 在切换区返回非零，无输入设备或不在区内返回零。
+ */
 static uint8_t product_ui_alarm_row_toggle_zone(lv_obj_t *row)
 {
     lv_indev_t *input = lv_indev_active();
@@ -233,6 +300,10 @@ static uint8_t product_ui_alarm_row_toggle_zone(lv_obj_t *row)
     return point.x >= area.x2 - 60;
 }
 
+/**
+ * @brief 按下时冻结规则编号、版本和命中区，失去输入资格时撤销行操作。
+ * @param[in] event 行全部事件，用户数据借用该复用槽状态。
+ */
 static void product_ui_alarm_row_input(lv_event_t *event)
 {
     product_ui_alarm_row_t *row = lv_event_get_user_data(event);
@@ -244,6 +315,11 @@ static void product_ui_alarm_row_input(lv_event_t *event)
         row->armed = 0U;
 }
 
+/**
+ * @brief 找到与当前逻辑行匹配且仍装备的槽，复核身份及命中区后分发编辑／切换。
+ * @param[in] item 当前排序逻辑下标。
+ * @param[in] context 列表动作上下文，当前未使用。
+ */
 static void product_ui_alarm_row_action(uint16_t item, void *context)
 {
     uint8_t index;
@@ -261,6 +337,9 @@ static void product_ui_alarm_row_action(uint16_t item, void *context)
     }
 }
 
+/**
+ * @brief 仅为新建立的复用行附着槽状态输入监听，避免重复注册。
+ */
 static void product_ui_alarm_bind_rows(void)
 {
     uint8_t index;
@@ -273,6 +352,10 @@ static void product_ui_alarm_bind_rows(void)
     }
 }
 
+/**
+ * @brief 按时分升序、同一时分按编号升序构建规则顺序表。
+ * @return 全部读取成功返回 0，任一逻辑记录读取失败返回 -1，部分顺序不提交为完成呈现。
+ */
 static int product_ui_alarm_build_order(void)
 {
     uint8_t index, position;
@@ -295,12 +378,18 @@ static int product_ui_alarm_build_order(void)
     return 0;
 }
 
+/**
+ * @brief 把持久槽缓冲重新绑定到只读标签，更新开关投影。
+ * @param[in,out] row 本模块固定三子对象布局的行。
+ * @param[in] spec 借用槽内文字的行规格，指针须覆盖该行寿命。
+ * @return 子对象和规格完整返回 0，否则返回 -1。
+ */
 static int product_ui_alarm_row_rebind(lv_obj_t *row, const product_ui_row_spec_t *spec)
 {
     lv_obj_t *title = lv_obj_get_child(row, 0), *subtitle = lv_obj_get_child(row, 1), *toggle = lv_obj_get_child(row, 2);
     if (!title || !subtitle || !toggle || !spec || !spec->item) return -1;
-    /* The six slot-owned buffers outlive their rows. Rebinding invalidates even
-     * when the pointer is unchanged, because the slot formatted new bytes. */
+    /* 六个槽缓冲覆盖行对象寿命；即使指针未变，槽内格式化字节也可能变化，
+     * 因此每次重绑都重新设置静态文本。 */
     lv_label_set_text_static(title, spec->item->title);
     lv_label_set_text_static(subtitle, spec->subtitle);
     if (spec->is_checked) lv_obj_add_state(toggle, LV_STATE_CHECKED);
@@ -308,6 +397,12 @@ static int product_ui_alarm_row_rebind(lv_obj_t *row, const product_ui_row_spec_
     return 0;
 }
 
+/**
+ * @brief 创建使用静态共用几何样式及持久槽文字的轻量闹钟行。
+ * @param[in,out] parent 新行父容器。
+ * @param[in] spec 带列表动作回调及持久文字的有效规格。
+ * @return 成功返回父树拥有的行，失败删除局部行并返回 NULL。
+ */
 static lv_obj_t *product_ui_alarm_row_create(lv_obj_t *parent, const product_ui_row_spec_t *spec)
 {
     lv_obj_t *row = lv_button_create(parent), *title, *subtitle, *toggle;
@@ -316,11 +411,13 @@ static lv_obj_t *product_ui_alarm_row_create(lv_obj_t *parent, const product_ui_
     lv_obj_add_flag(row, LV_OBJ_FLAG_PRESS_LOCK | LV_OBJ_FLAG_SCROLL_CHAIN_VER);
     lv_obj_add_style(row, product_ui_style(PRODUCT_UI_STYLE_INTERACTIVE), 0);
     lv_obj_add_style(row, product_ui_style(PRODUCT_UI_STYLE_PRESSED), LV_STATE_PRESSED);
+    lv_obj_set_style_radius(row, PRODUCT_UI_RADIUS_LG, 0);
     lv_obj_set_size(row, 296, PRODUCT_UI_ROW_DOUBLE_H);
     title = product_ui_time_label(row, "", PRODUCT_UI_STYLE_BODY);
     subtitle = product_ui_time_label(row, "", PRODUCT_UI_STYLE_CAPTION);
     toggle = lv_switch_create(row);
     if (!title || !subtitle || !toggle) { lv_obj_delete(row); return NULL; }
+    lv_obj_set_style_bg_color(toggle, product_ui_color(PRODUCT_UI_COLOR_ACCENT), LV_PART_INDICATOR | LV_STATE_CHECKED);
     lv_obj_add_style(title, &s_row_title_style, 0);
     lv_obj_add_style(subtitle, &s_row_subtitle_style, 0);
     lv_obj_add_style(toggle, &s_row_toggle_style, 0);
@@ -332,6 +429,11 @@ static lv_obj_t *product_ui_alarm_row_create(lv_obj_t *parent, const product_ui_
     return row;
 }
 
+/**
+ * @brief 排序后创建固定复用列表、校时状态及空提示，并绑定行身份监听。
+ * @param[in,out] view 候选根及输出控件引用。
+ * @return 完整创建／刷新为 0，任一步失败为 -1，候选树由上层清理。
+ */
 static int product_ui_alarm_list_build(product_ui_alarm_render_t *view)
 {
     product_ui_virtual_list_spec_t spec = {.row_height = PRODUCT_UI_ROW_DOUBLE_H,
@@ -361,6 +463,10 @@ static int product_ui_alarm_list_build(product_ui_alarm_render_t *view)
     return 0;
 }
 
+/**
+ * @brief 把作息矩阵下标解释为模式、两周星期、相位或恢复默认动作。
+ * @param[in] index 经矩阵输入校验的按钮下标。
+ */
 static void product_ui_alarm_routine_action(uint32_t index)
 {
     product_ui_alarm_repeat_e kind = s_view.routine_kind;
@@ -380,6 +486,10 @@ static void product_ui_alarm_routine_action(uint32_t index)
     }
 }
 
+/**
+ * @brief 冻结矩阵按钮及原点，移动、换项或旧视图代次均撤销点击资格。
+ * @param[in] event 矩阵全部事件，用户数据编码矩阵动作域。
+ */
 static void product_ui_alarm_matrix_input(lv_event_t *event)
 {
     lv_obj_t *object = lv_event_get_current_target(event);
@@ -408,6 +518,14 @@ static void product_ui_alarm_matrix_input(lv_event_t *event)
     }
 }
 
+/**
+ * @brief 创建借用静态布局的矩阵并安装动作身份校验及共用样式。
+ * @param[in,out] parent 矩阵父容器。
+ * @param[in] action 矩阵动作域。
+ * @param[in] map 须覆盖矩阵寿命的布局指针及文字数组。
+ * @param[in] height 明确的矩阵高度。
+ * @return 成功返回父树拥有的矩阵，创建失败返回 NULL。
+ */
 static lv_obj_t *product_ui_alarm_matrix(lv_obj_t *parent, product_ui_alarm_ui_action_e action,
     const char **map, int32_t height)
 {
@@ -431,6 +549,11 @@ static lv_obj_t *product_ui_alarm_matrix(lv_obj_t *parent, product_ui_alarm_ui_a
     return matrix;
 }
 
+/**
+ * @brief 在候选根创建时分滚轮、作息入口、标签及启用／删除控件。
+ * @param[in,out] view 候选根及输出控件引用。
+ * @return 完整创建为 0，任一步失败为 -1。
+ */
 static int product_ui_alarm_editor_build(product_ui_alarm_render_t *view)
 {
     lv_obj_t *label, *button;
@@ -469,6 +592,11 @@ static int product_ui_alarm_editor_build(product_ui_alarm_render_t *view)
     return 0;
 }
 
+/**
+ * @brief 按作息种类选择静态矩阵布局，一次性创建后先禁用全部项等待能力绑定。
+ * @param[in,out] view 含候选根及作息种类的视图。
+ * @return 创建成功为 0，失败为 -1。
+ */
 static int product_ui_alarm_routine_build(product_ui_alarm_render_t *view)
 {
     const char **map;
@@ -483,6 +611,10 @@ static int product_ui_alarm_routine_build(product_ui_alarm_render_t *view)
     return 0;
 }
 
+/**
+ * @brief 音量仅在同代次有效松手时提交，丢失或重置恢复原值及滚动链。
+ * @param[in] event 音量滑条全部事件。
+ */
 static void product_ui_alarm_slider_event(lv_event_t *event)
 {
     lv_event_code_t code = lv_event_get_code(event);
@@ -506,6 +638,11 @@ static void product_ui_alarm_slider_event(lv_event_t *event)
     }
 }
 
+/**
+ * @brief 在候选根创建独立闹钟音量、试听、校时及保存重试入口。
+ * @param[in,out] view 候选根及输出控件引用。
+ * @return 完整创建为 0，任一步失败为 -1。
+ */
 static int product_ui_alarm_settings_build(product_ui_alarm_render_t *view)
 {
     lv_obj_t *label, *button;
@@ -541,13 +678,21 @@ static int product_ui_alarm_settings_build(product_ui_alarm_render_t *view)
     return 0;
 }
 
+/**
+ * @brief 仅当前根删除时清空控件及显示缓存，旧候选删除不抹掉新视图。
+ * @param[in] event 视图根删除事件。
+ */
 static void product_ui_alarm_view_deleted(lv_event_t *event)
 {
     if (lv_event_get_current_target(event) != s_view.root) return;
+    memset(&s_text, 0, sizeof(s_text));
     memset(&s_view, 0, sizeof(s_view));
     s_pressed = s_slider = NULL; s_armed = 0U;
 }
 
+/**
+ * @brief 必要时先完整构建候选树，再替换当前闹钟子视图。
+ */
 int product_ui_alarm_view_show(lv_obj_t *parent, product_ui_alarm_mode_e mode,
     const product_ui_alarm_draft_t *draft, product_ui_alarm_ui_action_fn action)
 {
@@ -577,6 +722,7 @@ int product_ui_alarm_view_show(lv_obj_t *parent, product_ui_alarm_mode_e mode,
     product_ui_alarm_view_cancel_input();
     old = s_view.root;
     s_view = candidate; s_action = action; s_pressed = s_slider = NULL;
+    memset(&s_text, 0, sizeof(s_text));
     lv_obj_add_event_cb(candidate.root, product_ui_alarm_view_deleted, LV_EVENT_DELETE, NULL);
     if (old) lv_obj_delete(old);
     s_seen_revision = 0U;
@@ -585,6 +731,11 @@ int product_ui_alarm_view_show(lv_obj_t *parent, product_ui_alarm_mode_e mode,
     return 0;
 }
 
+/**
+ * @brief 区分版本保护、未加载、会话数据、在途保存及确认记录的状态文字。
+ * @param[in] snapshot 调用链保证非空的服务值。
+ * @return 静态状态说明的借用指针。
+ */
 static const char *product_ui_alarm_save_text(const product_ui_alarm_snapshot_t *snapshot)
 {
     if (snapshot->storage_protected) return "存储版本不兼容，无法保存";
@@ -597,19 +748,40 @@ static const char *product_ui_alarm_save_text(const product_ui_alarm_snapshot_t 
     return snapshot->has_record ? "已保存" : "默认设置，尚无保存记录";
 }
 
-static void product_ui_alarm_set_text(lv_obj_t *label, const char *text)
-{ if (label && strcmp(lv_label_get_text(label), text)) lv_label_set_text(label, text); }
+/**
+ * @brief 经共用缓存更新标签，失败保留其重试语义。
+ * @param[in,out] label 借用的目标标签。
+ * @param[in] text 本次目标文字。
+ * @param[in,out] cache 覆盖标签寿命的文本缓存。
+ */
+static void product_ui_alarm_set_text(lv_obj_t *label, const char *text,
+                                    product_ui_label_cache_t *cache)
+{
+    (void)product_ui_label_sync(label, text, cache);
+}
 
+/**
+ * @brief 投影普通按钮的选中与使能状态，空对象忽略。
+ * @param[in,out] button 借用按钮。
+ * @param[in] checked 非零选中。
+ * @param[in] enabled 非零使能。
+ */
 static void product_ui_alarm_check_button(lv_obj_t *button, uint8_t checked, uint8_t enabled)
 {
     if (!button) return;
     if (enabled) lv_obj_remove_state(button, LV_STATE_DISABLED);
     else lv_obj_add_state(button, LV_STATE_DISABLED);
-    lv_obj_set_style_bg_color(button, product_ui_color(checked ? PRODUCT_UI_COLOR_ACCENT : PRODUCT_UI_COLOR_SURFACE_ALT), 0);
-    lv_obj_set_style_text_color(lv_obj_get_child(button, 0),
-        product_ui_color(!enabled ? PRODUCT_UI_COLOR_TEXT_MUTED : checked ? PRODUCT_UI_COLOR_ON_PRIMARY : PRODUCT_UI_COLOR_TEXT), 0);
+    if (checked) lv_obj_add_state(button, LV_STATE_CHECKED);
+    else lv_obj_remove_state(button, LV_STATE_CHECKED);
 }
 
+/**
+ * @brief 只在差异存在时修改指定矩阵项的选中及禁用控制位。
+ * @param[in,out] matrix 借用矩阵，NULL 时忽略。
+ * @param[in] index 调用方保证存在的矩阵项下标。
+ * @param[in] checked 非零选中。
+ * @param[in] enabled 非零可操作。
+ */
 static void product_ui_alarm_matrix_bind(lv_obj_t *matrix, uint8_t index, uint8_t checked, uint8_t enabled)
 {
     if (!matrix) return;
@@ -623,6 +795,12 @@ static void product_ui_alarm_matrix_bind(lv_obj_t *matrix, uint8_t index, uint8_
     }
 }
 
+/**
+ * @brief 投影两周星期及可信本周相位，未校时仍保留既有周期的星期编辑。
+ * @param[in] snapshot 借用的时钟及服务值。
+ * @param[in] routine 控制器持有的作息子草稿。
+ * @note 共享相位说明缓冲静态存活；改字节后显式使矩阵失效，不把栈文字交给 map。
+ */
 static void product_ui_alarm_routine_refresh(const product_ui_alarm_snapshot_t *snapshot,
     const product_ui_alarm_routine_draft_t *routine)
 {
@@ -659,6 +837,9 @@ static void product_ui_alarm_routine_refresh(const product_ui_alarm_snapshot_t *
         product_ui_alarm_matrix_bind(s_view.repeats, PRODUCT_UI_ROUTINE_PHASE_FIRST + index, has_week && week == index, snapshot->clock.valid);
 }
 
+/**
+ * @brief 按服务值及控制器草稿更新当前视图，保留输入预览及失败重试条件。
+ */
 void product_ui_alarm_view_refresh(const product_ui_alarm_snapshot_t *snapshot, const product_ui_alarm_draft_t *draft)
 {
     uint8_t index;
@@ -683,32 +864,35 @@ void product_ui_alarm_view_refresh(const product_ui_alarm_snapshot_t *snapshot, 
         else lv_snprintf(text, sizeof(text), "%s · %u 条已开启", snapshot->clock.source == PRODUCT_UI_CLOCK_MANUAL ? "手动时间" : "网络时间", snapshot->enabled_count);
         if (snapshot->storage_error || (!snapshot->has_record && snapshot->load_error != D_OK && snapshot->load_error != D_ERR_NOT_FOUND))
             lv_snprintf(text, sizeof(text), "%s", product_ui_alarm_save_text(snapshot));
-        product_ui_alarm_set_text(s_view.status, text);
+        product_ui_alarm_set_text(s_view.status, text, &s_text.status);
         lv_obj_update_flag(s_view.empty, LV_OBJ_FLAG_HIDDEN, s_order_count != 0U || !snapshot->loaded);
     } else if (s_view.mode == PRODUCT_UI_ALARM_EDITOR) {
         product_ui_time_roller_bind(&s_hour_binding, s_view.hour, draft->record.rule.hour, s_generation);
         product_ui_time_roller_bind(&s_minute_binding, s_view.minute, draft->record.rule.minute, s_generation);
         product_ui_alarm_repeat_text(&draft->record.rule, text, sizeof(text));
-        product_ui_alarm_set_text(s_view.repeat_text, text);
+        product_ui_alarm_set_text(s_view.repeat_text, text, &s_text.repeat);
         for (index = 0U; index < 6U; index++) product_ui_alarm_matrix_bind(s_view.labels, index, draft->record.label_kind == index, 1U);
-        product_ui_alarm_set_text(lv_obj_get_child(s_view.enabled, 0), draft->record.rule.enabled ? "提醒：已开启" : "提醒：已关闭");
+        product_ui_alarm_set_text(lv_obj_get_child(s_view.enabled, 0), draft->record.rule.enabled ? "提醒：已开启" : "提醒：已关闭", &s_text.enabled);
         product_ui_alarm_check_button(s_view.enabled, draft->record.rule.enabled, 1U);
         product_ui_alarm_check_button(s_view.retry, 0U, draft->record.rule.id != 0U);
         product_ui_alarm_set_text(s_view.status, draft->has_conflict ? "记录已变化，请再次保存确认" : !snapshot->clock.valid && draft->record.rule.schedule == PRODUCT_UI_ALARM_SCHEDULE_ONCE ?
-            "仅一次闹钟需要先校时\n请到设置中校时" : draft->dirty ? "草稿尚未保存" : product_ui_alarm_save_text(snapshot));
+            "仅一次闹钟需要先校时\n请到设置中校时" : draft->dirty ? "草稿尚未保存" : product_ui_alarm_save_text(snapshot), &s_text.status);
     } else if (s_view.mode == PRODUCT_UI_ALARM_ROUTINE) {
         product_ui_alarm_routine_refresh(snapshot, &draft->routine);
     } else if (s_view.mode == PRODUCT_UI_ALARM_SETTINGS) {
         if (!s_slider) lv_slider_set_value(s_view.volume, draft->volume, LV_ANIM_OFF);
         lv_snprintf(text, sizeof(text), "%u%%", s_slider ? (unsigned)lv_slider_get_value(s_view.volume) : draft->volume);
-        product_ui_alarm_set_text(s_view.volume_text, text);
-        product_ui_alarm_set_text(lv_obj_get_child(s_view.preview, 0), draft->preview_active ? "停止试听" : "试听提示音");
-        product_ui_alarm_set_text(s_view.status, draft->dirty ? "音量尚未保存" : product_ui_alarm_save_text(snapshot));
+        product_ui_alarm_set_text(s_view.volume_text, text, &s_text.volume);
+        product_ui_alarm_set_text(lv_obj_get_child(s_view.preview, 0), draft->preview_active ? "停止试听" : "试听提示音", &s_text.preview);
+        product_ui_alarm_set_text(s_view.status, draft->dirty ? "音量尚未保存" : product_ui_alarm_save_text(snapshot), &s_text.status);
         product_ui_alarm_check_button(s_view.retry, 0U, !snapshot->storage_protected &&
             (snapshot->storage_error != D_OK || (!snapshot->has_record && snapshot->load_error != D_OK && snapshot->load_error != D_ERR_NOT_FOUND)));
     }
 }
 
+/**
+ * @brief 列表模式下推进共用虚拟列表重试，并为新复用槽附着记录身份监听。
+ */
 void product_ui_alarm_view_update(uint32_t elapsed_ms)
 {
     if (s_view.mode == PRODUCT_UI_ALARM_LIST && s_view.root) {
@@ -717,23 +901,33 @@ void product_ui_alarm_view_update(uint32_t elapsed_ms)
     }
 }
 
+/**
+ * @brief 读取当前列表或编辑子树的独立纵向偏移。
+ */
 int32_t product_ui_alarm_view_scroll(void)
 {
     lv_obj_t *root = s_view.mode == PRODUCT_UI_ALARM_LIST ? s_list.root : s_view.root;
     return root ? lv_obj_get_scroll_y(root) : 0;
 }
 
+/**
+ * @brief 布局完成后立即恢复当前列表或编辑子树视口。
+ */
 void product_ui_alarm_view_restore_scroll(int32_t y)
 {
     lv_obj_t *root = s_view.mode == PRODUCT_UI_ALARM_LIST ? s_list.root : s_view.root;
     if (root) { lv_obj_update_layout(root); lv_obj_scroll_to_y(root, y, LV_ANIM_OFF); }
 }
 
+/**
+ * @brief 撤销全部手势，删除当前视图树并清空控件、行副本及动作回调。
+ */
 void product_ui_alarm_view_destroy(void)
 {
     product_ui_alarm_view_cancel_input();
     if (s_view.root) lv_obj_delete(s_view.root);
     memset(&s_view, 0, sizeof(s_view));
+    memset(&s_text, 0, sizeof(s_text));
     memset(s_rows, 0, sizeof(s_rows));
     s_action = NULL;
 }

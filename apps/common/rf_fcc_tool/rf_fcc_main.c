@@ -9,7 +9,6 @@
 #include "wifi/wifi_connect.h"
 #include "btcontroller_modules.h"
 #include "utils/syscfg/syscfg_id.h"
-#include "sock_api/sock_api.h"
 #include "gpcnt.h"
 #include "gpio.h"
 
@@ -1822,6 +1821,8 @@ static void read_res(void)
     log_info("=========================CAL_RES=========================\n");
 }
 
+
+#include "sock_api/sock_api.h"
 
 static void udp_recv_handler(void *socket_fd)
 {

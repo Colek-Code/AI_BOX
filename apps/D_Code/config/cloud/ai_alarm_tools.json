@@ -1,0 +1,253 @@
+{
+  "set_name": "d_code_local_alarm",
+  "tools": [
+    {
+      "tool_definition": {
+        "name": "local_alarm_query",
+        "description": "一次读取本机全部闹钟、设备时间与保存状态，无需分页。必须等设备结果再回答。content.text 中 columns 定义 alarms 各列；按实际时间、开关、标签和规则回答全部记录，不朗读ID/版本。无结果时不得声称仍在后台查询。修改/删除/开关前须先查询真实ID和版本。",
+        "parameters": {
+          "type": "object",
+          "properties": {},
+          "required": [],
+          "additionalProperties": false
+        }
+      },
+      "response_type": "ON_EXECUTION_RESULT",
+      "usage_examples": [
+        {
+          "text": "查一下闹钟",
+          "tool_call": {
+            "arguments": {}
+          }
+        }
+      ]
+    },
+    {
+      "tool_definition": {
+        "name": "local_alarm_create",
+        "description": "创建一个本地闹钟。仅支持单次、每天、指定星期；保存失败后不得再次调用创建，应使用retry_save。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "schedule": {
+              "type": "string",
+              "description": "once=单次，weekly=每周。每天使用 weekly 且 weekdays=1,2,3,4,5,6,7。暂不支持大小周、每月、节假日或间隔循环。"
+            },
+            "hour": {
+              "type": "integer",
+              "description": "北京时间小时 0..23；非 delay 新建必填。上午/下午不明确时先追问。"
+            },
+            "minute": {
+              "type": "integer",
+              "description": "分钟 0..59；非 delay 新建必填。"
+            },
+            "date_mode": {
+              "type": "string",
+              "description": "仅 once：next=下一次该时刻；relative=以设备当天计算 day_offset；absolute=明确年月日 date；delay=从设备受理时延后 delay_minutes。不要用云端当前日期替代设备时间。"
+            },
+            "date": {
+              "type": "string",
+              "description": "仅 absolute：YYYY-MM-DD。与 day_offset、delay_minutes 互斥。明确过去日期不得改成明天。"
+            },
+            "day_offset": {
+              "type": "integer",
+              "description": "仅 relative：0..3650；今天0、明天1、后天2，由设备按其时钟计算。"
+            },
+            "delay_minutes": {
+              "type": "integer",
+              "description": "仅 delay：1..525600，整数分钟，与 hour/minute/date/day_offset 互斥。设备向后取整到分钟，必须复述结果中的实际时刻。"
+            },
+            "weekdays": {
+              "type": "string",
+              "description": "仅 weekly，ISO 星期数字的英文逗号列表：1=周一，7=周日，不重复；工作日指1,2,3,4,5，不支持法定调休。"
+            },
+            "label": {
+              "type": "string",
+              "description": "可选短标签，UTF-8 最多23字节（通常最多7个汉字）；过长请用户缩短，不自行删改提醒事项。"
+            }
+          },
+          "required": [
+            "schedule"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "response_type": "ON_EXECUTION_RESULT",
+      "usage_examples": [
+        {
+          "text": "明天早上七点提醒我",
+          "tool_call": {
+            "arguments": {
+              "schedule": "once",
+              "date_mode": "relative",
+              "day_offset": 1,
+              "hour": 7,
+              "minute": 0
+            }
+          }
+        },
+        {
+          "text": "五分钟后提醒我",
+          "tool_call": {
+            "arguments": {
+              "schedule": "once",
+              "date_mode": "delay",
+              "delay_minutes": 5
+            }
+          }
+        },
+        {
+          "text": "周一到周五七点叫我",
+          "tool_call": {
+            "arguments": {
+              "schedule": "weekly",
+              "weekdays": "1,2,3,4,5",
+              "hour": 7,
+              "minute": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "tool_definition": {
+        "name": "local_alarm_update",
+        "description": "修改已查询且唯一确定的闹钟。只传需要改变的字段，保留未提供字段。已有大小周等规则不支持编辑；不要将其转换为每周。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "integer",
+              "description": "必须使用本轮 local_alarm_query 返回的本地 id，不能编造。"
+            },
+            "revision": {
+              "type": "integer",
+              "description": "与 id 对应的 query 返回 revision；冲突后重新查询，不能自行加一。"
+            },
+            "schedule": {
+              "type": "string",
+              "description": "once=单次，weekly=每周。每天使用 weekly 且 weekdays=1,2,3,4,5,6,7。暂不支持大小周、每月、节假日或间隔循环。"
+            },
+            "hour": {
+              "type": "integer",
+              "description": "北京时间小时 0..23；非 delay 新建必填。上午/下午不明确时先追问。"
+            },
+            "minute": {
+              "type": "integer",
+              "description": "分钟 0..59；非 delay 新建必填。"
+            },
+            "date_mode": {
+              "type": "string",
+              "description": "仅 once：next=下一次该时刻；relative=以设备当天计算 day_offset；absolute=明确年月日 date；delay=从设备受理时延后 delay_minutes。不要用云端当前日期替代设备时间。"
+            },
+            "date": {
+              "type": "string",
+              "description": "仅 absolute：YYYY-MM-DD。与 day_offset、delay_minutes 互斥。明确过去日期不得改成明天。"
+            },
+            "day_offset": {
+              "type": "integer",
+              "description": "仅 relative：0..3650；今天0、明天1、后天2，由设备按其时钟计算。"
+            },
+            "delay_minutes": {
+              "type": "integer",
+              "description": "仅 delay：1..525600，整数分钟，与 hour/minute/date/day_offset 互斥。设备向后取整到分钟，必须复述结果中的实际时刻。"
+            },
+            "weekdays": {
+              "type": "string",
+              "description": "仅 weekly，ISO 星期数字的英文逗号列表：1=周一，7=周日，不重复；工作日指1,2,3,4,5，不支持法定调休。"
+            },
+            "label": {
+              "type": "string",
+              "description": "可选短标签，UTF-8 最多23字节（通常最多7个汉字）；过长请用户缩短，不自行删改提醒事项。"
+            }
+          },
+          "required": [
+            "id",
+            "revision"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "response_type": "ON_EXECUTION_RESULT",
+      "usage_examples": []
+    },
+    {
+      "tool_definition": {
+        "name": "local_alarm_delete",
+        "description": "删除已查询且唯一确定的一个闹钟。不能批量清空，不能根据列表位置推测id。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "integer",
+              "description": "必须使用本轮 local_alarm_query 返回的本地 id，不能编造。"
+            },
+            "revision": {
+              "type": "integer",
+              "description": "与 id 对应的 query 返回 revision；冲突后重新查询，不能自行加一。"
+            }
+          },
+          "required": [
+            "id",
+            "revision"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "response_type": "ON_EXECUTION_RESULT",
+      "usage_examples": []
+    },
+    {
+      "tool_definition": {
+        "name": "local_alarm_set_enabled",
+        "description": "启用或停用已查询的一个闹钟。保留原日期和规则；过期单次应先向用户取得新日期，不自动顺延。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "integer",
+              "description": "必须使用本轮 local_alarm_query 返回的本地 id，不能编造。"
+            },
+            "revision": {
+              "type": "integer",
+              "description": "与 id 对应的 query 返回 revision；冲突后重新查询，不能自行加一。"
+            },
+            "enabled": {
+              "type": "boolean",
+              "description": "true启用，false停用。"
+            }
+          },
+          "required": [
+            "id",
+            "revision",
+            "enabled"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "response_type": "ON_EXECUTION_RESULT",
+      "usage_examples": []
+    },
+    {
+      "tool_definition": {
+        "name": "local_alarm_retry_save",
+        "description": "重试原操作的保存。operation来自失败结果或最新query；只保存已生效状态，绝不重复创建。过期/冲突时先query确认当前状态。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "type": "integer",
+              "description": "设备返回的原本地操作号；不能使用command_request_id或编造。"
+            }
+          },
+          "required": [
+            "operation"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "response_type": "ON_EXECUTION_RESULT",
+      "usage_examples": []
+    }
+  ]
+}

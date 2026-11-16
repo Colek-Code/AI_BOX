@@ -1,6 +1,6 @@
 /**
  * @file product_ui_clock.c
- * @brief Shared software clock with a UI-independent sampling owner.
+ * @brief 供 UI 及后台服务使用的软件墙钟，手动设置不改 SDK／RTC。
  * @author D_Code
  * @date 2026-09-21
  */
@@ -22,6 +22,11 @@ static uint8_t s_clock_sample_now;
 static uint8_t s_clock_quiescing;
 static uint32_t s_clock_sample_generation;
 
+/**
+ * @brief 推进单调时间，并在锁外读取网络来源后按代次复核再应用。
+ * @param[in] context 定时器上下文；当前未使用。
+ * @note 手动校正、静默或采样代次变化会拒绝锁外取得的旧样本；采样耗时不占用时钟自旋锁。
+ */
 static void product_ui_clock_tick(void *context)
 {
     uint32_t now = product_ui_clock_port_ms();
@@ -42,13 +47,16 @@ static void product_ui_clock_tick(void *context)
     if (!sample) return;
     reason = product_ui_clock_port_network(&seconds);
     spin_lock(&s_clock_lock);
-    /* A concurrent manual command makes the model reject this older network sample. */
+    /* 并发手动命令会改变代次，使旧网络样本在重新取得锁后被拒绝。 */
     if (s_clock_ready && !s_clock_quiescing && s_clock_sample_generation == sample_generation &&
         s_clock.state.revision == sample_revision && reason == PRODUCT_UI_TIME_UNAVAILABLE_NONE)
         (void)product_ui_clock_model_network(&s_clock, seconds);
     spin_unlock(&s_clock_lock);
 }
 
+/**
+ * @brief 一次性初始化未可信模型并建立独立周期采样。
+ */
 d_err_t product_ui_clock_init(void)
 {
     uint16_t timer;
@@ -71,6 +79,9 @@ d_err_t product_ui_clock_init(void)
     return timer ? D_OK : D_ERR_IO;
 }
 
+/**
+ * @brief 在自旋锁内推进经过时间并复制墙钟快照。
+ */
 void product_ui_clock_get_snapshot(product_ui_clock_snapshot_t *snapshot)
 {
     uint32_t now;
@@ -83,6 +94,9 @@ void product_ui_clock_get_snapshot(product_ui_clock_snapshot_t *snapshot)
     spin_unlock(&s_clock_lock);
 }
 
+/**
+ * @brief 读取有效软件 UTC 并转换为北京时间，不使用 RTC 回退。
+ */
 product_ui_time_unavailable_reason_e product_ui_clock_read(product_ui_datetime_t *value)
 {
     product_ui_clock_snapshot_t snapshot;
@@ -93,6 +107,9 @@ product_ui_time_unavailable_reason_e product_ui_clock_read(product_ui_datetime_t
         PRODUCT_UI_TIME_UNAVAILABLE_NONE : PRODUCT_UI_TIME_UNAVAILABLE_SOURCE_INVALID;
 }
 
+/**
+ * @brief 按预期代次设置经校验的手动北京时间。
+ */
 d_err_t product_ui_clock_set_manual(const product_ui_datetime_t *value, uint32_t expected_revision)
 {
     product_ui_time_result_e result;
@@ -106,6 +123,9 @@ d_err_t product_ui_clock_set_manual(const product_ui_datetime_t *value, uint32_t
     return result == PRODUCT_UI_TIME_OK ? D_OK : D_ERR_INVALID_ARG;
 }
 
+/**
+ * @brief 按预期代次切回自动来源，并请求一次立即网络采样。
+ */
 d_err_t product_ui_clock_use_automatic(uint32_t expected_revision)
 {
     spin_lock(&s_clock_lock);
@@ -118,6 +138,9 @@ d_err_t product_ui_clock_use_automatic(uint32_t expected_revision)
     return D_OK;
 }
 
+/**
+ * @brief 冻结网络及手动校正并推进采样代次，经过时间仍继续累计。
+ */
 void product_ui_clock_quiesce_begin(void)
 {
     spin_lock(&s_clock_lock);
@@ -125,6 +148,9 @@ void product_ui_clock_quiesce_begin(void)
     spin_unlock(&s_clock_lock);
 }
 
+/**
+ * @brief 解除校正静默，推进采样代次并要求下一次立即采样。
+ */
 void product_ui_clock_quiesce_cancel(void)
 {
     spin_lock(&s_clock_lock);
@@ -132,6 +158,9 @@ void product_ui_clock_quiesce_cancel(void)
     spin_unlock(&s_clock_lock);
 }
 
+/**
+ * @brief 撤销就绪状态并停止独立定时器。
+ */
 void product_ui_clock_stop(void)
 {
     uint16_t timer;

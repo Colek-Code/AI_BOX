@@ -1,3 +1,8 @@
+/**
+ * @file lcd_gc9307.c
+ * @brief 保留 GC9307 面板命令及 TE/SPI 适配，不修改产品运行方向或像素所有权。
+ */
+
 #include "config/app_config.h"
 
 #if defined(D_LCD_ENABLE) && defined(D_LCD_GC9307_SDK_LCD_ENABLE)
@@ -96,6 +101,9 @@ static u8 gc9307_te_sem_ready = 0;
 static u8 gc9307_te_registered = 0;
 #endif
 
+/**
+ * @brief 按已有电平及延时复位 GC9307，不更改面板时序参数。
+ */
 static void gc9307_reset(void)
 {
     lcd_rst_pinstate(1);
@@ -110,6 +118,14 @@ static void gc9307_reset(void)
     lcd_delay(120);
 }
 
+/**
+ * @brief 向面板提交列、行地址窗口。
+ * @param[in] xs 起始列。
+ * @param[in] xe 结束列。
+ * @param[in] ys 起始行。
+ * @param[in] ye 结束行。
+ * @note 内部调用方先校验范围；此兼容命令路径不返回写入错误。
+ */
 static void gc9307_set_draw_area(u16 xs, u16 xe, u16 ys, u16 ye)
 {
     WriteCOM(0x2a);
@@ -125,6 +141,14 @@ static void gc9307_set_draw_area(u16 xs, u16 xe, u16 ys, u16 ye)
     WriteDAT_8((u8)ye);
 }
 
+/**
+ * @brief 检查物理矩形有序且位于固定面板边界。
+ * @param[in] xs 起始列。
+ * @param[in] xe 结束列。
+ * @param[in] ys 起始行。
+ * @param[in] ye 结束行。
+ * @return 有效为 1，否则为 0。
+ */
 static int gc9307_area_valid(u16 xs, u16 xe, u16 ys, u16 ye)
 {
     if ((xs > xe) || (ys > ye)) {
@@ -136,6 +160,10 @@ static int gc9307_area_valid(u16 xs, u16 xe, u16 ys, u16 ye)
     return 1;
 }
 
+/**
+ * @brief 执行既有初始化表的一项命令、参数及延时。
+ * @param[in] init_cmd 有效且数据长度不超过表项容量的静态命令项。
+ */
 static void gc9307_write_init_cmd(const gc9307_init_cmd_t *init_cmd)
 {
     u8 i;
@@ -149,6 +177,9 @@ static void gc9307_write_init_cmd(const gc9307_init_cmd_t *init_cmd)
     }
 }
 
+/**
+ * @brief 顺序执行原面板初始化表，保留所有寄存器值及延时。
+ */
 static void gc9307_write_init_sequence(void)
 {
     u32 i;
@@ -158,6 +189,10 @@ static void gc9307_write_init_sequence(void)
     }
 }
 
+/**
+ * @brief 把颜色低 16 位按面板字节序填入静态清屏块。
+ * @param[in] color 低 16 位为 RGB565 颜色。
+ */
 static void gc9307_fill_clear_buf(u32 color)
 {
     u8 hi = (u8)(color >> 8);
@@ -171,6 +206,10 @@ static void gc9307_fill_clear_buf(u32 color)
 }
 
 #ifdef D_GC9307_TE_SYNC_ENABLE
+/**
+ * @brief 记录 TE 边沿时钟和计数，仅在等待者已武装时发信号。
+ * @note 中断中不等待、不发送帧，不改变 LVGL 或页面状态。
+ */
 static void gc9307_te_irq_cb(void)
 {
     u32 now_ms = timer_get_ms();
@@ -186,12 +225,23 @@ static void gc9307_te_irq_cb(void)
     }
 }
 
+/**
+ * @brief 将板级 TE 引脚设置为数字输入。
+ * @param[in] pin 有效的板级 TE GPIO 编号。
+ */
 static void gc9307_te_prepare_pin(u32 pin)
 {
     gpio_set_direction(pin, 1);
     gpio_set_die(pin, 1);
 }
 
+/**
+ * @brief 从当前中断计数核对请求之后是否已有新 TE 边沿。
+ * @param[in] start_irq 本次等待开始的中断计数。
+ * @param[in] request_ms 本次等待请求时钟。
+ * @return 计数已变化为 1，并记录边沿统计；未变化为 0。
+ * @note 供任务内等待路径使用；只按计数是否变化，不把旧信号量通知当作边沿。
+ */
 static int gc9307_te_capture_edge(u32 start_irq, u32 request_ms)
 {
     u32 edge_irq;
@@ -213,6 +263,9 @@ static int gc9307_te_capture_edge(u32 start_irq, u32 request_ms)
 }
 #endif
 
+/**
+ * @brief 装配 TE 输入、信号量及中断注册；完整合同见 platform/screen/lcd/d_lcd_compat.h。
+ */
 void d_lcd_gc9307_te_init(const struct lcd_platform_data *pdata)
 {
 #ifdef D_GC9307_TE_SYNC_ENABLE
@@ -251,6 +304,9 @@ void d_lcd_gc9307_te_init(const struct lcd_platform_data *pdata)
 #endif
 }
 
+/**
+ * @brief 等待一次请求后的 TE 边沿；完整合同见 lcd_gc9307.h。
+ */
 d_lcd_gc9307_te_wait_result_e d_lcd_gc9307_wait_te_frame(void)
 {
 #ifdef D_GC9307_TE_SYNC_ENABLE
@@ -301,6 +357,9 @@ d_lcd_gc9307_te_wait_result_e d_lcd_gc9307_wait_te_frame(void)
 #endif
 }
 
+/**
+ * @brief 准备物理窗口；完整合同见 lcd_gc9307.h。
+ */
 int d_lcd_gc9307_prepare_area(uint16_t xs, uint16_t xe,
                               uint16_t ys, uint16_t ye)
 {
@@ -313,6 +372,9 @@ int d_lcd_gc9307_prepare_area(uint16_t xs, uint16_t xe,
     return 0;
 }
 
+/**
+ * @brief 准备像素写命令；完整合同见 lcd_gc9307.h。
+ */
 int d_lcd_gc9307_prepare_write(void)
 {
     if (!d_lcd_spi_async_is_ready()) {
@@ -322,6 +384,9 @@ int d_lcd_gc9307_prepare_write(void)
     return 0;
 }
 
+/**
+ * @brief 提交唯一像素传输；完整合同见 lcd_gc9307.h。
+ */
 int d_lcd_gc9307_flush_pixels_start(uint8_t *data, uint32_t len)
 {
     u32 callback_count;
@@ -346,6 +411,9 @@ int d_lcd_gc9307_flush_pixels_start(uint8_t *data, uint32_t len)
     return 0;
 }
 
+/**
+ * @brief 组合窗口及像素提交；完整合同见 lcd_gc9307.h。
+ */
 int d_lcd_gc9307_flush_start(const d_lcd_gc9307_flush_t *flush)
 {
     if ((flush == NULL) || (flush->data == NULL) || (flush->len == 0)) {
@@ -361,6 +429,9 @@ int d_lcd_gc9307_flush_start(const d_lcd_gc9307_flush_t *flush)
     return d_lcd_gc9307_flush_pixels_start(flush->data, flush->len);
 }
 
+/**
+ * @brief 等待并核对传输回调；完整合同见 lcd_gc9307.h。
+ */
 int d_lcd_gc9307_flush_wait(uint32_t timeout_ticks)
 {
     u32 callback_count;
@@ -391,6 +462,9 @@ int d_lcd_gc9307_flush_wait(uint32_t timeout_ticks)
     return result;
 }
 
+/**
+ * @brief 复制本地传输统计；完整合同见 lcd_gc9307.h。
+ */
 void d_lcd_gc9307_get_transfer_stats(
     d_lcd_gc9307_transfer_stats_t *stats)
 {
@@ -405,6 +479,9 @@ void d_lcd_gc9307_get_transfer_stats(
     stats->last_submit_ms = d_lcd_spi_async_get_last_submit_ms();
 }
 
+/**
+ * @brief 复制 TE 诊断；完整合同见 lcd_gc9307.h。
+ */
 void d_lcd_gc9307_get_te_stats(d_lcd_gc9307_te_stats_t *stats)
 {
     if (stats == NULL) {
@@ -431,6 +508,11 @@ void d_lcd_gc9307_get_te_stats(d_lcd_gc9307_te_stats_t *stats)
 #endif
 }
 
+/**
+ * @brief 按既有窗口及静态颜色块执行整屏清除。
+ * @param[in] color 低 16 位为 RGB565 颜色。
+ * @note 沿兼容 void 发送/等待路径，不能据此报告独立 DMA 成功票据。
+ */
 static void gc9307_clear_screen(u32 color)
 {
     u16 y;
@@ -445,6 +527,12 @@ static void gc9307_clear_screen(u32 color)
     lcd_interface_non_block_wait();
 }
 
+/**
+ * @brief 在当前窗口按既有等待顺序提交像素块。
+ * @param[in] map 有效源缓冲；NULL 时不处理。
+ * @param[in] size 有效字节数；零时不处理。
+ * @note 不自动换算逻辑方向或重设绘图区域。
+ */
 static void gc9307_draw(u8 *map, u32 size)
 {
     if ((map == NULL) || (size == 0)) {
@@ -457,6 +545,15 @@ static void gc9307_draw(u8 *map, u32 size)
     lcd_interface_non_block_wait();
 }
 
+/**
+ * @brief 校验物理矩形后按 RGB565 字节数调用兼容矩形发送。
+ * @param[in] xs 起始列。
+ * @param[in] xe 结束列。
+ * @param[in] ys 起始行。
+ * @param[in] ye 结束行。
+ * @param[in] img 覆盖矩形的像素字节，调用方保持。
+ * @note void 入口不暴露发送或等待失败，不能代替带确认的 flush_start/flush_wait。
+ */
 static void gc9307_lvgl_full(u16 xs, u16 xe, u16 ys, u16 ye, char *img)
 {
     u32 len;
@@ -475,6 +572,10 @@ static void gc9307_lvgl_full(u16 xs, u16 xe, u16 ys, u16 ye, char *img)
     lcd_interface_non_block_wait();
 }
 
+/**
+ * @brief 执行原复位、初始化表、整屏窗口及黑色清屏。
+ * @return 当前固定为 0，表示调用序列已执行；兼容 void 命令不提供逐项硬件确认。
+ */
 static int gc9307_init(void)
 {
     printf("[GC9307_LCD] SDK LCD init start\n");

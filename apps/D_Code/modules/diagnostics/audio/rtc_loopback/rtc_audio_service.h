@@ -1,6 +1,6 @@
 /**
  * @file    rtc_audio_service.h
- * @brief   RTC 音频服务 — 最小验证（MIC→cbuffer→DAC 环回）
+ * @brief   共享音频底层的 MIC→编码缓冲→解码→DAC 环回诊断接口。
  * @note    封装 SDK audio_input.c，提供 D_Code 风格接口
  *          后续扩展 WebSocket 音频传输时在此基础上增加
  */
@@ -25,45 +25,46 @@
 #endif
 
 //*********************************************************************************//
-//                              API                                                 //
+//                              公共接口                                            //
 //*********************************************************************************//
 
 /**
- * @brief 初始化 RTC 音频服务
- * @note  调用 audio_stream_init() 初始化 Audio Server + cbuffer
- *        应在 app_main Phase 4 中调用
- * @return D_OK 成功, D_ERR_IO 失败
+ * @brief 一次性调用共享 audio_stream_init 建立采集与播放对象。
+ * @return 当前封装在调用后返回 D_OK；不接收底层初始化错误反馈。
+ * @note 启动阶段调用；本封装的 initialized 不证明实机音频通路已通过。
  */
 d_err_t rtc_audio_service_init(void);
 
 /**
- * @brief 启动录音 + 播放（同时启动编码器和解码器）
- * @return D_OK 成功
+ * @brief 提交共享音频流录音与播放启动请求。
+ * @return 已初始化时返回 D_OK；未初始化返回 D_ERR_NOT_READY。
+ * @note 不在本封装等待底层启动完成。
  */
 d_err_t rtc_audio_start(void);
 
 /**
- * @brief 停止录音 + 播放
- * @return D_OK 成功
+ * @brief 提交共享音频流停止请求。
+ * @return 已初始化时返回 D_OK；未初始化返回 D_ERR_NOT_READY。
+ * @note 返回不等同底层 STOP 完成确认。
  */
 d_err_t rtc_audio_stop(void);
 
 /**
- * @brief 启动本地环回测试（MIC → encode → cbuffer → decode → DAC）
- * @note  会创建一个后台任务，循环读取编码数据并写入解码缓冲
- *        对 MIC 说话应能从扬声器听到回放
- * @return D_OK 成功, D_ERR_BUSY 已在运行
+ * @brief 按先播放后录音顺序提交启动，并创建本地环回任务。
+ * @return 任务创建成功返回 D_OK；未初始化、已报告运行或创建失败返回对应错误。
+ * @note 环回读取编码缓冲并写解码缓冲；当前 running 标志由任务启动后置位，本接口不保证并发重复调用安全。
  */
 d_err_t rtc_audio_loopback_start(void);
 
 /**
- * @brief 停止环回测试
+ * @brief 请求环回任务退出，有限等待后提交共享音频停止。
+ * @note 最长轮询约一秒，超时只记录日志；返回不能证明任务或底层资源已释放。
  */
 void rtc_audio_loopback_stop(void);
 
 /**
- * @brief 查询环回测试是否正在运行
- * @return 1=运行中, 0=未运行
+ * @brief 读取环回任务发布的运行标志。
+ * @return 任务报告运行返回非零，否则返回 0。
  */
 int rtc_audio_loopback_is_running(void);
 

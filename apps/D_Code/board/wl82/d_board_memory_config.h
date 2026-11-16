@@ -1,18 +1,9 @@
 /**
  * @file d_board_memory_config.h
- * @brief Linker-visible Flash and SDRAM capacities for the D_Code WL82 board.
- *
- * This file owns memory-capacity constants only. Select the hardware board in
- * config/board_config.h; config/internal/d_board_resolve.h maps that selection
- * to the matching display, touch and peripheral profile.
- *
- * Current firmware capacity contract:
- *   - Flash: GC9307/HYN 16 MB; legacy EMI hardware 8 MB.
- *   - SDRAM: 8 MB external SDRAM (4M x 16-bit, expressed as bytes).
- *
- * __FLASH_SIZE__ directly affects the sdk.ld address-space allocation. Both
- * capacity values must match the assembled memory devices; verify the chip
- * marking or schematic before changing either value.
+ * @brief 定义链接器可见的 WL82 Flash 与 SDRAM 容量，不选择业务功能。
+ * @note 板型由 config/board_config.h 选择，d_board_resolve.h 解析显示、触摸及外设配置。
+ * 当前容量：GC9307/HYN Flash 为 16 MB，旧 EMI 板为 8 MB；外挂 SDRAM 为 8 MB（4M×16 位）。
+ * __FLASH_SIZE__ 直接影响 sdk.ld 地址分配；修改前必须核对实际器件丝印或原理图。
  */
 
 #ifndef D_BOARD_MEMORY_CONFIG_H

@@ -1,7 +1,17 @@
+/**
+ * @file d_config_validate.h
+ * @brief 编译期校验配置组合与板级能力，只报告配置错误，不自动改配置。
+ */
+
 #ifndef D_CONFIG_VALIDATE_H
 #define D_CONFIG_VALIDATE_H
 
 #include "config/board_config.h"
+
+/* 旧命令行选项必须显式受检；设为零不会恢复已移除的后端。 */
+#if defined(D_DEVICE_CLOUD_ENABLE) && D_DEVICE_CLOUD_ENABLE != 0
+#error "D_DEVICE_CLOUD_ENABLE is retired; the legacy device platform is unavailable"
+#endif
 
 #if !defined(D_BOARD_TARGET)
 #error "请在 board_config.h 中设置 D_BOARD_TARGET"
@@ -16,11 +26,18 @@
 #error "请在 app_config.h 中设置 D_UI_TARGET"
 #endif
 
+#if (D_SCREEN_DEFAULT_ROTATION_DEGREES != 0) && (D_SCREEN_DEFAULT_ROTATION_DEGREES != 180)
+#error "D_SCREEN_DEFAULT_ROTATION_DEGREES must be 0 or 180"
+#endif
+#if (D_SCREEN_DEFAULT_ROTATION_DEGREES == 180) && \
+    ((D_BOARD_TARGET != D_BOARD_COPY_GC9307_HYN) || (D_UI_TARGET != D_UI_PRODUCT))
+#error "180 degree product orientation requires GC9307/HYN Product UI"
+#endif
+
 #if !defined(D_FEATURE_KEY_SERVICE) || \
     !defined(D_FEATURE_POWER_CONTROL) || \
     !defined(D_FEATURE_WIFI) || \
     !defined(D_FEATURE_BLE_PROVISION) || \
-    !defined(D_FEATURE_WEBSOCKET) || \
     !defined(D_FEATURE_AI_CHAT) || \
     !defined(D_FEATURE_CAMERA) || \
     !defined(D_FEATURE_GALLERY) || \
@@ -30,9 +47,11 @@
     !defined(D_FEATURE_BRTC) || \
     !defined(D_FEATURE_RTC_AUDIO) || \
     !defined(D_FEATURE_OTA) || \
+    !defined(D_FEATURE_WEBSOCKET) || \
     !defined(D_DEBUG_BOARD_LOG) || \
     !defined(D_DEBUG_UI_PERFORMANCE) || \
-    !defined(D_DEBUG_VISUAL_CAPTURE)
+    !defined(D_DEBUG_VISUAL_CAPTURE) || \
+    !defined(D_DEBUG_AUTH_CODE_READBACK)
 #error "app_config.h 配置项不完整，请恢复缺少的 D_FEATURE_* 或 D_DEBUG_* 行"
 #endif
 
@@ -47,11 +66,20 @@
 
 #define D_CONFIG_BOOL_IS_VALID(value) (((value) == 0) || ((value) == 1))
 
+#if !D_CONFIG_BOOL_IS_VALID(D_FEATURE_AI_ALARM) || !D_CONFIG_BOOL_IS_VALID(D_AI_ALARM_MUTATIONS)
+#error "AI alarm switches must be 0 or 1"
+#endif
+#if D_FEATURE_AI_ALARM && (!D_FEATURE_QWEN || D_UI_TARGET != D_UI_PRODUCT)
+#error "AI alarm requires Qwen and the Product UI alarm service"
+#endif
+#if D_AI_ALARM_MUTATIONS && !D_FEATURE_AI_ALARM
+#error "AI alarm mutations require the tool feature"
+#endif
+
 #if !D_CONFIG_BOOL_IS_VALID(D_FEATURE_KEY_SERVICE) || \
     !D_CONFIG_BOOL_IS_VALID(D_FEATURE_POWER_CONTROL) || \
     !D_CONFIG_BOOL_IS_VALID(D_FEATURE_WIFI) || \
     !D_CONFIG_BOOL_IS_VALID(D_FEATURE_BLE_PROVISION) || \
-    !D_CONFIG_BOOL_IS_VALID(D_FEATURE_WEBSOCKET) || \
     !D_CONFIG_BOOL_IS_VALID(D_FEATURE_AI_CHAT) || \
     !D_CONFIG_BOOL_IS_VALID(D_FEATURE_CAMERA) || \
     !D_CONFIG_BOOL_IS_VALID(D_FEATURE_GALLERY) || \
@@ -61,10 +89,16 @@
     !D_CONFIG_BOOL_IS_VALID(D_FEATURE_BRTC) || \
     !D_CONFIG_BOOL_IS_VALID(D_FEATURE_RTC_AUDIO) || \
     !D_CONFIG_BOOL_IS_VALID(D_FEATURE_OTA) || \
+    !D_CONFIG_BOOL_IS_VALID(D_FEATURE_WEBSOCKET) || \
     !D_CONFIG_BOOL_IS_VALID(D_DEBUG_BOARD_LOG) || \
     !D_CONFIG_BOOL_IS_VALID(D_DEBUG_UI_PERFORMANCE) || \
-    !D_CONFIG_BOOL_IS_VALID(D_DEBUG_VISUAL_CAPTURE)
+    !D_CONFIG_BOOL_IS_VALID(D_DEBUG_VISUAL_CAPTURE) || \
+    !D_CONFIG_BOOL_IS_VALID(D_DEBUG_AUTH_CODE_READBACK)
 #error "D_FEATURE_* 和 D_DEBUG_* 开关只能填写 0 或 1"
+#endif
+
+#if D_DEBUG_AUTH_CODE_READBACK && D_BOARD_TARGET != D_BOARD_COPY_GC9307_HYN
+#error "Authentication-code readback test is qualified only for the 16 MB GC9307 board"
 #endif
 
 #if !D_CONFIG_BOOL_IS_VALID(D_OTA_KEEP_VM) || !D_CONFIG_BOOL_IS_VALID(D_OTA_DOUBLE_BANK)
@@ -93,7 +127,7 @@
 
 #if (D_BOARD_TARGET == D_BOARD_COPY_GC9307_HYN) && \
     (D_FEATURE_AI_CHAT || (D_FEATURE_CAMERA && D_UI_TARGET != D_UI_PRODUCT) || D_FEATURE_GALLERY || \
-     D_FEATURE_LOCAL_MUSIC || D_FEATURE_BRTC || D_FEATURE_RTC_AUDIO)
+     (D_FEATURE_LOCAL_MUSIC && D_UI_TARGET != D_UI_PRODUCT) || D_FEATURE_BRTC || D_FEATURE_RTC_AUDIO)
 #error "GC9307/HYN 当前不支持旧版 AI/相机/相册/本地音乐/BRTC/RTC Audio，请关闭对应开关或改用 EMI 板型"
 #endif
 
@@ -113,9 +147,9 @@
 #error "启用 Qwen 时必须同时启用 Key Service"
 #endif
 
-#if (D_FEATURE_BLE_PROVISION || D_FEATURE_WEBSOCKET || \
+#if (D_FEATURE_BLE_PROVISION || \
      D_FEATURE_AI_CHAT || D_FEATURE_QWEN || D_FEATURE_BRTC || \
-     D_FEATURE_OTA) && \
+     D_FEATURE_OTA || D_FEATURE_WEBSOCKET) && \
     !D_FEATURE_WIFI
 #error "当前启用的网络业务需要同时启用 WiFi"
 #endif
@@ -124,6 +158,7 @@
     (D_UI_TARGET != D_UI_PRODUCT)
 #error "UI性能统计和视觉采集只适用于 Product UI"
 #endif
+
 
 #undef D_CONFIG_BOOL_IS_VALID
 

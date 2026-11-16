@@ -1,6 +1,4 @@
-/** @file product_ui_calendar_model.c
- * @brief Pure day/festival queries and Monday-first 42-cell month models.
- */
+/** @file product_ui_calendar_model.c @brief 日期、节日及周一起始的四十二格月份模型。 */
 #include "modules/applications/product_ui/features/time/product_ui_calendar_model.h"
 #include "modules/applications/product_ui/features/time/product_ui_calendar_lunar.h"
 #include "modules/applications/product_ui/features/time/product_ui_time_domain_internal.h"
@@ -13,6 +11,12 @@ typedef struct {
     uint16_t mask;
 } product_ui_calendar_festival_rule_t;
 
+/**
+ * @brief 按固定公历、非闰农历、除夕及清明规则组合节日位。
+ * @param[in] day 调用链保证完整的公历、农历及节气日信息。
+ * @return 本日期命中的节日位掩码，可同时含多个节日。
+ * @note 闰月不套用普通农历节日日期。
+ */
 static uint16_t product_ui_calendar_festivals(const product_ui_calendar_day_t *day)
 {
     static const product_ui_calendar_festival_rule_t solar[] = {
@@ -58,6 +62,9 @@ static uint16_t product_ui_calendar_festivals(const product_ui_calendar_day_t *d
     return mask;
 }
 
+/**
+ * @brief 查询受支持日期的农历、星期、节气及节日位。
+ */
 product_ui_calendar_result_e product_ui_calendar_get_day(
     const product_ui_date_t *date, product_ui_calendar_day_t *out)
 {
@@ -82,6 +89,9 @@ product_ui_calendar_result_e product_ui_calendar_get_day(
     return PRODUCT_UI_CALENDAR_OK;
 }
 
+/**
+ * @brief 构建周一起始的六行七列月份模型，含前后相邻月份单元。
+ */
 product_ui_calendar_result_e product_ui_calendar_build_month(
     uint16_t year, uint8_t month, product_ui_calendar_month_t *out)
 {

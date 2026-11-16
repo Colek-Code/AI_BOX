@@ -1,7 +1,4 @@
-/**
- * @file product_ui_visual_capture.c
- * @brief UART2 export of the existing GC9307 transition staging frame.
- */
+/** @file product_ui_visual_capture.c @brief 验证用现有 GC9307 过渡暂存帧导出，带请求身份及像素 CRC。 */
 
 #include "config/app_config.h"
 
@@ -34,12 +31,22 @@ static uint32_t s_capture_transition_id;
 static uint8_t s_capture_pending;
 static char s_capture_case[PRODUCT_UI_CAPTURE_CASE_SIZE];
 
+/**
+ * @brief 向协议头写入两字节小端值。
+ * @param[out] dst 至少两字节可写片段。
+ * @param[in] value 待编码数值。
+ */
 static void product_ui_capture_put_u16(uint8_t *dst, uint16_t value)
 {
     dst[0] = (uint8_t)value;
     dst[1] = (uint8_t)(value >> 8);
 }
 
+/**
+ * @brief 向协议头写入四字节小端值。
+ * @param[out] dst 至少四字节可写片段。
+ * @param[in] value 待编码数值。
+ */
 static void product_ui_capture_put_u32(uint8_t *dst, uint32_t value)
 {
     dst[0] = (uint8_t)value;
@@ -48,6 +55,12 @@ static void product_ui_capture_put_u32(uint8_t *dst, uint32_t value)
     dst[3] = (uint8_t)(value >> 24);
 }
 
+/**
+ * @brief 计算完整像素载荷的反射 CRC32。
+ * @param[in] data 至少 length 字节的借用载荷。
+ * @param[in] length 参与校验的字节数。
+ * @return 使用 0xedb88320、初始全一及最终取反的 CRC32。
+ */
 static uint32_t product_ui_capture_crc32(const uint8_t *data, uint32_t length)
 {
     uint32_t crc = 0xffffffffU;
@@ -64,6 +77,10 @@ static uint32_t product_ui_capture_crc32(const uint8_t *data, uint32_t length)
     return ~crc;
 }
 
+/**
+ * @brief 在固定用例标识缓冲内取得有效长度。
+ * @return 首个 NUL 前的字节数，最大为 CASE_SIZE。
+ */
 static uint8_t product_ui_capture_case_length(void)
 {
     uint8_t length = 0U;
@@ -76,6 +93,13 @@ static uint8_t product_ui_capture_case_length(void)
     return length;
 }
 
+/**
+ * @brief 编码固定六十四字节帧头，包括尺寸、方向、像素长度和 CRC。
+ * @param[out] header 至少 HEADER_SIZE 字节的输出。
+ * @param[in] frame 本次观察器借用的冻结过渡帧。
+ * @param[in] frame_crc 相同像素载荷的 CRC32。
+ * @note 像素仍按面板 RGB565 大端字节排列，协议头数值另按小端编码。
+ */
 static void product_ui_capture_build_header(
     uint8_t *header, const gc9307_transition_frame_t *frame,
     uint32_t frame_crc)
@@ -93,12 +117,19 @@ static void product_ui_capture_build_header(
     product_ui_capture_put_u16(header + 30, D_GC9307_PHYS_VER_RES);
     product_ui_capture_put_u16(header + 32, MY_DISP_HOR_RES);
     product_ui_capture_put_u16(header + 34, MY_DISP_VER_RES);
-    product_ui_capture_put_u16(header + 36, D_GC9307_ROTATION_DEGREES);
-    header[38] = 1U; /* RGB565 bytes are panel order: big endian. */
+    product_ui_capture_put_u16(header + 36, frame->orientation.angle);
+    header[38] = 1U; /* RGB565 像素使用面板大端字节顺序。 */
     header[39] = product_ui_capture_case_length();
     memcpy(header + 40, s_capture_case, PRODUCT_UI_CAPTURE_CASE_SIZE);
 }
 
+/**
+ * @brief 按需打开 UART2 并分块提交有限数据。
+ * @param[in] data 调用期间借用的待发送数据。
+ * @param[in] length 发送字节数。
+ * @return 打开或任一负写返回 -1，其余返回 0；当前不另核对非负短写长度。
+ * @note 在观察器路径同步执行；成功只沿用设备写接口当前检查，不提供更强传输确认。
+ */
 static int product_ui_capture_write(const uint8_t *data, uint32_t length)
 {
     uint32_t offset;
@@ -121,6 +152,13 @@ static int product_ui_capture_write(const uint8_t *data, uint32_t length)
     return 0;
 }
 
+/**
+ * @brief 只接受匹配截图过渡编号的完成帧，成功后发送帧头及像素并结束本请求。
+ * @param[in] frame 观察回调期间借用的帧及像素。
+ * @param[in] transfer_result 显示传输结果，非零结束本次捕获但不导出。
+ * @param[in] user_data 观察器上下文，当前未使用。
+ * @note 不保留帧指针；捕获完毕或传输失败才清 pending。
+ */
 static void product_ui_capture_frame_observer(
     const gc9307_transition_frame_t *frame, int transfer_result,
     void *user_data)
@@ -154,6 +192,11 @@ static void product_ui_capture_frame_observer(
            frame_crc, result);
 }
 
+/**
+ * @brief 为单次截图生成专用过渡编号并使活动屏幕失效重绘。
+ * @param[in] timer LVGL 单次定时器，当前未读取内容。
+ * @note 无活动屏幕时清除待捕获状态，不导出未取得的帧。
+ */
 static void product_ui_capture_timer_cb(lv_timer_t *timer)
 {
     lv_obj_t *screen;
@@ -174,6 +217,9 @@ static void product_ui_capture_timer_cb(lv_timer_t *timer)
     }
 }
 
+/**
+ * @brief 在截图诊断启用时安装过渡帧观察器，关闭时为空操作。
+ */
 int product_ui_visual_capture_init(void)
 {
     gc9307_transition_set_frame_observer(
@@ -181,6 +227,9 @@ int product_ui_visual_capture_init(void)
     return 0;
 }
 
+/**
+ * @brief 在截图诊断启用时排入一次延后帧捕获。
+ */
 int product_ui_visual_capture_request(const char *case_id)
 {
     uint32_t length;
@@ -206,11 +255,17 @@ int product_ui_visual_capture_request(const char *case_id)
 
 #else
 
+/**
+ * @brief 视觉截图诊断关闭时保留入口并返回零。
+ */
 int product_ui_visual_capture_init(void)
 {
     return 0;
 }
 
+/**
+ * @brief 视觉截图诊断关闭时保留入口并返回零。
+ */
 int product_ui_visual_capture_request(const char *case_id)
 {
     (void)case_id;

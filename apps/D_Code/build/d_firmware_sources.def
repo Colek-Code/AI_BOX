@@ -1,21 +1,23 @@
 /*
- * D_Code firmware source list.
- *
- * This file deliberately has no include guard: the build resolver includes it
- * after defining D_SOURCE().  Adding an ordinary D_Code module therefore needs
- * only one C-style entry here; the Makefile remains an internal implementation.
+ * D_Code 固件源码唯一成员清单。
+ * 本文件故意不设包含保护：构建解析器先定义 D_SOURCE() 再包含。
+ * 普通模块只需在此增加 C 风格条目，Makefile 继续作为内部实现。
  */
 #ifndef D_SOURCE
 #error "d_firmware_sources.def 只能由内部构建解析器包含"
 #endif
 
-/* Application skeleton and framework. */
+
+/* 应用启动骨架及共用框架。 */
 D_SOURCE("app/app_main.c")
 D_SOURCE("app/d_service_startup.c")
 D_SOURCE("app/d_ui_startup.c")
 D_SOURCE("config/d_config_report.c")
 D_SOURCE("board/wl82/d_board.c")
 D_SOURCE("framework/d_lvgl.c")
+#if defined(D_LVGL_ENABLE) && D_DEBUG_UI_PERFORMANCE
+D_SOURCE("framework/d_lvgl_profile.c")
+#endif
 D_SOURCE("framework/d_ui_font.c")
 D_SOURCE("framework/d_page_manager.c")
 D_SOURCE("framework/d_ui_module.c")
@@ -26,11 +28,21 @@ D_SOURCE("platform/screen/power/d_screen_power.c")
 D_SOURCE("platform/pwm/d_pwm.c")
 D_SOURCE("platform/screen/lcd/d_lcd_compat.c")
 
+#if D_AUTH_CODE_READ_ENABLE
+D_SOURCE("platform/storage/d_auth_code.c")
+#endif
+#if D_AUTH_CODE_READ_ENABLE
+D_SOURCE("platform/storage/d_auth_code_flash.c")
+#endif
+#if D_DEBUG_AUTH_CODE_READBACK
+D_SOURCE("modules/diagnostics/auth_code/d_auth_code_probe.c")
+#endif
+
 #ifdef D_TCP_CLIENT_TEST
 D_SOURCE("modules/diagnostics/network/tcp_client/d_tcp_client.c")
 #endif
 
-/* Optional services. */
+/* 按功能开关选择的可选服务。 */
 #if D_LOCAL_PROMPT_ENABLE
 D_SOURCE("modules/services/audio/d_local_prompt.c")
 D_SOURCE("modules/services/audio/d_local_prompt_decoder.c")
@@ -43,6 +55,7 @@ D_SOURCE("modules/services/audio/d_device_volume.c")
 
 #if D_FEATURE_KEY_SERVICE
 D_SOURCE("modules/services/key/d_key_service.c")
+D_SOURCE("modules/applications/device_control/product_key_bindings.c")
 #endif
 
 #if D_FEATURE_POWER_CONTROL
@@ -61,12 +74,6 @@ D_SOURCE("modules/services/ble_provisioning/ble_service.c")
 
 #ifdef CONFIG_MBEDTLS_ENABLE
 D_SOURCE("framework/d_crypto.c")
-#endif
-
-#if D_DEVICE_CLOUD_ENABLE
-D_SOURCE("modules/services/provisioning/device_credentials.c")
-D_SOURCE("modules/services/provisioning/provision_service.c")
-D_SOURCE("modules/services/websocket/ws_service.c")
 #endif
 
 #if D_FEATURE_AI_CHAT
@@ -94,6 +101,10 @@ D_SOURCE("modules/applications/legacy_ui/gallery/d_gallery_page.c")
 
 #if D_FEATURE_LOCAL_MUSIC
 D_SOURCE("modules/services/local_music/music_service.c")
+D_SOURCE("modules/services/local_music/music_backend_wl82.c")
+#endif
+#if D_PRODUCT_MUSIC_ENABLE
+D_SOURCE("modules/applications/product_ui/features/media/product_ui_media_runtime.c")
 #endif
 
 #if D_FEATURE_RTC_AUDIO
@@ -113,8 +124,22 @@ D_SOURCE("modules/integrations/qwen/qwen_audio.c")
 D_SOURCE("modules/integrations/qwen/qwen_cmd.c")
 D_SOURCE("modules/integrations/qwen/qwen_service.c")
 D_SOURCE("modules/integrations/qwen/qwen_hal.c")
-D_SOURCE("modules/integrations/qwen/qwen_net.c")
-D_SOURCE("modules/integrations/qwen/qwen_wss.c")
+D_SOURCE("modules/integrations/qwen/qwen_access_port.c")
+#if D_QWEN_ACTIVATION_ENABLE
+#if D_QWEN_FACTORY_TEST_BUILD
+D_SOURCE("modules/integrations/qwen/qwen_factory.c")
+#endif
+#endif
+#if D_QWEN_WSS_DIAG_ENABLE
+D_SOURCE("modules/integrations/qwen/qwen_wire_diag.c")
+#endif
+#if D_FEATURE_AI_ALARM
+D_SOURCE("modules/integrations/qwen/qwen_tool_protocol.c")
+D_SOURCE("modules/integrations/qwen/qwen_local_tool.c")
+D_SOURCE("modules/integrations/qwen/qwen_request_gate.c")
+D_SOURCE("modules/applications/product_ui/features/time/product_ui_alarm_tool.c")
+D_SOURCE("modules/applications/product_ui/features/time/product_ui_alarm_tool_args.c")
+#endif
 #endif
 
 #if D_FEATURE_XIAOLE_WAKEUP
@@ -133,7 +158,7 @@ D_SOURCE("modules/applications/product_ui/features/settings/product_ui_settings_
 D_SOURCE("modules/applications/product_ui/features/settings/product_ui_ota_notice.c")
 #endif
 
-/* Exactly one root UI. */
+/* 只选择一个根界面。 */
 #if (D_UI_TARGET == D_UI_CIPHER_PANEL) || (D_UI_TARGET == D_UI_PRODUCT)
 D_SOURCE("modules/applications/qwen_subtitle/qwen_subtitle_text.c")
 D_SOURCE("modules/applications/qwen_subtitle/qwen_subtitle_sentence.c")
@@ -154,7 +179,7 @@ D_SOURCE("modules/diagnostics/display/launcher_demo/launcher_demo.c")
 D_SOURCE("modules/diagnostics/display/light_spot_demo/light_spot_demo.c")
 #endif
 
-/* Board-owned drivers and LVGL ports. */
+/* 板级拥有的驱动及 LVGL 平台适配。 */
 #if D_BOARD_TARGET == D_BOARD_COPY_GC9307_HYN
 D_SOURCE("platform/screen/profiles/gc9307_hyn/d_display_gc9307.c")
 D_SOURCE("platform/screen/profiles/gc9307_hyn/d_screen_gc9307_hyn.c")
@@ -162,6 +187,7 @@ D_SOURCE("platform/screen/profiles/gc9307_hyn/d_touch_gesture.c")
 D_SOURCE("platform/screen/profiles/gc9307_hyn/d_touch_hyn.c")
 D_SOURCE("platform/screen/profiles/gc9307_hyn/lcd_gc9307.c")
 D_SOURCE("platform/screen/profiles/gc9307_hyn/lvgl/lv_port_disp_gc9307.c")
+D_SOURCE("platform/screen/profiles/gc9307_hyn/lvgl/gc9307_rotation.c")
 D_SOURCE("platform/screen/profiles/gc9307_hyn/lvgl/lv_port_disp_gc9307_trace.c")
 D_SOURCE("platform/screen/profiles/gc9307_hyn/lvgl/lv_port_disp_gc9307_transition.c")
 D_SOURCE("platform/screen/profiles/gc9307_hyn/lvgl/lv_port_indev_gc9307.c")
@@ -180,7 +206,7 @@ D_SOURCE("modules/diagnostics/display/tablet_shell/tablet_shell_panel.c")
 #elif D_UI_TARGET == D_UI_SCREEN_TEST
 D_SOURCE("modules/diagnostics/display/screen_test/screen_test_page.c")
 #elif D_UI_TARGET == D_UI_PRODUCT
-/* Product UI core, services and pinned assets. */
+/* Product UI 核心、服务与固定资源。 */
 D_SOURCE("modules/applications/product_ui/product_ui.c")
 D_SOURCE("modules/applications/product_ui/features/ai_chat/product_ui_ai_chat_controller.c")
 D_SOURCE("modules/applications/product_ui/features/ai_chat/product_ui_ai_chat_view.c")
@@ -205,6 +231,7 @@ D_SOURCE("modules/applications/product_ui/features/media/product_ui_media_storag
 D_SOURCE("modules/applications/product_ui/features/media/product_ui_media_control.c")
 D_SOURCE("modules/applications/product_ui/features/settings/product_ui_settings_service.c")
 D_SOURCE("modules/applications/product_ui/runtime/preferences/product_ui_appearance.c")
+D_SOURCE("modules/applications/product_ui/runtime/preferences/product_ui_orientation.c")
 D_SOURCE("modules/applications/product_ui/adapters/gc9307/product_ui_appearance_gc9307.c")
 D_SOURCE("modules/applications/product_ui/adapters/power/product_ui_appearance_power.c")
 D_SOURCE("modules/applications/product_ui/adapters/power/product_ui_pomodoro_power.c")
@@ -256,9 +283,18 @@ D_SOURCE("modules/applications/product_ui/features/settings/product_ui_settings_
 D_SOURCE("modules/applications/product_ui/features/settings/product_ui_settings_device_pages.c")
 D_SOURCE("modules/applications/product_ui/features/settings/product_ui_settings_wallpaper_page.c")
 D_SOURCE("modules/applications/product_ui/features/settings/product_ui_settings_time_page.c")
+#if D_QWEN_ACTIVATION_ENABLE
+D_SOURCE("modules/applications/product_ui/features/settings/product_ui_settings_activation_page.c")
+#endif
 D_SOURCE("modules/applications/product_ui/debug/product_ui_perf.c")
 D_SOURCE("modules/applications/product_ui/debug/product_ui_visual_capture.c")
 D_SOURCE("modules/applications/product_ui/assets/product_ui_icons.c")
 D_SOURCE("modules/applications/product_ui/assets/product_ui_color_icons.c")
 D_SOURCE("modules/applications/product_ui/assets/product_ui_wallpapers.c")
+#endif
+#if D_FEATURE_WEBSOCKET
+D_SOURCE("modules/services/websocket/ws_service.c")
+D_SOURCE("modules/services/websocket/ws_protocol.c")
+D_SOURCE("modules/services/websocket/ws_http.c")
+D_SOURCE("modules/services/websocket/ws_port_wl82.c")
 #endif

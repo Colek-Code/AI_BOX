@@ -1,7 +1,4 @@
-/**
- * @file cipher_panel_wifi_page.c
- * @brief WiFi sub page for the cipher panel demo.
- */
+/** @file cipher_panel_wifi_page.c @brief 旧根 UI 的 WiFi 状态、扫描及显式请求完成观察。 */
 #include "config/app_config.h"
 #if defined(D_LVGL_ENABLE) && (D_UI_TARGET == D_UI_CIPHER_PANEL)
 
@@ -33,10 +30,34 @@ static uint8_t s_wifi_row_index[WIFI_SERVICE_SCAN_MAX_RESULTS];
 static uint32_t s_wifi_seen_scan_version = 0xFFFFFFFFU;
 static uint32_t s_wifi_seen_status_version = 0xFFFFFFFFU;
 static uint32_t s_wifi_status_refresh_ms = 0;
+static uint32_t s_wifi_interest_id;
+static wifi_service_request_kind_e s_wifi_interest_kind;
 
 static void cipher_wifi_render_scan(void);
 static void cipher_wifi_render_status(void);
 
+/**
+ * @brief 状态卡根删除时撤销本页请求兴趣及全部输入／列表引用。
+ * @param[in] event 状态卡 DELETE 事件。
+ * @note 只撤销本页观察身份，不取消 WiFi 服务已经受理的工作。
+ */
+static void cipher_wifi_page_deleted(lv_event_t *event)
+{
+    if (lv_event_get_target(event) != s_wifi_status_card) return;
+    s_wifi_interest_id = 0U;
+    s_wifi_interest_kind = WIFI_SERVICE_REQUEST_NONE;
+    s_wifi_status_card = NULL;
+    s_wifi_scan_label = NULL;
+    s_wifi_list = NULL;
+    s_wifi_page = NULL;
+    cipher_wifi_input_reset();
+}
+
+/**
+ * @brief 把扫描阶段映射为静态既有状态文字。
+ * @param[in] state 服务扫描阶段。
+ * @return 阶段说明的借用指针，未列状态为刷新提示。
+ */
 static const char *cipher_wifi_scan_text(wifi_service_scan_state_t state)
 {
     switch (state) {
@@ -55,6 +76,11 @@ static const char *cipher_wifi_scan_text(wifi_service_scan_state_t state)
     }
 }
 
+/**
+ * @brief 把连接错误映射为静态既有说明。
+ * @param[in] error 服务连接错误枚举。
+ * @return 错误文字的借用指针，未列值返回既有无错误说明。
+ */
 static const char *cipher_wifi_error_text(wifi_service_conn_error_t error)
 {
     switch (error) {
@@ -81,6 +107,11 @@ static const char *cipher_wifi_error_text(wifi_service_conn_error_t error)
     }
 }
 
+/**
+ * @brief 把请求受理错误映射为静态连接说明。
+ * @param[in] err 请求受理结果。
+ * @return 对应说明的借用指针。
+ */
 static const char *cipher_wifi_connect_error_text(d_err_t err)
 {
     switch (err) {
@@ -97,6 +128,11 @@ static const char *cipher_wifi_connect_error_text(d_err_t err)
     }
 }
 
+/**
+ * @brief 密码层打开时更新其提示，否则更新当前扫描说明。
+ * @param[in] text 本次复制的文字。
+ * @param[in] color 输入提示使用的 RGB 颜色，扫描标签分支不改颜色。
+ */
 static void cipher_wifi_set_input_message(const char *text, uint32_t color)
 {
     if (cipher_wifi_input_is_open() != 0U) {
@@ -108,11 +144,27 @@ static void cipher_wifi_set_input_message(const char *text, uint32_t color)
     }
 }
 
+/**
+ * @brief 验证长度后原样复制 SSID／密码并受理显式连接请求。
+ * @param[in] ssid 借用目标 SSID，保留原始身份字节。
+ * @param[in] pwd 借用密码，开放网络使用非空指针的空串。
+ * @return 有效受理为 1，参数或服务失败为 0。
+ * @note 成功记录兴趣编号及种类，真实完成由页面 update 继续观察。
+ */
 static uint8_t cipher_wifi_start_connect(const char *ssid, const char *pwd)
 {
-    d_err_t err = wifi_service_connect_ui(ssid, pwd);
+    wifi_service_request_t request = {.kind = WIFI_SERVICE_REQUEST_CONNECT};
+    uint32_t ticket = 0U;
+    d_err_t err;
+    if (ssid == NULL || pwd == NULL || strlen(ssid) >= sizeof(request.ssid) ||
+        strlen(pwd) >= sizeof(request.pwd)) return 0U;
+    strcpy(request.ssid, ssid);
+    strcpy(request.pwd, pwd);
+    err = wifi_service_request_submit(&request, &ticket);
 
     if (err == D_OK) {
+        s_wifi_interest_id = ticket;
+        s_wifi_interest_kind = request.kind;
         cipher_wifi_render_status();
         return 1U;
     }
@@ -121,6 +173,13 @@ static uint8_t cipher_wifi_start_connect(const char *ssid, const char *pwd)
     return 0U;
 }
 
+/**
+ * @brief 把密码面板的本次借用输入转交显式连接受理。
+ * @param[in] ssid 本次借用网络身份。
+ * @param[in] pwd 本次借用密码。
+ * @param[in] user_data 密码回调上下文，当前未使用。
+ * @return 连接受理成功为 1，否则为 0。
+ */
 static uint8_t cipher_wifi_connect_input_cb(const char *ssid, const char *pwd,
                                             void *user_data)
 {
@@ -128,6 +187,17 @@ static uint8_t cipher_wifi_connect_input_cb(const char *ssid, const char *pwd,
     return cipher_wifi_start_connect(ssid, pwd);
 }
 
+/**
+ * @brief 创建旧根状态卡操作按钮，回调可选。
+ * @param[in,out] parent 按钮父对象。
+ * @param[in] text 本次复制的文字。
+ * @param[in] x 局部横坐标。
+ * @param[in] y 局部纵坐标。
+ * @param[in] w 按钮宽度。
+ * @param[in] accent RGB 强调色。
+ * @param[in] cb 可为空的持久点击回调。
+ * @return 成功返回父树拥有的按钮，按钮创建失败为 NULL。
+ */
 static lv_obj_t *cipher_wifi_action_button(lv_obj_t *parent, const char *text,
                                            int x, int y, int w, uint32_t accent,
                                            lv_event_cb_t cb)
@@ -155,21 +225,49 @@ static lv_obj_t *cipher_wifi_action_button(lv_obj_t *parent, const char *text,
     return btn;
 }
 
+/**
+ * @brief 受理重连已存网络，并记录本页兴趣编号及即时受理说明。
+ * @param[in] e 重连事件，当前未读取载荷。
+ */
 static void cipher_wifi_reconnect_event(lv_event_t *e)
 {
+    wifi_service_request_t request = {.kind = WIFI_SERVICE_REQUEST_RECONNECT};
+    uint32_t ticket = 0U;
+    d_err_t result;
     (void)e;
-    (void)wifi_service_reconnect_saved();
+    result = wifi_service_request_submit(&request, &ticket);
+    if (result == D_OK) {
+        s_wifi_interest_id = ticket;
+        s_wifi_interest_kind = request.kind;
+        cipher_wifi_set_input_message("Reconnect requested", CIPHER_ACCENT);
+    } else cipher_wifi_set_input_message(cipher_wifi_connect_error_text(result), CIPHER_WARN);
     cipher_wifi_render_status();
 }
 
+/**
+ * @brief 关闭密码层并受理忘记网络，真实清除结果留给完成确认。
+ * @param[in] e 忘记网络事件，当前未读取载荷。
+ */
 static void cipher_wifi_forget_event(lv_event_t *e)
 {
+    wifi_service_request_t request = {.kind = WIFI_SERVICE_REQUEST_FORGET};
+    uint32_t ticket = 0U;
+    d_err_t result;
     (void)e;
     cipher_wifi_input_close();
-    (void)wifi_service_forget_saved();
+    result = wifi_service_request_submit(&request, &ticket);
+    if (result == D_OK) {
+        s_wifi_interest_id = ticket;
+        s_wifi_interest_kind = request.kind;
+        cipher_wifi_set_input_message("Forgetting...", CIPHER_ACCENT);
+    } else cipher_wifi_set_input_message(cipher_wifi_connect_error_text(result), CIPHER_WARN);
     cipher_wifi_render_status();
 }
 
+/**
+ * @brief 按当前扫描下标选择网络，开放网络直接受理，其他打开密码层。
+ * @param[in] e 行点击事件，用户数据借用静态下标字节。
+ */
 static void cipher_wifi_row_event(lv_event_t *e)
 {
     uint8_t *index = (uint8_t *)lv_event_get_user_data(e);
@@ -186,6 +284,11 @@ static void cipher_wifi_row_event(lv_event_t *e)
     cipher_wifi_input_open(s_wifi_page, item, cipher_wifi_connect_input_cb, NULL);
 }
 
+/**
+ * @brief 在现有状态卡中创建连接、信号、获取 IP 或错误说明。
+ * @param[in,out] card 状态卡父对象。
+ * @param[in] status 本次借用的内存状态快照。
+ */
 static void cipher_wifi_render_status_text(lv_obj_t *card,
                                            const wifi_service_status_t *status)
 {
@@ -224,6 +327,10 @@ static void cipher_wifi_render_status_text(lv_obj_t *card,
     }
 }
 
+/**
+ * @brief 状态版本变化时清空并重建当前网络文字及重连／忘记操作。
+ * @note 只读取服务内存缓存；当前提前记录已见版本，不提供子控件分配失败的独立重试确认。
+ */
 static void cipher_wifi_render_status(void)
 {
     wifi_service_status_t status;
@@ -237,7 +344,7 @@ static void cipher_wifi_render_status(void)
         return;
     }
     s_wifi_seen_status_version = version;
-    wifi_service_get_status(&status);
+    wifi_service_get_cached_status(&status);
     lv_obj_clean(s_wifi_status_card);
 
     cipher_rect(s_wifi_status_card, 12, 0, 90, 2, CIPHER_ACCENT_2, 0);
@@ -251,6 +358,12 @@ static void cipher_wifi_render_status(void)
                               CIPHER_WARN, cipher_wifi_forget_event);
 }
 
+/**
+ * @brief 创建当前扫描结果行，绑定静态下标上下文并显示信号及认证说明。
+ * @param[in,out] parent 扫描列表父容器。
+ * @param[in] y 行纵向位置。
+ * @param[in] index 当前扫描结果下标。
+ */
 static void cipher_wifi_add_row(lv_obj_t *parent, int y, uint8_t index)
 {
     lv_obj_t *row;
@@ -285,6 +398,10 @@ static void cipher_wifi_add_row(lv_obj_t *parent, int y, uint8_t index)
                 CIPHER_ACCENT, LV_TEXT_ALIGN_RIGHT);
 }
 
+/**
+ * @brief 扫描版本变化时复制有限结果并重建列表，只有 DONE 且非空时创建网络行。
+ * @note 保留旧根 UI 的既有刷新策略，不提供 Product 虚拟列表的稳定条目键或部分呈现重试合同。
+ */
 static void cipher_wifi_render_scan(void)
 {
     wifi_service_scan_state_t state;
@@ -327,6 +444,9 @@ static void cipher_wifi_render_scan(void)
 }
 #endif
 
+/**
+ * @brief 创建旧根 WiFi 状态、扫描列表及操作，功能启用时受理首次扫描。
+ */
 void cipher_panel_show_wifi(lv_obj_t *parent)
 {
 #if D_FEATURE_WIFI
@@ -339,6 +459,8 @@ void cipher_panel_show_wifi(lv_obj_t *parent)
     s_wifi_seen_scan_version = 0xFFFFFFFFU;
     s_wifi_seen_status_version = 0xFFFFFFFFU;
     s_wifi_status_refresh_ms = 0;
+    s_wifi_interest_id = 0U;
+    s_wifi_interest_kind = WIFI_SERVICE_REQUEST_NONE;
 #endif
 
     cipher_page_header(parent, "WiFi");
@@ -348,6 +470,8 @@ void cipher_panel_show_wifi(lv_obj_t *parent)
                   CIPHER_PAGE_WIFI, CIPHER_ACCENT_2);
     s_wifi_status_card = cipher_row(parent, 22, CIPHER_WIFI_STATUS_Y,
                                     CIPHER_WIFI_LIST_W, CIPHER_WIFI_STATUS_H);
+    if (s_wifi_status_card != NULL)
+        lv_obj_add_event_cb(s_wifi_status_card, cipher_wifi_page_deleted, LV_EVENT_DELETE, NULL);
     s_wifi_scan_label = cipher_text(parent, "Scanning...", 22, CIPHER_WIFI_SCAN_Y,
                                     276, &lv_font_montserrat_12, CIPHER_MUTED,
                                     LV_TEXT_ALIGN_LEFT);
@@ -362,7 +486,14 @@ void cipher_panel_show_wifi(lv_obj_t *parent)
         lv_obj_set_style_clip_corner(s_wifi_list, 1, 0);
     }
 
-    (void)wifi_service_scan_start();
+    {
+        wifi_service_request_t request = {.kind = WIFI_SERVICE_REQUEST_SCAN};
+        uint32_t ticket = 0U;
+        if (wifi_service_request_submit(&request, &ticket) == D_OK) {
+            s_wifi_interest_id = ticket;
+            s_wifi_interest_kind = request.kind;
+        }
+    }
     cipher_wifi_render_status();
     cipher_wifi_render_scan();
 #else
@@ -371,9 +502,27 @@ void cipher_panel_show_wifi(lv_obj_t *parent)
 #endif
 }
 
+/**
+ * @brief 消费匹配编号及种类的 WiFi 请求完成，按周期刷新状态及扫描。
+ */
 void cipher_panel_wifi_update(uint32_t elapsed_ms)
 {
 #if D_FEATURE_WIFI
+    wifi_service_request_snapshot_t request;
+    wifi_service_get_request_snapshot(&request);
+    if (s_wifi_interest_id != 0U && request.completed_id == s_wifi_interest_id &&
+        request.completed_kind == s_wifi_interest_kind) {
+        wifi_service_request_kind_e kind = s_wifi_interest_kind;
+        s_wifi_interest_id = 0U;
+        s_wifi_interest_kind = WIFI_SERVICE_REQUEST_NONE;
+        if (request.completed_result != D_OK) {
+            cipher_wifi_set_input_message(request.completed_result == D_ERR_IO && kind == WIFI_SERVICE_REQUEST_FORGET ?
+                "Clear credentials failed" : cipher_wifi_connect_error_text(request.completed_result), CIPHER_WARN);
+        } else if (kind == WIFI_SERVICE_REQUEST_FORGET) {
+            cipher_wifi_set_input_message("Forgot network", CIPHER_ACCENT);
+        }
+        s_wifi_seen_status_version = 0xFFFFFFFFU;
+    }
     s_wifi_status_refresh_ms += elapsed_ms;
     if (s_wifi_status_refresh_ms >= CIPHER_WIFI_STATUS_REFRESH_MS) {
         s_wifi_status_refresh_ms = 0;

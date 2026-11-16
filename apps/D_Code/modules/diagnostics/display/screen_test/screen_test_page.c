@@ -1,6 +1,6 @@
 /**
  * @file screen_test_page.c
- * @brief Minimal LVGL validation page for the GC9307/HYN screen profile.
+ * @brief GC9307/HYN 扫描线与触摸点诊断页实现。
  */
 
 #include "config/app_config.h"
@@ -27,6 +27,9 @@ static int16_t s_touch_x = 0;
 static int16_t s_touch_y = 0;
 static uint8_t s_touch_pressed = 0;
 
+/**
+ * @brief 清空扫描线和触摸点引用及运行计数，不删除对象。
+ */
 static void screen_test_reset_runtime_state(void)
 {
     s_scan_line = NULL;
@@ -38,6 +41,10 @@ static void screen_test_reset_runtime_state(void)
     s_touch_pressed = 0;
 }
 
+/**
+ * @brief 清除边框、内边距、圆角并禁用滚动。
+ * @param[in,out] obj 待调整的 LVGL 对象；为空时不处理。
+ */
 static void screen_test_clean_obj(lv_obj_t *obj)
 {
     if (obj == NULL) {
@@ -50,6 +57,13 @@ static void screen_test_clean_obj(lv_obj_t *obj)
     lv_obj_remove_flag(obj, LV_OBJ_FLAG_SCROLLABLE);
 }
 
+/**
+ * @brief 创建定位文本，并通过指针输出标签对象。
+ * @param[in,out] parent 承载新建子对象的父容器。
+ * @param[out] label 非空标签指针输出，创建失败时为空。
+ * @param[in] y 标签纵坐标。
+ * @param[in] text LVGL 复制的零结尾显示文本。
+ */
 static void screen_test_label(lv_obj_t *parent, lv_obj_t **label, int y, const char *text)
 {
     *label = lv_label_create(parent);
@@ -63,6 +77,9 @@ static void screen_test_label(lv_obj_t *parent, lv_obj_t **label, int y, const c
     lv_obj_set_style_text_color(*label, lv_color_white(), 0);
 }
 
+/**
+ * @brief 将触摸点限制在屏内，并按按下状态更新颜色。
+ */
 static void screen_test_update_touch_dot(void)
 {
     int16_t x;
@@ -102,6 +119,10 @@ static void screen_test_update_touch_dot(void)
                               0);
 }
 
+/**
+ * @brief 从按下、拖动及释放事件读取指针坐标并更新触摸点。
+ * @param[in] event LVGL 分发的事件，调用期间借用。
+ */
 static void screen_test_touch_event_cb(lv_event_t *event)
 {
     lv_event_code_t code;
@@ -131,6 +152,11 @@ static void screen_test_touch_event_cb(lv_event_t *event)
     screen_test_update_touch_dot();
 }
 
+/**
+ * @brief 创建底部四条固定色条供目视检查。
+ * @param[in,out] parent 承载新建子对象的父容器。
+ * @return 成功返回 0，分配失败返回 -1。
+ */
 static int screen_test_create_bars(lv_obj_t *parent)
 {
     static const uint32_t bar_colors[SCREEN_TEST_BAR_COUNT] = {
@@ -159,6 +185,11 @@ static int screen_test_create_bars(lv_obj_t *parent)
     return 0;
 }
 
+/**
+ * @brief 创建初始静止的触摸点对象。
+ * @param[in,out] parent 承载新建子对象的父容器。
+ * @return 成功返回 0，分配失败返回 -1。
+ */
 static int screen_test_create_touch_dot(lv_obj_t *parent)
 {
     s_touch_dot = lv_obj_create(parent);
@@ -174,6 +205,11 @@ static int screen_test_create_touch_dot(lv_obj_t *parent)
     return 0;
 }
 
+/**
+ * @brief 创建诊断文本、色条、扫描线和触摸点。
+ * @param[in,out] parent 承载新建子对象的父容器。
+ * @return 成功返回 0；空父对象或创建失败返回 -1。
+ */
 static int screen_test_page_create(lv_obj_t *parent)
 {
     lv_obj_t *title;
@@ -222,6 +258,10 @@ static int screen_test_page_create(lv_obj_t *parent)
     return 0;
 }
 
+/**
+ * @brief 累计到 50 ms 后将扫描线水平推进三个像素。
+ * @param[in] elapsed_ms 本轮经过的毫秒数。
+ */
 static void screen_test_page_update(uint32_t elapsed_ms)
 {
     int16_t max_x;
@@ -245,11 +285,17 @@ static void screen_test_page_update(uint32_t elapsed_ms)
     lv_obj_set_x(s_scan_line, s_scan_x);
 }
 
+/**
+ * @brief 记录诊断页进入事件。
+ */
 static void screen_test_page_enter(void)
 {
     printf(SCREEN_TEST_LOG_TAG "enter\n");
 }
 
+/**
+ * @brief 记录诊断页退出事件。
+ */
 static void screen_test_page_exit(void)
 {
     printf(SCREEN_TEST_LOG_TAG "exit\n");
@@ -274,6 +320,9 @@ static const page_desc_t s_screen_test_page_desc = {
     .is_active  = 0,
 };
 
+/**
+ * @brief 注册静态页面描述；完整合同见 screen_test_page.h。
+ */
 int screen_test_page_register(void)
 {
     return page_manager_register(&s_screen_test_page_desc);

@@ -1,6 +1,6 @@
 /**
  * @file product_ui_alarm_rules.c
- * @brief Rule validation and future occurrence calculation for bounded civil dates.
+ * @brief 有限日期范围内的闹钟规则校验及未来执行时刻计算。
  * @author D_Code
  * @date 2026-09-21
  */
@@ -8,12 +8,18 @@
 #include "product_ui_time_domain_internal.h"
 #include <string.h>
 
+/**
+ * @brief 读取具名标签种类的静态中文文字。
+ */
 const char *product_ui_alarm_label(uint8_t kind)
 {
     static const char *const labels[] = {"闹钟", "起床", "午休", "吃药", "学习", "运动"};
     return kind < 6U ? labels[kind] : labels[0];
 }
 
+/**
+ * @brief 按非零规则编号查找固定记录槽。
+ */
 int product_ui_alarm_model_find(const product_ui_alarm_model_t *model, uint32_t id)
 {
     uint8_t index;
@@ -23,11 +29,21 @@ int product_ui_alarm_model_find(const product_ui_alarm_model_t *model, uint32_t 
     return -1;
 }
 
+/**
+ * @brief 判断存储时间戳是否为空值或位于产品有效 UTC 范围。
+ * @param[in] stamp 待校验 UTC 秒。
+ * @return 零或范围内返回非零，否则为零。
+ */
 static uint8_t product_ui_alarm_stamp_valid(int64_t stamp)
 {
     return stamp == 0 || (stamp >= PRODUCT_UI_CLOCK_MIN_UTC && stamp <= PRODUCT_UI_CLOCK_END_UTC);
 }
 
+/**
+ * @brief 在固定标签容量内验证 NUL 终止、可显示字符及完整 UTF-8。
+ * @param[in] label 至少 ALARM_LABEL_SIZE 可读字节的非空标签。
+ * @return 全部合法返回 1，无终止、控制符或非法编码返回 0。
+ */
 static uint8_t product_ui_alarm_label_valid(const char *label)
 {
     uint8_t index = 0U;
@@ -49,6 +65,9 @@ static uint8_t product_ui_alarm_label_valid(const char *label)
     return 0U;
 }
 
+/**
+ * @brief 统一验证规则、标签 UTF-8、版本、实例字段及 UTC 关系。
+ */
 uint8_t product_ui_alarm_record_valid(const product_ui_alarm_record_t *record)
 {
     if (record == NULL) return 0U;
@@ -70,6 +89,12 @@ uint8_t product_ui_alarm_record_valid(const product_ui_alarm_record_t *record)
     return 1U;
 }
 
+/**
+ * @brief 把合法公历日期转换为所属周周一零时 UTC。
+ * @param[in] date 借用日期。
+ * @param[out] monday 成功接收周一 UTC 秒；失败不改。
+ * @return 成功返回 D_OK，参数或日期转换失败返回 INVALID_ARG。
+ */
 static d_err_t product_ui_alarm_monday(const product_ui_date_t *date, int64_t *monday)
 {
     product_ui_datetime_t day;
@@ -81,6 +106,9 @@ static d_err_t product_ui_alarm_monday(const product_ui_date_t *date, int64_t *m
     return D_OK;
 }
 
+/**
+ * @brief 以规则首周周一为锚点，计算指定日期属于双周的第几周。
+ */
 d_err_t product_ui_alarm_week_index(const product_ui_alarm_t *rule,
     const product_ui_date_t *date, uint8_t *week)
 {
@@ -89,12 +117,15 @@ d_err_t product_ui_alarm_week_index(const product_ui_alarm_t *rule,
         product_ui_time_domain_validate_alarm(rule) != PRODUCT_UI_TIME_OK ||
         product_ui_alarm_monday(&rule->date, &anchor) != D_OK ||
         product_ui_alarm_monday(date, &monday) != D_OK) return D_ERR_INVALID_ARG;
-    /* Monday-to-Monday is an exact signed number of weeks, also before the anchor. */
+    /* 周一到周一为精确的有符号整周差，锚点之前日期也按同样奇偶计算。 */
     difference = (monday - anchor) / (7 * 86400);
     *week = (uint8_t)(difference % 2 != 0);
     return D_OK;
 }
 
+/**
+ * @brief 把可信日期所属周及用户确认周次转换为固定第一周周一。
+ */
 d_err_t product_ui_alarm_anchor_for_week(const product_ui_date_t *date,
     uint8_t week, product_ui_date_t *anchor)
 {
@@ -109,6 +140,9 @@ d_err_t product_ui_alarm_anchor_for_week(const product_ui_date_t *date,
     return D_OK;
 }
 
+/**
+ * @brief 为已校验且启用的单次、每周或双周规则寻找严格晚于给定时刻的执行点。
+ */
 int64_t product_ui_alarm_next_occurrence(const product_ui_alarm_t *rule, int64_t after_utc)
 {
     product_ui_datetime_t day;
@@ -139,6 +173,9 @@ int64_t product_ui_alarm_next_occurrence(const product_ui_alarm_t *rule, int64_t
     return 0;
 }
 
+/**
+ * @brief 读取仍待音频或正在响铃的实例槽位集合。
+ */
 uint16_t product_ui_alarm_model_ring_mask(const product_ui_alarm_model_t *model)
 {
     uint16_t mask = 0U;
@@ -152,6 +189,9 @@ uint16_t product_ui_alarm_model_ring_mask(const product_ui_alarm_model_t *model)
     return mask;
 }
 
+/**
+ * @brief 读取仍等待真实音频停止确认的实例集合。
+ */
 uint16_t product_ui_alarm_model_stop_mask(const product_ui_alarm_model_t *model)
 {
     uint16_t mask = 0U;

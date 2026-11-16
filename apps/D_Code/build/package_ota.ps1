@@ -1,4 +1,21 @@
-﻿param(
+﻿<#
+.SYNOPSIS
+校验 GC9307/HYN 双备份构建配置，准备 OTA 工作目录，并在显式 RUN 确认后调用原厂打包下载菜单。
+.DESCRIPTION
+校验 GC9307/HYN 双备份构建配置，准备 OTA 工作目录，并在显式 RUN 确认后调用原厂打包下载菜单。
+.PARAMETER PrepareOnly
+仅准备并检查工作目录，不调用 SDK 菜单。
+.PARAMETER BuildDir
+含 sdk.elf、下载脚本和编译配置的构建目录。
+.PARAMETER WorkDir
+本工程 product_ui_ota 下的任务输出目录。
+.PARAMETER SdkDir
+原厂 SDK 工具输入目录；空值使用工程默认位置。
+.OUTPUTS
+按脚本入口输出诊断信息或回执；失败沿用脚本的异常与退出码。
+#>
+
+param(
     [switch]$PrepareOnly,
     [string]$BuildDir = (Join-Path $PSScriptRoot 'out/wl82/ota'),
     [string]$WorkDir = (Join-Path $PSScriptRoot 'out/product_ui_ota/packages'),
@@ -9,12 +26,36 @@ $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $PSScriptRoot))
 if (-not $SdkDir) { $SdkDir = Join-Path $projectRoot 'cpu/wl82/tools' }
 
+<#
+.SYNOPSIS
+替换唯一 INI 字段，缺失或重复时抛出异常。
+.DESCRIPTION
+替换唯一 INI 字段，缺失或重复时抛出异常。
+.PARAMETER Text
+待替换的配置文本。
+.PARAMETER Name
+须唯一匹配的配置字段名。
+.PARAMETER Value
+该字段的新值。
+.OUTPUTS
+替换后的配置文本。
+#>
 function Set-IniValue([string]$Text, [string]$Name, [string]$Value) {
     $pattern = '(?m)^' + [regex]::Escape($Name) + '\s*=[^;\r\n]+;'
     if ([regex]::Matches($Text, $pattern).Count -ne 1) { throw "配置项缺失或重复：$Name" }
     return [regex]::Replace($Text, $pattern, ($Name + '=' + $Value + ';'))
 }
 
+<#
+.SYNOPSIS
+流式计算文件 SHA-256，最终释放流和哈希对象。
+.DESCRIPTION
+流式计算文件 SHA-256，最终释放流和哈希对象。
+.PARAMETER Path
+待读取文件的路径。
+.OUTPUTS
+小写十六进制 SHA-256。
+#>
 function FileHash([string]$Path) {
     $stream = [IO.File]::OpenRead($Path)
     $sha = [Security.Cryptography.SHA256]::Create()
@@ -63,18 +104,18 @@ try {
     $null = New-Item -ItemType Directory -Path $stage -Force
     foreach ($name in @('sdk.elf','download.bat')) { Copy-Item -LiteralPath (Join-Path $BuildDir $name) -Destination $stage }
     [IO.File]::WriteAllText((Join-Path $stage 'isd_config.ini'), $ini, [Text.Encoding]::ASCII)
-    # isd_download reads ota.bin implicitly when generating a dual-bank package.
+    # isd_download 生成双备份包时会隐式读取 ota.bin。
     foreach ($name in @('生成升级固件.bat','note.txt','script.ver','wl82loader.bin','sd_update2.bin','usb_update2.bin','uboot.boot','ota.bin','cfg_tool.bin','audlogo','cfg')) {
         Copy-Item -LiteralPath (Join-Path $SdkDir $name) -Destination (Join-Path $stage $name) -Recurse
     }
-    # Remove only the copied menu's final pause so the full output path appears immediately.
-    # Byte-preserving encoding keeps the vendor batch's original Chinese code page intact.
+    # 仅移除菜单副本最后的 pause，使完整输出路径立即可见。
+    # 以保字节编码保持原厂批处理原有中文代码页。
     $menu = Join-Path $stage '生成升级固件.bat'
     $bytesEncoding = [Text.Encoding]::GetEncoding(28591)
     $menuText = [IO.File]::ReadAllText($menu, $bytesEncoding)
     $menuText = [regex]::Replace($menuText, '(?im)^pause[\t ]*(?:\r?\n)*\z', '')
     [IO.File]::WriteAllText($menu, $menuText, $bytesEncoding)
-    Write-Host ("应用版本：{0}  SDK 升级序号：{1}  VM_OPT：{2}（1 保留，0 清空）" -f
+    Write-Host ("应用版本：{0}  SDK 序号：{1}  VM_OPT：{2}（1 保留，0 清空）" -f
         $config.D_BUILD_FIRMWARE_VERSION,$config.D_BUILD_OTA_BOOT_VERSION,$config.D_BUILD_OTA_KEEP_VM)
     Write-Host "工作目录：$stage"
     if ($PrepareOnly) { Write-Host '仅准备配置，未调用 SDK。'; exit 0 }

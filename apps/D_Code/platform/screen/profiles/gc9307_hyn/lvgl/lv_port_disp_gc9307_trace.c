@@ -1,7 +1,7 @@
 /**
  * @file lv_port_disp_gc9307_trace.c
- * @brief Bounded GC9307 frame and TE timing diagnostics.
- * D++: Owned by the D_Code GC9307/HYN screen profile.
+ * @brief 汇总有界 GC9307 帧及 TE 耗时诊断，不改变传输或资源策略。
+ * D++: 归属 D_Code GC9307/HYN 显示配置。
  */
 
 #define BOOL_DEFINE_CONFLICT
@@ -34,6 +34,12 @@ typedef struct {
     uint32_t report_total_ms;
     uint32_t report_max_ms;
     uint32_t report_slow_frames;
+    uint32_t report_rotate_ms;
+    uint32_t report_wait_ms;
+    uint32_t report_tx_ms;
+    uint32_t report_rotate_max_ms;
+    uint32_t report_wait_max_ms;
+    uint32_t report_tx_max_ms;
     uint32_t report_irq_start;
     uint32_t report_timeout_start;
     unsigned int transition_id;
@@ -42,6 +48,9 @@ typedef struct {
 
 static gc9307_port_frame_trace_t s_trace;
 
+/**
+ * @brief 登记帧诊断起点；完整合同见 lv_port_disp_gc9307_trace.h。
+ */
 void gc9307_port_trace_frame_begin(uint32_t now_ms,
                                    unsigned int transition_id)
 {
@@ -69,6 +78,25 @@ void gc9307_port_trace_frame_begin(uint32_t now_ms,
     s_trace.report_timeout_start = stats.timeout_count;
 }
 
+/**
+ * @brief 按现有首帧及过渡策略选择是否输出逐片详细日志。
+ * @param[in] transition_id 当前过渡编号，性能诊断配置下首批后忽略该值。
+ * @return 需要详细日志为 true，否则为 false。
+ */
+static bool gc9307_port_trace_detail(unsigned int transition_id)
+{
+    if (s_trace.frame_id <= GC9307_FRAME_DETAIL_LIMIT) return true;
+#if D_DEBUG_UI_PERFORMANCE
+    (void)transition_id;
+    return false;
+#else
+    return transition_id != 0U;
+#endif
+}
+
+/**
+ * @brief 累计片段探针；完整合同见 lv_port_disp_gc9307_trace.h。
+ */
 void gc9307_port_trace_part(const gc9307_port_trace_part_t *part)
 {
     if ((part == NULL) || (part->logical == NULL)) {
@@ -85,8 +113,7 @@ void gc9307_port_trace_part(const gc9307_port_trace_part_t *part)
     if (part->physical_dma_completed) {
         s_trace.physical_dma_count++;
     }
-    if ((s_trace.frame_id > GC9307_FRAME_DETAIL_LIMIT) &&
-        (part->transition_id == 0U)) {
+    if (!gc9307_port_trace_detail(part->transition_id)) {
         return;
     }
 
@@ -106,6 +133,12 @@ void gc9307_port_trace_part(const gc9307_port_trace_part_t *part)
            part->is_last ? 1U : 0U, part->transition_id);
 }
 
+/**
+ * @brief 累计帧窗口统计，达到原有报告周期时输出并重置窗口。
+ * @param[in] now_ms 本帧结束的毫秒计数。
+ * @param[in] frame_ms 本帧墙上耗时。
+ * @note 只更新探针状态，不插入 TE 等待、重试或渲染调度。
+ */
 static void gc9307_port_trace_report(uint32_t now_ms, uint32_t frame_ms)
 {
     d_lcd_gc9307_te_stats_t stats;
@@ -114,6 +147,12 @@ static void gc9307_port_trace_report(uint32_t now_ms, uint32_t frame_ms)
 
     s_trace.report_frames++;
     s_trace.report_total_ms += frame_ms;
+    s_trace.report_rotate_ms += s_trace.rotate_ms;
+    s_trace.report_wait_ms += s_trace.wait_ms;
+    s_trace.report_tx_ms += s_trace.tx_ms;
+    if (s_trace.rotate_ms > s_trace.report_rotate_max_ms) s_trace.report_rotate_max_ms = s_trace.rotate_ms;
+    if (s_trace.wait_ms > s_trace.report_wait_max_ms) s_trace.report_wait_max_ms = s_trace.wait_ms;
+    if (s_trace.tx_ms > s_trace.report_tx_max_ms) s_trace.report_tx_max_ms = s_trace.tx_ms;
     if (frame_ms > s_trace.report_max_ms) {
         s_trace.report_max_ms = frame_ms;
     }
@@ -129,24 +168,37 @@ static void gc9307_port_trace_report(uint32_t now_ms, uint32_t frame_ms)
     d_lcd_gc9307_get_te_stats(&stats);
     average_ms = s_trace.report_total_ms / s_trace.report_frames;
     printf("[GC9307-FRAME] summary frames=%u avg=%u max=%u over33=%u "
-           "te_irq=%u period=%u requests=%u post=%u stale=%u timeout=%u registered=%u\n",
+           "te_irq=%u period=%u requests=%u post=%u stale=%u timeout=%u registered=%u "
+           "elapsed=%u rot_avg=%u rot_max=%u wait_avg=%u wait_max=%u tx_avg=%u tx_max=%u\n",
            s_trace.report_frames, average_ms, s_trace.report_max_ms,
            s_trace.report_slow_frames,
            stats.irq_count - s_trace.report_irq_start,
            stats.irq_period_ms, stats.request_count,
            stats.sem_post_count, stats.stale_wakeup_count,
            stats.timeout_count - s_trace.report_timeout_start,
-           stats.is_registered);
+           stats.is_registered, elapsed_ms,
+           s_trace.report_rotate_ms / s_trace.report_frames, s_trace.report_rotate_max_ms,
+           s_trace.report_wait_ms / s_trace.report_frames, s_trace.report_wait_max_ms,
+           s_trace.report_tx_ms / s_trace.report_frames, s_trace.report_tx_max_ms);
 
     s_trace.report_start_ms = now_ms;
     s_trace.report_frames = 0;
     s_trace.report_total_ms = 0;
     s_trace.report_max_ms = 0;
     s_trace.report_slow_frames = 0;
+    s_trace.report_rotate_ms = 0U;
+    s_trace.report_wait_ms = 0U;
+    s_trace.report_tx_ms = 0U;
+    s_trace.report_rotate_max_ms = 0U;
+    s_trace.report_wait_max_ms = 0U;
+    s_trace.report_tx_max_ms = 0U;
     s_trace.report_irq_start = stats.irq_count;
     s_trace.report_timeout_start = stats.timeout_count;
 }
 
+/**
+ * @brief 结算帧及报告窗口；完整合同见 lv_port_disp_gc9307_trace.h。
+ */
 void gc9307_port_trace_frame_finish(uint32_t now_ms)
 {
     d_lcd_gc9307_te_stats_t stats;
@@ -164,8 +216,7 @@ void gc9307_port_trace_frame_finish(uint32_t now_ms)
     if ((s_trace.tx_ms != 0) && (stats.irq_period_ms != 0)) {
         speed_ratio_x1000 = stats.irq_period_ms * 1000U / s_trace.tx_ms;
     }
-    if ((s_trace.frame_id <= GC9307_FRAME_DETAIL_LIMIT) ||
-        (s_trace.transition_id != 0U)) {
+    if (gc9307_port_trace_detail(s_trace.transition_id)) {
         printf("[GC9307-FRAME] done frame=%u logical_parts=%u logical_bytes=%u "
                "physical_dma=%u physical_bytes=%u rot=%u wait=%u te_dma=%u "
                "tx=%u total=%u transition=%u request_ms=%u request_irq=%u "

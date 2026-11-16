@@ -1,6 +1,4 @@
-/** @file product_ui_calendar_view.c
- * @brief Calendar widgets, persistent button labels, input identity and events.
- */
+/** @file product_ui_calendar_view.c @brief 日历控件、持久按钮文字、输入身份及日程呈现；控制器拥有查询。 */
 #include "config/app_config.h"
 #if defined(D_LVGL_ENABLE) && (D_UI_TARGET == D_UI_PRODUCT)
 #include "modules/applications/product_ui/features/time/product_ui_calendar_view.h"
@@ -36,13 +34,16 @@ typedef struct {
     product_ui_calendar_presentation_t state;
     product_ui_calendar_action_cb_t callback;
     char cells[PRODUCT_UI_CALENDAR_CELL_COUNT][PRODUCT_UI_CALENDAR_LABEL_BYTES];
-    const char *map[48]; /* 42 buttons + 5 row breaks + terminator. */
+    const char *map[48]; /**< 四十二个按钮、五个行分隔及终止项。 */
     product_ui_virtual_list_t events;
     product_ui_calendar_event_t event_slots[PRODUCT_UI_VIRTUAL_LIST_SLOT_COUNT];
     product_ui_list_item_t event_rows[PRODUCT_UI_VIRTUAL_LIST_SLOT_COUNT];
     uint8_t event_order[PRODUCT_UI_TIME_DOMAIN_MAX_EVENTS];
     uint8_t event_count;
     uint32_t event_signature;
+    uint32_t seen_event_revision;
+    product_ui_date_t seen_selected_date;
+    uint8_t is_event_cache_valid;
     uint32_t generation;
     uint32_t pressed_generation;
     lv_obj_t *pressed_object;
@@ -53,6 +54,7 @@ typedef struct {
 } product_ui_calendar_view_t;
 
 static product_ui_calendar_view_t s_view;
+static product_ui_row_text_cache_t s_event_text[PRODUCT_UI_VIRTUAL_LIST_SLOT_COUNT];
 
 static const char *const s_calendar_terms[] = {
     "", "小寒", "大寒", "立春", "雨水", "惊蛰", "春分", "清明", "谷雨",
@@ -74,12 +76,23 @@ static const char *const s_calendar_lunar_days[] = {
 };
 static const char *const s_calendar_weekdays[] = {"周一", "周二", "周三", "周四", "周五", "周六", "周日"};
 
+/**
+ * @brief 逐字段比较两个有效日期。
+ * @param[in] a 调用链保证非空的左日期。
+ * @param[in] b 调用链保证非空的右日期。
+ * @return 年月日相同返回非零，否则为零。
+ */
 static uint8_t product_ui_calendar_dates_equal(const product_ui_date_t *a,
                                               const product_ui_date_t *b)
 {
     return a->year == b->year && a->month == b->month && a->day == b->day;
 }
 
+/**
+ * @brief 根据投影添加或删除对象禁用状态。
+ * @param[in,out] object 调用链保证有效的对象。
+ * @param[in] disabled 非零禁用，零使能。
+ */
 static void product_ui_calendar_disable(lv_obj_t *object, uint8_t disabled)
 {
     if (disabled) {
@@ -89,6 +102,9 @@ static void product_ui_calendar_disable(lv_obj_t *object, uint8_t disabled)
     }
 }
 
+/**
+ * @brief 撤销当前按压所有者并推进输入代次，使旧点击无效。
+ */
 void product_ui_calendar_view_cancel_press(void)
 {
     s_view.is_armed = 0U;
@@ -96,6 +112,11 @@ void product_ui_calendar_view_cancel_press(void)
     s_view.generation++;
 }
 
+/**
+ * @brief 滚动撤销按压，用户开始浏览时通知控制器停止自动跟随今天。
+ * @param[in] event 容器或列表的滚动事件。
+ * @note 程序绑定阶段不发布用户浏览动作；滚动及结束请求组合帧。
+ */
 static void product_ui_calendar_scroll_cb(lv_event_t *event)
 {
     lv_event_code_t code = lv_event_get_code(event);
@@ -109,6 +130,11 @@ static void product_ui_calendar_scroll_cb(lv_event_t *event)
     }
 }
 
+/**
+ * @brief 按对象、输入代次及按钮矩阵日期身份校验完整点击，再提交页面动作。
+ * @param[in] event 按钮或日期矩阵事件，用户数据编码动作。
+ * @note 只有当前按压所有者的丢失／失焦能撤销资格；按下时捕获日期，松手时矩阵下标必须仍一致。
+ */
 static void product_ui_calendar_input_cb(lv_event_t *event)
 {
     lv_event_code_t code = lv_event_get_code(event);
@@ -119,8 +145,8 @@ static void product_ui_calendar_input_cb(lv_event_t *event)
 
     if ((code == LV_EVENT_PRESS_LOST) || (code == LV_EVENT_DEFOCUSED) ||
         (code == LV_EVENT_INDEV_RESET)) {
-        /* LVGL can focus the new button after delivering its PRESSED event,
-         * then defocus the old button. Only the press owner may revoke it. */
+        /* LVGL 可能先给新按钮 PRESSED，再让旧按钮失焦；
+         * 只有当前按压所有者能撤销本轮输入。 */
         if (object == s_view.pressed_object) {
             product_ui_calendar_view_cancel_press();
         }
@@ -158,6 +184,12 @@ static void product_ui_calendar_input_cb(lv_event_t *event)
     }
 }
 
+/**
+ * @brief 创建主题文字标签并复制本次文本，关闭点击及手势冒泡。
+ * @param[in,out] parent 标签父对象。
+ * @param[in] text 本次复制的借用文字。
+ * @return 成功返回父对象拥有的标签，失败返回 NULL。
+ */
 static lv_obj_t *product_ui_calendar_label(lv_obj_t *parent, const char *text)
 {
     lv_obj_t *label = lv_label_create(parent);
@@ -170,6 +202,13 @@ static lv_obj_t *product_ui_calendar_label(lv_obj_t *parent, const char *text)
     return label;
 }
 
+/**
+ * @brief 创建主题按钮及文字，使用具名动作和共用输入身份校验。
+ * @param[in,out] parent 按钮父对象。
+ * @param[in] text 本次复制的按钮文字。
+ * @param[in] action 页面动作编号。
+ * @return 成功返回按钮，失败返回 NULL；标签失败时删除局部按钮。
+ */
 static lv_obj_t *product_ui_calendar_button(lv_obj_t *parent, const char *text,
                                            product_ui_calendar_action_e action)
 {
@@ -179,9 +218,6 @@ static lv_obj_t *product_ui_calendar_button(lv_obj_t *parent, const char *text,
     if (button == NULL) {
         return NULL;
     }
-    lv_obj_add_style(button, product_ui_style(PRODUCT_UI_STYLE_SURFACE), 0);
-    lv_obj_add_style(button, product_ui_style(PRODUCT_UI_STYLE_PRESSED), LV_STATE_PRESSED);
-    lv_obj_add_style(button, product_ui_style(PRODUCT_UI_STYLE_DISABLED), LV_STATE_DISABLED);
     lv_obj_set_size(button, PRODUCT_UI_TOUCH_MIN, PRODUCT_UI_TOUCH_MIN);
     lv_obj_set_style_pad_all(button, 0, 0);
     lv_obj_clear_flag(button, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_GESTURE_BUBBLE);
@@ -190,11 +226,18 @@ static lv_obj_t *product_ui_calendar_button(lv_obj_t *parent, const char *text,
         lv_obj_delete(button);
         return NULL;
     }
+    product_ui_button_style(button, action == PRODUCT_UI_CALENDAR_ACTION_APPLY ?
+        PRODUCT_UI_BUTTON_PRIMARY : PRODUCT_UI_BUTTON_SECONDARY);
+    lv_obj_set_size(button, PRODUCT_UI_TOUCH_MIN, PRODUCT_UI_TOUCH_MIN);
     lv_obj_center(label);
     lv_obj_add_event_cb(button, product_ui_calendar_input_cb, LV_EVENT_ALL, (void *)(uintptr_t)action);
     return button;
 }
 
+/**
+ * @brief 配置视图根纵向布局并绑定滚动取消与组合帧回调。
+ * @param[in,out] root 新创建的视图根。
+ */
 static void product_ui_calendar_container(lv_obj_t *root)
 {
     lv_obj_remove_style_all(root);
@@ -208,6 +251,12 @@ static void product_ui_calendar_container(lv_obj_t *root)
     lv_obj_add_event_cb(root, product_ui_calendar_scroll_cb, LV_EVENT_SCROLL_END, NULL);
 }
 
+/**
+ * @brief 创建固定高度的水平分散布局行。
+ * @param[in,out] parent 行父对象。
+ * @param[in] height 行高度像素数。
+ * @return 成功返回父对象拥有的行，失败返回 NULL。
+ */
 static lv_obj_t *product_ui_calendar_row(lv_obj_t *parent, int32_t height)
 {
     lv_obj_t *row = lv_obj_create(parent);
@@ -223,6 +272,11 @@ static lv_obj_t *product_ui_calendar_row(lv_obj_t *parent, int32_t height)
     return row;
 }
 
+/**
+ * @brief 在 LVGL 绘制任务创建阶段按今天标志设置独立日期边框。
+ * @param[in] event 网格 DRAW_TASK_ADDED 事件。
+ * @note 选中填充与今天边框语义分开；仅处理日期单元的边框描述，不修改其他绘制任务。
+ */
 static void product_ui_calendar_grid_draw_cb(lv_event_t *event)
 {
     lv_draw_task_t *task = lv_event_get_draw_task(event);
@@ -236,12 +290,17 @@ static void product_ui_calendar_grid_draw_cb(lv_event_t *event)
     if (border->base.part != LV_PART_ITEMS || border->base.id1 >= PRODUCT_UI_CALENDAR_CELL_COUNT) {
         return;
     }
-    /* The checked fill is selection; this independent border means today.
-     * LVGL 9.0 exposes these descriptors and button IDs during task creation. */
+    /* 选中填充表示当前选择，独立边框表示今天；
+     * LVGL 9.0 在任务创建阶段提供此描述及按钮编号。 */
     border->opa = lv_buttonmatrix_has_button_ctrl(grid, border->base.id1,
         LV_BUTTONMATRIX_CTRL_CUSTOM_1) ? LV_OPA_COVER : LV_OPA_TRANSP;
 }
 
+/**
+ * @brief 在候选根创建月份导航、周标题及可滚动四十二格矩阵。
+ * @param[in,out] widgets 含候选根并接收子控件引用的描述。
+ * @return 完整创建返回 0，任一对象失败返回 -1，候选根由上层统一删除。
+ */
 static int product_ui_calendar_month_create(product_ui_calendar_widgets_t *widgets)
 {
     static const char *const week[] = {"一", "二", "三", "四", "五", "六", "日"};
@@ -301,9 +360,9 @@ static int product_ui_calendar_month_create(product_ui_calendar_widgets_t *widge
     lv_obj_set_style_pad_column(widgets->grid, 2, 0);
     lv_obj_set_style_bg_color(widgets->grid, product_ui_color(PRODUCT_UI_COLOR_SURFACE), LV_PART_ITEMS);
     lv_obj_set_style_bg_opa(widgets->grid, LV_OPA_COVER, LV_PART_ITEMS);
-    lv_obj_set_style_radius(widgets->grid, PRODUCT_UI_RADIUS_SM, LV_PART_ITEMS);
-    lv_obj_set_style_border_width(widgets->grid, 2, LV_PART_ITEMS);
-    lv_obj_set_style_border_color(widgets->grid, product_ui_color(PRODUCT_UI_COLOR_ACCENT), LV_PART_ITEMS);
+    lv_obj_set_style_radius(widgets->grid, PRODUCT_UI_RADIUS_MD, LV_PART_ITEMS);
+    lv_obj_set_style_border_width(widgets->grid, 1, LV_PART_ITEMS);
+    lv_obj_set_style_border_color(widgets->grid, product_ui_color(PRODUCT_UI_COLOR_ACTION), LV_PART_ITEMS);
     lv_obj_set_style_border_opa(widgets->grid, LV_OPA_COVER, LV_PART_ITEMS);
     lv_obj_set_style_text_font(widgets->grid, product_ui_font(PRODUCT_UI_FONT_CAPTION), LV_PART_ITEMS);
     lv_obj_set_style_text_color(widgets->grid, product_ui_color(PRODUCT_UI_COLOR_TEXT), LV_PART_ITEMS);
@@ -312,7 +371,9 @@ static int product_ui_calendar_month_create(product_ui_calendar_widgets_t *widge
     lv_obj_set_style_bg_opa(widgets->grid, LV_OPA_TRANSP, LV_PART_ITEMS | LV_STATE_DISABLED);
     lv_obj_set_style_bg_color(widgets->grid, product_ui_color(PRODUCT_UI_COLOR_PRIMARY_SOFT),
                              LV_PART_ITEMS | LV_STATE_CHECKED);
-    lv_obj_set_style_bg_color(widgets->grid, product_ui_color(PRODUCT_UI_COLOR_SURFACE_PRESSED),
+    lv_obj_set_style_text_color(widgets->grid, product_ui_color(PRODUCT_UI_COLOR_ACTION),
+                               LV_PART_ITEMS | LV_STATE_CHECKED);
+    lv_obj_set_style_bg_color(widgets->grid, product_ui_color(PRODUCT_UI_COLOR_PRIMARY_SOFT),
                              LV_PART_ITEMS | LV_STATE_PRESSED);
     lv_obj_clear_flag(widgets->grid, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_GESTURE_BUBBLE);
     lv_obj_add_flag(widgets->grid, LV_OBJ_FLAG_SEND_DRAW_TASK_EVENTS);
@@ -322,6 +383,11 @@ static int product_ui_calendar_month_create(product_ui_calendar_widgets_t *widge
     return 0;
 }
 
+/**
+ * @brief 按节日优先、其次节气、最后农历月日选择格内短标签。
+ * @param[in] day 调用链保证字段及表下标合法的日信息。
+ * @return 静态文字的借用指针。
+ */
 static const char *product_ui_calendar_short_label(const product_ui_calendar_day_t *day)
 {
     uint8_t index;
@@ -338,6 +404,11 @@ static const char *product_ui_calendar_short_label(const product_ui_calendar_day
                                 s_calendar_lunar_days[day->lunar.day];
 }
 
+/**
+ * @brief 把控制器月模型绑定到持久矩阵文字，设置选中、今天及范围边缘能力。
+ * @param[in] state 借用的已验证呈现状态及持续有效月模型。
+ * @note 负滚动目标表示显露选中行，非负目标精确恢复；矩阵 map 借用本模块静态文字，不指向栈缓冲。
+ */
 static void product_ui_calendar_month_bind(const product_ui_calendar_presentation_t *state)
 {
     product_ui_calendar_widgets_t *widgets = &s_view.widgets;
@@ -395,6 +466,11 @@ static void product_ui_calendar_month_bind(const product_ui_calendar_presentatio
     lv_obj_scroll_to_y(widgets->grid_scroll, scroll_y, LV_ANIM_OFF);
 }
 
+/**
+ * @brief 在候选根创建年、十年、月及确定操作。
+ * @param[in,out] widgets 候选根及其输出控件引用。
+ * @return 完整创建返回 0，任一步失败返回 -1。
+ */
 static int product_ui_calendar_picker_create(product_ui_calendar_widgets_t *widgets)
 {
     lv_obj_t *year_row;
@@ -431,6 +507,10 @@ static int product_ui_calendar_picker_create(product_ui_calendar_widgets_t *widg
     return 0;
 }
 
+/**
+ * @brief 显示控制器草稿年月，并在查询上下界禁用相应增减操作。
+ * @param[in] state 借用的年月选择器状态。
+ */
 static void product_ui_calendar_picker_bind(const product_ui_calendar_presentation_t *state)
 {
     char value[20];
@@ -447,45 +527,91 @@ static void product_ui_calendar_picker_bind(const product_ui_calendar_presentati
     product_ui_calendar_disable(s_view.widgets.month_up, state->picker_month == 12U);
 }
 
-static uint32_t product_ui_calendar_event_order(const product_ui_date_t *date)
+/**
+ * @brief 在局部数组中筛选所选日期并按开始时间排序，版本稳定后提交顺序。
+ * @param[in] date 筛选的开始日期；跨天事件仍按开始日期归属。
+ * @param[out] out_signature 成功时接收选中日完整事件值的内容摘要，失败不写。
+ * @return 成功返回 TIME_OK；参数、摘要容量、记录读取或末次代次复核失败返回对应错误。
+ * @note 失败或重入变化不得把部分顺序发布给可见行绑定器；日程接口沿用 UI 串行合同。
+ */
+static product_ui_time_result_e product_ui_calendar_event_order(
+    const product_ui_date_t *date, uint32_t *out_signature)
 {
     product_ui_calendar_event_t event;
     product_ui_calendar_event_t previous;
     product_ui_time_domain_summary_t summary;
+    uint8_t order[PRODUCT_UI_TIME_DOMAIN_MAX_EVENTS] = {0};
+    uint8_t count = 0U;
     uint8_t source;
+    uint32_t revision;
+    product_ui_time_result_e result;
     uint32_t signature = 2166136261UL;
 
-    s_view.event_count = 0U;
-    if (product_ui_time_domain_get_summary(&summary) != PRODUCT_UI_TIME_OK) {
-        return 0U;
-    }
+    if (date == NULL || out_signature == NULL) return PRODUCT_UI_TIME_ERR_INVALID_ARGUMENT;
+    revision = product_ui_time_domain_get_event_revision();
+    result = product_ui_time_domain_get_summary(&summary);
+    if (result != PRODUCT_UI_TIME_OK) return result;
+    if (summary.event_count > PRODUCT_UI_TIME_DOMAIN_MAX_EVENTS) return PRODUCT_UI_TIME_ERR_CAPACITY;
     for (source = 0U; source < summary.event_count; source++) {
         uint8_t insert;
         uint16_t byte;
         const uint8_t *bytes = (const uint8_t *)&event;
 
-        if (product_ui_time_domain_get_event(source, &event) != PRODUCT_UI_TIME_OK ||
-            !product_ui_calendar_dates_equal(date, &event.start.date)) {
+        result = product_ui_time_domain_get_event(source, &event);
+        if (result != PRODUCT_UI_TIME_OK) return result;
+        if (!product_ui_calendar_dates_equal(date, &event.start.date)) {
             continue;
         }
         for (byte = 0U; byte < sizeof(event); byte++) {
             signature = (signature ^ bytes[byte]) * 16777619UL;
         }
-        insert = s_view.event_count;
+        insert = count;
         while (insert > 0U) {
-            if (product_ui_time_domain_get_event(s_view.event_order[insert - 1U], &previous) != PRODUCT_UI_TIME_OK ||
-                product_ui_time_compare_datetime(&previous.start, &event.start) <= 0) {
+            result = product_ui_time_domain_get_event(order[insert - 1U], &previous);
+            if (result != PRODUCT_UI_TIME_OK) return result;
+            if (product_ui_time_compare_datetime(&previous.start, &event.start) <= 0) {
                 break;
             }
-            s_view.event_order[insert] = s_view.event_order[insert - 1U];
+            order[insert] = order[insert - 1U];
             insert--;
         }
-        s_view.event_order[insert] = source;
-        s_view.event_count++;
+        order[insert] = source;
+        count++;
     }
-    return signature;
+    /* 先在局部完成构建；不完整查询或重入日程变更
+     * 不得把部分排序发布给可见行绑定器。 */
+    if (revision != product_ui_time_domain_get_event_revision()) return PRODUCT_UI_TIME_ERR_CONFLICT;
+    memcpy(s_view.event_order, order, (size_t)count * sizeof(order[0]));
+    s_view.event_count = count;
+    *out_signature = signature;
+    return PRODUCT_UI_TIME_OK;
 }
 
+/**
+ * @brief 仅在日程代次仍匹配且列表完整呈现时提交日期／代次缓存键。
+ * @param[in] revision 查询开始时观察到的日程专用代次。
+ * @param[in] date 对应的选中日期。
+ * @note 先使旧键失效，再检查 render_pending 和 is_refreshing，避免失败行被缓存命中压制。
+ */
+static void product_ui_calendar_event_cache_commit(
+    uint32_t revision, const product_ui_date_t *date)
+{
+    s_view.is_event_cache_valid = 0U;
+    if (s_view.events.render_pending || s_view.events.is_refreshing ||
+        revision != product_ui_time_domain_get_event_revision()) return;
+    s_view.seen_event_revision = revision;
+    s_view.seen_selected_date = *date;
+    s_view.is_event_cache_valid = 1U;
+}
+
+/**
+ * @brief 按排序逻辑下标复制事件到固定槽，输出只读日程行规格。
+ * @param[in] index 当天排序列表的逻辑下标。
+ * @param[in] slot 固定复用槽下标。
+ * @param[out] spec 接收借用槽内事件标题的行规格。
+ * @param[in] context 列表上下文，当前未使用。
+ * @return 成功返回 0，参数、槽／逻辑下标或事件读取失败返回 -1。
+ */
 static int product_ui_calendar_event_bind(uint16_t index, uint8_t slot,
                                          product_ui_row_spec_t *spec, void *context)
 {
@@ -503,27 +629,38 @@ static int product_ui_calendar_event_bind(uint16_t index, uint8_t slot,
     }
     *row = (product_ui_list_item_t){.item_id = "calendar_event", .title = event->title[0] ? event->title : "未命名日程",
         .icon_id = PRODUCT_UI_ICON_SCHEDULE, .accent = PRODUCT_UI_COLOR_WARNING};
-    *spec = (product_ui_row_spec_t){.item = row, .item_key = event->id,
+    *spec = (product_ui_row_spec_t){.item = row, .item_key = event->id, .appearance = PRODUCT_UI_ROW_APPEARANCE_INSET,
         .subtitle = event->completed ? "已完成" : "待处理", .is_enabled = 1U,
         .interaction = PRODUCT_UI_ROW_INTERACTION_NONE, .trailing = PRODUCT_UI_ROW_TRAILING_NONE};
     return 0;
 }
 
+/**
+ * @brief 创建选中日期详情及当天有限日程列表，完整刷新后尝试提交缓存键。
+ * @param[in,out] widgets 候选视图根及输出控件引用。
+ * @param[in] state 借用的所选日期及详情滚动目标。
+ * @return 完整创建返回 0，日期查询、排序、任一对象或行刷新失败返回 -1。
+ */
 static int product_ui_calendar_detail_create(product_ui_calendar_widgets_t *widgets,
                                              const product_ui_calendar_presentation_t *state)
 {
     product_ui_calendar_day_t day;
     product_ui_virtual_list_spec_t list_spec = {.row_height = PRODUCT_UI_ROW_DOUBLE_H,
-        .bind_cb = product_ui_calendar_event_bind};
+        .bind_cb = product_ui_calendar_event_bind, .text_caches = s_event_text};
     lv_obj_t *header;
     char text[160];
     size_t used = 0U;
     uint8_t index;
+    uint32_t revision = product_ui_time_domain_get_event_revision();
+
+    s_view.is_event_cache_valid = 0U;
 
     if (product_ui_calendar_get_day(&state->selected, &day) != PRODUCT_UI_CALENDAR_OK) {
         return -1;
     }
-    s_view.event_signature = product_ui_calendar_event_order(&state->selected);
+    if (product_ui_calendar_event_order(&state->selected, &s_view.event_signature) != PRODUCT_UI_TIME_OK) {
+        return -1;
+    }
     list_spec.item_count = s_view.event_count;
     lv_obj_clear_flag(widgets->root, LV_OBJ_FLAG_SCROLLABLE);
     if (product_ui_virtual_list_create(widgets->root, &s_view.events, &list_spec) != 0) {
@@ -569,9 +706,13 @@ static int product_ui_calendar_detail_create(product_ui_calendar_widgets_t *widg
     }
     lv_obj_add_event_cb(s_view.events.root, product_ui_calendar_scroll_cb, LV_EVENT_SCROLL, NULL);
     lv_obj_add_event_cb(s_view.events.root, product_ui_calendar_scroll_cb, LV_EVENT_SCROLL_END, NULL);
+    product_ui_calendar_event_cache_commit(revision, &state->selected);
     return 0;
 }
 
+/**
+ * @brief 在无现存视图的串行创建阶段建立父容器及动作回调借用。
+ */
 void product_ui_calendar_view_init(lv_obj_t *parent, product_ui_calendar_action_cb_t callback)
 {
     memset(&s_view, 0, sizeof(s_view));
@@ -579,6 +720,9 @@ void product_ui_calendar_view_init(lv_obj_t *parent, product_ui_calendar_action_
     s_view.callback = callback;
 }
 
+/**
+ * @brief 模式变化时先构建完整候选子树再替换旧树，同模式只重新绑定。
+ */
 int product_ui_calendar_view_show(const product_ui_calendar_presentation_t *state)
 {
     product_ui_calendar_widgets_t next = {0};
@@ -610,6 +754,7 @@ int product_ui_calendar_view_show(const product_ui_calendar_presentation_t *stat
             lv_obj_delete(s_view.widgets.root);
         }
         s_view.widgets = next;
+        if (state->mode != PRODUCT_UI_CALENDAR_DETAIL) memset(s_event_text, 0, sizeof(s_event_text));
     }
     s_view.state = *state;
     s_view.is_binding = 1U;
@@ -623,6 +768,9 @@ int product_ui_calendar_view_show(const product_ui_calendar_presentation_t *stat
     return 0;
 }
 
+/**
+ * @brief 读取当前显示视图对应的独立滚动位置。
+ */
 int32_t product_ui_calendar_view_scroll(void)
 {
     if (s_view.state.mode == PRODUCT_UI_CALENDAR_DETAIL) {
@@ -631,31 +779,60 @@ int32_t product_ui_calendar_view_scroll(void)
     return s_view.widgets.grid_scroll != NULL ? lv_obj_get_scroll_y(s_view.widgets.grid_scroll) : 0;
 }
 
+/**
+ * @brief 以日程专用代次和选中日期检查详情缓存，再重试有限行绑定。
+ */
 void product_ui_calendar_view_update(uint32_t elapsed_ms)
 {
     uint32_t signature;
+    uint32_t revision;
+    product_ui_date_t date;
 
     if (s_view.widgets.root == NULL || s_view.state.mode != PRODUCT_UI_CALENDAR_DETAIL) {
         return;
     }
-    signature = product_ui_calendar_event_order(&s_view.state.selected);
-    if (signature != s_view.event_signature) {
+    revision = product_ui_time_domain_get_event_revision();
+    date = s_view.state.selected;
+    if (s_view.is_event_cache_valid && revision == s_view.seen_event_revision &&
+        product_ui_calendar_dates_equal(&date, &s_view.seen_selected_date)) {
+        /* 排序缓存命中也不能压制先前失败的可见行绑定重试。 */
+        product_ui_virtual_list_update(&s_view.events, elapsed_ms);
+        return;
+    }
+    if (product_ui_calendar_event_order(&date, &signature) != PRODUCT_UI_TIME_OK ||
+        revision != product_ui_time_domain_get_event_revision()) {
+        s_view.is_event_cache_valid = 0U;
+        product_ui_virtual_list_update(&s_view.events, elapsed_ms);
+        return;
+    }
+    if (!s_view.is_event_cache_valid ||
+        !product_ui_calendar_dates_equal(&date, &s_view.seen_selected_date) ||
+        signature != s_view.event_signature) {
+        s_view.is_event_cache_valid = 0U;
         product_ui_calendar_view_cancel_press();
         lv_label_set_text(s_view.widgets.status, s_view.event_count ? "" : "当天没有日程");
         if (product_ui_virtual_list_set_count(&s_view.events, s_view.event_count) == 0) {
             s_view.event_signature = signature;
+            product_ui_calendar_event_cache_commit(revision, &date);
         }
         d_screen_request_composed_frame();
+    } else {
+        /* 其他日期的日程变化可以只更新缓存键，保留当前可见内容。 */
+        product_ui_calendar_event_cache_commit(revision, &date);
     }
     product_ui_virtual_list_update(&s_view.events, elapsed_ms);
 }
 
+/**
+ * @brief 撤销按压、删除本视图子树并清空回调、父引用及文本缓存。
+ */
 void product_ui_calendar_view_reset(void)
 {
     product_ui_calendar_view_cancel_press();
     if (s_view.widgets.root != NULL) {
         lv_obj_delete(s_view.widgets.root);
     }
+    memset(s_event_text, 0, sizeof(s_event_text));
     memset(&s_view, 0, sizeof(s_view));
 }
 

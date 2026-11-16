@@ -1,7 +1,4 @@
-/**
- * @file product_ui_settings_controls.c
- * @brief Reusable settings rows with local UI controls.
- */
+/** @file product_ui_settings_controls.c @brief 设置详情页的本地开关及滑条行，服务提交由外部消费者绑定。 */
 
 #include "config/app_config.h"
 
@@ -13,10 +10,10 @@
 #define PRODUCT_UI_SETTING_ROW_W       (PRODUCT_UI_SCREEN_W - (2 * PRODUCT_UI_PAGE_PAD))
 #define PRODUCT_UI_SETTING_ROW_H       PRODUCT_UI_ROW_DOUBLE_H
 #define PRODUCT_UI_SETTING_ROW_GAP     4
-#define PRODUCT_UI_SETTING_PAD_HOR     8
+#define PRODUCT_UI_SETTING_PAD_HOR     PRODUCT_UI_SPACE_MD
 #define PRODUCT_UI_SETTING_PAD_VER     4
 #define PRODUCT_UI_SETTING_TEXT_GAP    2
-#define PRODUCT_UI_SETTING_RADIUS      7
+#define PRODUCT_UI_SETTING_RADIUS      PRODUCT_UI_RADIUS_LG
 #define PRODUCT_UI_SETTING_SWITCH_W    32
 #define PRODUCT_UI_SETTING_SWITCH_H    18
 #define PRODUCT_UI_SETTING_SLIDER_W    96
@@ -25,12 +22,20 @@
     ((PRODUCT_UI_TOUCH_MIN - PRODUCT_UI_SETTING_SLIDER_H + 1) / 2)
 #define PRODUCT_UI_SETTING_VALUE_LEN   8
 
+/**
+ * @brief 清除对象默认样式及滚动能力，保留显式交互配置。
+ * @param[in,out] obj 调用链保证有效的 LVGL 对象。
+ */
 static void product_ui_setting_clean(lv_obj_t *obj)
 {
     lv_obj_remove_style_all(obj);
     lv_obj_clear_flag(obj, LV_OBJ_FLAG_SCROLLABLE);
 }
 
+/**
+ * @brief 行点击时翻转子开关并发送 VALUE_CHANGED，不直接提交业务命令。
+ * @param[in] event 点击事件，用户数据借用行内开关对象。
+ */
 static void product_ui_toggle_row_clicked(lv_event_t *event)
 {
     lv_obj_t *toggle = lv_event_get_user_data(event);
@@ -48,6 +53,13 @@ static void product_ui_toggle_row_clicked(lv_event_t *event)
     lv_obj_send_event(toggle, LV_EVENT_VALUE_CHANGED, NULL);
 }
 
+/**
+ * @brief 创建不可点击的标题及副标题文本区。
+ * @param[in,out] row 文本区父行。
+ * @param[in] title 本次由标签复制的标题。
+ * @param[in] subtitle 本次由标签复制的副标题。
+ * @return 成功返回文本区，任一步创建失败返回 NULL，部分对象仍由行拥有。
+ */
 static lv_obj_t *product_ui_setting_text(lv_obj_t *row, const char *title,
                                          const char *subtitle)
 {
@@ -96,6 +108,13 @@ static lv_obj_t *product_ui_setting_text(lv_obj_t *row, const char *title,
     return box;
 }
 
+/**
+ * @brief 创建共用设置行及文本区，失败删除已创建行。
+ * @param[in,out] parent 新行的父容器。
+ * @param[in] title 借用标题。
+ * @param[in] subtitle 借用副标题。
+ * @return 成功返回父对象拥有的行，失败返回 NULL。
+ */
 static lv_obj_t *product_ui_setting_row(lv_obj_t *parent, const char *title,
                                         const char *subtitle)
 {
@@ -124,6 +143,11 @@ static lv_obj_t *product_ui_setting_row(lv_obj_t *parent, const char *title,
     return row;
 }
 
+/**
+ * @brief 按本模块固定子对象布局借用副标题标签。
+ * @param[in] row 本模块创建的设置行，可为空。
+ * @return 结构符合预期返回标签，否则为 NULL。
+ */
 static lv_obj_t *product_ui_setting_subtitle(lv_obj_t *row)
 {
     lv_obj_t *text_box;
@@ -138,6 +162,10 @@ static lv_obj_t *product_ui_setting_subtitle(lv_obj_t *row)
     return lv_obj_get_child(text_box, 1);
 }
 
+/**
+ * @brief 在滑条值变化时只更新副标题的百分比显示。
+ * @param[in] event 滑条事件，用户数据借用副标题标签。
+ */
 static void product_ui_slider_value_changed(lv_event_t *event)
 {
     lv_obj_t *slider = lv_event_get_target(event);
@@ -150,6 +178,9 @@ static void product_ui_slider_value_changed(lv_event_t *event)
                           (long)lv_slider_get_value(slider));
 }
 
+/**
+ * @brief 创建本地开关行并设定初始选中状态。
+ */
 lv_obj_t *product_ui_toggle_row_create(lv_obj_t *parent, const char *title,
                                        const char *subtitle, uint8_t is_checked)
 {
@@ -205,6 +236,9 @@ lv_obj_t *product_ui_toggle_row_create(lv_obj_t *parent, const char *title,
     return row;
 }
 
+/**
+ * @brief 创建零至一百的本地滑条行并绑定百分比文字更新。
+ */
 lv_obj_t *product_ui_slider_row_create(lv_obj_t *parent, const char *title,
                                        int32_t value)
 {
@@ -264,6 +298,9 @@ lv_obj_t *product_ui_slider_row_create(lv_obj_t *parent, const char *title,
     return row;
 }
 
+/**
+ * @brief 按设置行固定布局借用第二个子对象作为实际控件。
+ */
 lv_obj_t *product_ui_setting_row_get_control(lv_obj_t *row)
 {
     if ((row == NULL) || (lv_obj_get_child_count(row) < 2U)) {

@@ -1,4 +1,4 @@
-"""Run production crypto capacity/time contracts with injected SDK boundaries."""
+"""替换 SDK 边界后验证实际加密实现的容量和时间合同。"""
 from __future__ import annotations
 
 import argparse
@@ -17,6 +17,7 @@ FIXTURE = Path(__file__).resolve().parent / "tests/crypto_host"
 
 
 def run(options: argparse.Namespace) -> int:
+    """在工程任务目录建立 SDK 替身，编译并执行真实加密容量及时间合同。"""
     work = options.work_dir.resolve()
     if not work.is_relative_to(ROOT) or work == ROOT:
         raise ValueError("work directory must stay inside this project")
@@ -28,7 +29,7 @@ def run(options: argparse.Namespace) -> int:
         environment[name] = str(temp)
     for relative in ("mbedtls/md.h", "mbedtls/pk.h", "mbedtls/sha256.h",
                      "mbedtls/entropy.h", "mbedtls/ctr_drbg.h", "system/includes.h",
-                     "system/generic/printf.h"):
+                     "system/generic/printf.h", "system/spinlock.h"):
         target = stubs / relative
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text('#include "d_crypto_sdk_stub.h"\n', encoding="utf-8")
@@ -103,7 +104,7 @@ def run(options: argparse.Namespace) -> int:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--work-dir", type=Path,
-                        default=D_CODE / "build/out/crypto_tests")
+                        default=D_CODE / "build/out/crypto")
     parser.add_argument("--compiler", default="gcc")
     parser.add_argument("--negative-control", action="store_true")
     try:

@@ -1,15 +1,13 @@
 /**
  * @file deployment_config.h
- * @brief Network, cloud, BLE, AI Chat and BRTC deployment parameters.
- *
- * Feature selection belongs in app_config.h. Edit this file only when the
- * selected deployment needs different credentials, endpoints or identities.
+ * @brief 配置网络、云端、BLE、AI Chat 和 BRTC 的部署参数。
+ * @note 功能选择由 app_config.h 管理；仅在当前部署需要调整凭据、地址或身份时修改本文件。
  */
 
 #ifndef D_DEPLOYMENT_CONFIG_H
 #define D_DEPLOYMENT_CONFIG_H
 
-/* Product identity exists independently of the selected cloud provider. */
+/* 产品身份独立于所选云服务商。 */
 #define D_FIRMWARE_VERSION                "1.1.0"
 #ifndef D_FIRMWARE_BUILD_ID
 #define D_FIRMWARE_BUILD_ID               "development"
@@ -25,14 +23,14 @@
 #endif
 
 #ifdef D_TCP_CLIENT_TEST
-#define D_TCP_SERVER_IP             "192.168.1.100"
+#define D_TCP_SERVER_IP             "10.17.40.160"
 #define D_TCP_SERVER_PORT           8080
 #define SERVER_TCP_IP               D_TCP_SERVER_IP
 #define SERVER_TCP_PORT             D_TCP_SERVER_PORT
 #endif
 
 #if D_FEATURE_AI_CHAT
-/* 1 = Qwen text API, 2 = Doubao text API. */
+/* 1 = Qwen 文本接口；2 = 豆包文本接口。 */
 #define D_AI_PLATFORM               2
 
 #if (D_AI_PLATFORM == 1)
@@ -52,32 +50,9 @@
 #define D_AI_REPLY_BUF_SIZE         2048
 #endif
 
-#if D_DEVICE_CLOUD_ENABLE
-#define D_PROVISION_AUTH_FACTORY_SECRET   0
-#define D_PROVISION_AUTH_DEVICE_CERT      1
-#define D_PROVISION_AUTH_MODE             D_PROVISION_AUTH_FACTORY_SECRET
-
-#define D_CLOUD_BASE_URL                  "https://your-cloud.example.com"
-#define D_WS_DEFAULT_ENDPOINT             "wss://your-cloud.example.com/device/ws"
-
-#define D_DEFAULT_DEVICE_ID               "your_device_id"
-#define D_DEFAULT_PRODUCT_KEY             "your_product_key"
-#define D_DEFAULT_DEVICE_SN               "your_device_sn"
-#define D_DEFAULT_FACTORY_SECRET          ""
-
-#define D_DEFAULT_CLAIM_TICKET            "your_claim_ticket"
-#define D_DEFAULT_TENANT_ID               "your_tenant_id"
-#define D_SIGN_ALGORITHM                  "SHA256withRSA"
-
-#define D_WS_RECV_BUF_SIZE                2048
-#define D_WS_HEARTBEAT_INTERVAL_S         30
-#define D_WS_HEARTBEAT_TIMEOUT_S          120
-#define D_WS_RECONNECT_INTERVAL_S         5
-#define D_WS_RECONNECT_MAX_S              60
-#endif
 
 #if D_FEATURE_BRTC
-#define D_BRTC_USERSERVER_URL       "http://your_brtc_server_ip:8936/api/v1/aiagent"
+#define D_BRTC_USERSERVER_URL       "http://10.122.170.160:8936/api/v1/aiagent"
 #define D_BRTC_APP_ID               ""
 #define D_BRTC_USER_ID              "D_Code_001"
 

@@ -1,6 +1,6 @@
 /**
  * @file d_lvgl.c
- * @brief LVGL worker lifecycle and exact-once terminal publication.
+ * @brief 实现 LVGL 任务生命周期及终态发布，不把等待超时当成初始化取消。
  */
 
 #include "config/app_config.h"
@@ -10,6 +10,7 @@
 #ifdef D_LVGL_ENABLE
 
 #include "d_lvgl.h"
+#include "d_lvgl_profile.h"
 #include "d_ui_font.h"
 #include "framework/compat/d_stdio_compat.h"
 #include "d_lvgl_port.h"
@@ -25,19 +26,27 @@ static volatile d_err_t s_lvgl_init_result = D_ERR_NOT_READY;
 static volatile uint8_t s_is_result_published;
 static uint8_t s_is_init_started;
 static uint8_t s_is_wait_detached;
-/*
- * The initializer runs at most once, so retain the static semaphore for the
- * firmware lifetime.  This also prevents a timeout-boundary publisher from
- * posting to an OS object deleted after it left the critical section.
- */
+/* 初始化最多执行一次，静态信号量保留到固件结束。这样可避免超时边界上的发布者
+ * 退出临界区后，向已被等待线程删除的 OS 对象发通知。 */
 static uint8_t s_is_sem_created;
 static uint8_t s_is_callback_claimed;
 
+/**
+ * @brief 把初始化结果映射到成功或失败终态。
+ * @param[in] result 本次初始化结果。
+ * @return D_OK 对应 READY，其他结果对应 FAILED。
+ */
 static d_lvgl_init_state_e d_lvgl_terminal_state(d_err_t result)
 {
     return (result == D_OK) ? D_LVGL_INIT_READY : D_LVGL_INIT_FAILED;
 }
 
+/**
+ * @brief 只接纳首个初始化终态，锁外通知等待者和完成回调。
+ * @param[in] result 待发布的初始化结果。
+ * @return 已经发布或本次接纳的最终结果。
+ * @note 临界区只登记结果及回调归属；信号量与回调在退出临界区后执行。静态信号量不因等待超时而销毁。
+ */
 static d_err_t d_lvgl_publish_terminal(d_err_t result)
 {
     d_lvgl_init_complete_cb_t callback = NULL;
@@ -75,6 +84,13 @@ static d_err_t d_lvgl_publish_terminal(d_err_t result)
     return result;
 }
 
+/**
+ * @brief 等待失败时复核终态，或把同步等待标为已分离。
+ * @param[in] wait_error 映射后的等待错误码。
+ * @param[in] wait_ret SDK 等待结果，用于失败诊断。
+ * @return 终态已经发布时返回最终结果；否则返回传入的等待错误。
+ * @note 只改变等待者状态，不终止 LVGL 初始化任务。
+ */
 static d_err_t d_lvgl_detach_startup_wait(d_err_t wait_error, int wait_ret)
 {
     d_err_t result;
@@ -102,6 +118,11 @@ static d_err_t d_lvgl_detach_startup_wait(d_err_t wait_error, int wait_ret)
     return result;
 }
 
+/**
+ * @brief 在唯一 UI 任务中初始化 LVGL、显示、输入、字体及根页面，然后持续更新。
+ * @param[in] context SDK 任务参数，当前未使用。
+ * @note 任何初始化失败都会发布终态并结束任务；成功后循环调用产品更新及 LVGL handler，不向外转移 UI 执行权。
+ */
 static void d_lvgl_task(void *context)
 {
     d_err_t result;
@@ -154,7 +175,13 @@ static void d_lvgl_task(void *context)
         if (s_lvgl_init_spec.cycle_complete_cb != NULL) {
             render_started_ms = timer_get_ms();
         }
+#if D_DEBUG_UI_PERFORMANCE
+        d_lvgl_profile_begin();
+#endif
         time_till_next = lv_task_handler();
+#if D_DEBUG_UI_PERFORMANCE
+        d_lvgl_profile_end();
+#endif
         if (s_lvgl_init_spec.cycle_complete_cb != NULL) {
             s_lvgl_init_spec.cycle_complete_cb(render_started_ms - now,
                                                timer_get_ms() - render_started_ms);
@@ -167,15 +194,21 @@ static void d_lvgl_task(void *context)
     }
 }
 
+/**
+ * @brief 创建一次性 UI 任务并等待其终态；完整合同见 d_lvgl.h。
+ */
 d_err_t d_lvgl_init(const d_lvgl_init_spec_t *spec)
 {
     int task_result;
     int wait_result;
+    int worker_priority;
     d_err_t terminal_result;
 
-    if ((spec == NULL) || (spec->bootstrap == NULL)) {
+    if ((spec == NULL) || (spec->bootstrap == NULL) ||
+        (spec->worker_priority > D_LVGL_WORKER_PRIORITY_MAX)) {
         return D_ERR_INVALID_ARG;
     }
+    worker_priority = spec->worker_priority ? spec->worker_priority : 1;
 
     OS_ENTER_CRITICAL();
     if (s_is_result_published != 0U) {
@@ -200,8 +233,8 @@ d_err_t d_lvgl_init(const d_lvgl_init_spec_t *spec)
     s_is_sem_created = 1U;
     OS_EXIT_CRITICAL();
 
-    printf(LOG_TAG "Creating LVGL task...\n");
-    task_result = thread_fork("d_lvgl", 1, 16 * 1024, 0, 0,
+    printf(LOG_TAG "Creating LVGL task priority=%d...\n", worker_priority);
+    task_result = thread_fork("d_lvgl", worker_priority, 16 * 1024, 0, 0,
                               d_lvgl_task, NULL);
     if (task_result != OS_NO_ERR) {
         printf(LOG_TAG "Create LVGL task failed: %d\n", task_result);
@@ -223,6 +256,9 @@ d_err_t d_lvgl_init(const d_lvgl_init_spec_t *spec)
     return terminal_result;
 }
 
+/**
+ * @brief 复制初始化状态；完整合同见 d_lvgl.h。
+ */
 d_err_t d_lvgl_get_init_snapshot(d_lvgl_init_snapshot_t *snapshot)
 {
     if (snapshot == NULL) {

@@ -1,7 +1,4 @@
-/**
- * @file product_ui_theme.h
- * @brief Product UI design tokens and reusable styles.
- */
+/** @file product_ui_theme.h @brief Product UI 的具名颜色、字体、布局常量及共用样式。 */
 
 #ifndef PRODUCT_UI_THEME_H
 #define PRODUCT_UI_THEME_H
@@ -21,11 +18,9 @@
 #define PRODUCT_UI_NAV_PAD_H             10
 #define PRODUCT_UI_PAGE_PAD              12
 
-/*
- * Status-bar visual contract (320 x PRODUCT_UI_STATUS_H).
- * Time and secondary text use 12px; glyph geometry stays independent of fonts.
- * Right-side glyphs share ICON_H / ICON_GAP so signal, BT and battery read as one row.
- */
+/* 状态栏几何合同：宽 320、高 PRODUCT_UI_STATUS_H。
+ * 时间及次要文字使用 12 像素，图形尺寸不随字体变化；
+ * 右侧信号、蓝牙、电池共享 ICON_H／ICON_GAP，保持为一行。 */
 #define PRODUCT_UI_STATUS_ICON_GAP       6
 #define PRODUCT_UI_STATUS_ICON_H         14
 #define PRODUCT_UI_STATUS_WIFI_BAR_W     3
@@ -35,11 +30,9 @@
 #define PRODUCT_UI_STATUS_WIFI_BAR_H2    10
 #define PRODUCT_UI_STATUS_WIFI_BAR_H3    13
 #define PRODUCT_UI_STATUS_BT_ICON        14
-/*
- * Battery geometry mirrors portrait Cipher status bar (cipher_battery_icon):
- *   body 26x14, border-only shell; fill inset 2px → max 22x10; tip 2x6.
- * See: main_page/cipher_panel/cipher_panel_demo.c + knowledge card 08.
- */
+/* 电池几何沿用竖屏 Cipher 状态栏 cipher_battery_icon：
+ * 外框 26×14、内缩 2 像素，最大填充 22×10，端点 2×6。
+ * 参考 legacy_ui/cipher_panel/cipher_panel_demo.c 的同名图形。 */
 #define PRODUCT_UI_STATUS_BAT_BODY_W     26
 #define PRODUCT_UI_STATUS_BAT_BODY_H     14
 #define PRODUCT_UI_STATUS_BAT_TIP_W      2
@@ -48,21 +41,22 @@
 #define PRODUCT_UI_STATUS_BAT_INSET      2
 #define PRODUCT_UI_STATUS_BAT_FILL_MAX   22
 #define PRODUCT_UI_STATUS_BAT_FILL_H     10
-/* Legacy alias kept so any remaining pad references still compile. */
+/* 保留旧别名，兼容尚存的间距引用。 */
 #define PRODUCT_UI_STATUS_BAT_PAD        PRODUCT_UI_STATUS_BAT_INSET
 #define PRODUCT_UI_STATUS_BAT_TRACK_OPA  LV_OPA_TRANSP
 #if (D_UI_TARGET == D_UI_PRODUCT)
 #define PRODUCT_UI_ROW_H                 36
 #else
-/* The existing 16px CJK fallback needs the legacy height for two-line rows. */
+/* 既有 16 像素中文回退字体的双行内容仍需旧行高。 */
 #define PRODUCT_UI_ROW_H                 48
 #endif
 #define PRODUCT_UI_TOUCH_MIN             36
-/* Ten-pixel horizontal tracks retain a 38px touch area. */
+/* 十像素水平轨道通过扩展保留 38 像素触摸区。 */
 #define PRODUCT_UI_SLIDER_TOUCH_EXTEND   14
 #define PRODUCT_UI_ROW_SINGLE_H          36
 #define PRODUCT_UI_ROW_DOUBLE_H          44
 #define PRODUCT_UI_TOUCH_TARGET          48
+#define PRODUCT_UI_DIALOG_ACTION_H       40
 
 #define PRODUCT_UI_SPACE_XS              4
 #define PRODUCT_UI_SPACE_SM              8
@@ -72,45 +66,44 @@
 #define PRODUCT_UI_RADIUS_SM             4
 #define PRODUCT_UI_RADIUS_MD             8
 #define PRODUCT_UI_RADIUS_LG             12
+#define PRODUCT_UI_BUTTON_RADIUS         10
+#define PRODUCT_UI_PRIMARY_RGB           0x1264D9U
+#define PRODUCT_UI_PRIMARY_PRESSED_RGB   0x0F52B5U
+#define PRODUCT_UI_PAGE_PAD_COMPACT       6
 #define PRODUCT_UI_ANIM_FAST_MS          140
 #define PRODUCT_UI_ANIM_NORMAL_MS        180
 
-/*
- * Control-center geometry — sole source of truth for 320x240 GC9307 layout.
- * Columns 108/80/36/36 with 12px gaps inside the 296px content width.
- */
+/* 320×240 GC9307 控制中心布局的唯一几何来源：
+ * 184 像素信息区加两个 44 像素滑条，屏幕边距为 12 像素。 */
 #define PRODUCT_UI_CC_WIFI_X               12
-#define PRODUCT_UI_CC_WIFI_Y               36
-#define PRODUCT_UI_CC_WIFI_W              108
-#define PRODUCT_UI_CC_WIFI_H               51
-#define PRODUCT_UI_CC_FOCUS_X             132
-#define PRODUCT_UI_CC_FOCUS_Y              36
-#define PRODUCT_UI_CC_FOCUS_W              80
-#define PRODUCT_UI_CC_FOCUS_H              51
+#define PRODUCT_UI_CC_WIFI_Y               32
+#define PRODUCT_UI_CC_WIFI_W              184
+#define PRODUCT_UI_CC_WIFI_H               44
 #define PRODUCT_UI_CC_MEDIA_X              12
-#define PRODUCT_UI_CC_MEDIA_Y              93
-#define PRODUCT_UI_CC_MEDIA_W             108
-#define PRODUCT_UI_CC_MEDIA_H             111
-#define PRODUCT_UI_CC_QUICK0_X            132
-#define PRODUCT_UI_CC_QUICK1_X            176
-#define PRODUCT_UI_CC_QUICK_Y0             99
-#define PRODUCT_UI_CC_QUICK_Y1            153
-#define PRODUCT_UI_CC_QUICK_SIZE           36
-#define PRODUCT_UI_CC_SLIDER_W             36
+#define PRODUCT_UI_CC_MEDIA_Y              84
+#define PRODUCT_UI_CC_MEDIA_W             184
+#define PRODUCT_UI_CC_MEDIA_H              80
+#define PRODUCT_UI_CC_QUICK0_X             12
+#define PRODUCT_UI_CC_QUICK1_X             76
+#define PRODUCT_UI_CC_QUICK2_X            140
+#define PRODUCT_UI_CC_QUICK_Y             176
+#define PRODUCT_UI_CC_QUICK_W              56
+#define PRODUCT_UI_CC_QUICK_H              44
+#define PRODUCT_UI_CC_SLIDER_W             44
 #define PRODUCT_UI_CC_SLIDER_H            168
-#define PRODUCT_UI_CC_SLIDER_0_X          224
-#define PRODUCT_UI_CC_SLIDER_1_X          272
-#define PRODUCT_UI_CC_SLIDER_Y             36
-/* Card-local transport: three independent 36px targets. */
-#define PRODUCT_UI_CC_MEDIA_TRANSPORT_Y    75
-#define PRODUCT_UI_CC_MEDIA_TRANSPORT_W   108
+#define PRODUCT_UI_CC_SLIDER_0_X          208
+#define PRODUCT_UI_CC_SLIDER_1_X          264
+#define PRODUCT_UI_CC_SLIDER_Y             32
+/* 卡片内部传输控制各自持有命中区，填满较宽的音乐卡片。 */
+#define PRODUCT_UI_CC_MEDIA_TRANSPORT_Y    44
+#define PRODUCT_UI_CC_MEDIA_TRANSPORT_W   184
 #define PRODUCT_UI_CC_MEDIA_TRANSPORT_H    36
-#define PRODUCT_UI_CC_MEDIA_HIT_W0         36
-#define PRODUCT_UI_CC_MEDIA_HIT_W1         36
-#define PRODUCT_UI_CC_MEDIA_HIT_W2         36
+#define PRODUCT_UI_CC_MEDIA_HIT_W0         60
+#define PRODUCT_UI_CC_MEDIA_HIT_W1         64
+#define PRODUCT_UI_CC_MEDIA_HIT_W2         60
 #define PRODUCT_UI_CC_MEDIA_HIT_H          36
-#define PRODUCT_UI_CC_MEDIA_BTN_VIS        21
-#define PRODUCT_UI_CC_MEDIA_GLYPH_SIZE     12
+#define PRODUCT_UI_CC_MEDIA_BTN_VIS        28
+#define PRODUCT_UI_CC_MEDIA_GLYPH_SIZE     16
 
 #define PRODUCT_UI_CONTROL_QUICK_HIT_PAD  2
 #define PRODUCT_UI_CONTROL_DRAG_CAPTURE  8
@@ -118,7 +111,7 @@
 #define PRODUCT_UI_CONTROL_OPEN_AT       450
 #define PRODUCT_UI_CONTROL_CLOSE_AT      550
 #define PRODUCT_UI_CONTROL_VELOCITY      450
-/* JXY 480→320 scale: corner 18 * 2/3 = 12 (keep circles circular). */
+/* 信息卡及滑条共用的圆角半径。 */
 #define PRODUCT_UI_CONTROL_RADIUS        12
 
 typedef enum {
@@ -164,8 +157,16 @@ typedef enum {
     PRODUCT_UI_COLOR_CONTROL_PLAY_GLYPH,
     PRODUCT_UI_COLOR_CONTROL_ACTIVE_TINT,
     PRODUCT_UI_COLOR_CONTROL_BTN_PRESSED,
-    /* Media card 24x24 flat cover plate (JXY #354A62). */
+    /* 媒体卡片 24×24 平面封面底色，JXY #354A62。 */
     PRODUCT_UI_COLOR_MEDIA_ART_BG,
+    PRODUCT_UI_COLOR_MUSIC_SURFACE,
+    PRODUCT_UI_COLOR_ON_MUSIC_SURFACE,
+    PRODUCT_UI_COLOR_ON_MUSIC_SURFACE_MUTED,
+    PRODUCT_UI_COLOR_MUSIC_DISC,
+    PRODUCT_UI_COLOR_MUSIC_DISC_RING,
+    PRODUCT_UI_COLOR_MUSIC_OUTLINE,
+    PRODUCT_UI_COLOR_MUSIC_LIST_MUTED,
+    PRODUCT_UI_COLOR_MUSIC_LIST_GLYPH,
     PRODUCT_UI_COLOR_COUNT
 } product_ui_color_e;
 
@@ -183,6 +184,19 @@ typedef enum {
     PRODUCT_UI_STYLE_SECTION,
     PRODUCT_UI_STYLE_CONTROL_CARD,
     PRODUCT_UI_STYLE_CONTROL_PRESSED,
+    PRODUCT_UI_STYLE_DIALOG_BUTTON,
+    PRODUCT_UI_STYLE_DIALOG_PRIMARY,
+    PRODUCT_UI_STYLE_DIALOG_SECONDARY,
+    PRODUCT_UI_STYLE_DIALOG_DANGER,
+    PRODUCT_UI_STYLE_DIALOG_PRIMARY_PRESSED,
+    PRODUCT_UI_STYLE_DIALOG_SECONDARY_PRESSED,
+    PRODUCT_UI_STYLE_DIALOG_DANGER_PRESSED,
+    PRODUCT_UI_STYLE_DIALOG_DISABLED,
+    PRODUCT_UI_STYLE_DIALOG_FOCUS,
+    PRODUCT_UI_STYLE_BUTTON_SELECTED,
+    PRODUCT_UI_STYLE_BUTTON_SELECTED_PRESSED,
+    PRODUCT_UI_STYLE_BUTTON_SELECTED_DARK,
+    PRODUCT_UI_STYLE_BUTTON_SELECTED_DARK_PRESSED,
     PRODUCT_UI_STYLE_COUNT
 } product_ui_style_e;
 
@@ -195,9 +209,31 @@ typedef enum {
     PRODUCT_UI_FONT_COUNT
 } product_ui_font_e;
 
+/**
+ * @brief 一次性初始化所有共用主题样式，并建立中文及表情字体回退链。
+ * @return 当前实现初始化及重复调用均返回 0。
+ * @note 由 UI 启动串行调用；样式和字体 RAM 副本为进程期静态资源，不在页面销毁时释放。
+ */
 int product_ui_theme_init(void);
+/**
+ * @brief 把具名颜色标记转换为 LVGL 颜色。
+ * @param[in] token 主题颜色标记。
+ * @return 对应主题色；非法标记回退为 PRODUCT_UI_COLOR_TEXT。
+ */
 lv_color_t product_ui_color(product_ui_color_e token);
+/**
+ * @brief 借用具名的共用样式。
+ * @param[in] token 主题样式标记。
+ * @return 合法标记返回静态样式指针，非法标记返回 NULL。
+ * @note 调用方须先完成 theme_init；本函数本身不初始化，不转移所有权，也不允许调用方修改共用样式。
+ */
 const lv_style_t *product_ui_style(product_ui_style_e token);
+/**
+ * @brief 借用具名字体，Product 配置下按需建立中文与表情回退。
+ * @param[in] token 状态、标题、正文、说明或数字显示字体标记。
+ * @return 对应静态字体；非法标记返回 NULL。
+ * @note 字体及回退副本为静态资源，调用方不释放。
+ */
 const lv_font_t *product_ui_font(product_ui_font_e token);
 
 #endif

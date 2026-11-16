@@ -1,6 +1,6 @@
 /**
  * @file d_device_volume.c
- * @brief Device volume ownership and serialized, bounded backend requests.
+ * @brief 在锁内维护音量元数据，在锁外串行调用音量后端。
  */
 #include "config/app_config.h"
 #include "d_device_volume.h"
@@ -61,6 +61,11 @@ typedef struct {
 
 static d_device_volume_context_t s_volume;
 
+/**
+ * @brief 将有符号音量限制到设备百分比范围。
+ * @param[in] percent 待限制音量。
+ * @return 0～100 的音量。
+ */
 static uint8_t d_device_volume_clamp(int percent)
 {
     if (percent < 0) {
@@ -72,6 +77,9 @@ static uint8_t d_device_volume_clamp(int percent)
     return (uint8_t)percent;
 }
 
+/**
+ * @brief 在自旋锁内一次性建立默认音量缓存。
+ */
 static void d_device_volume_ensure_init(void)
 {
     spin_lock(&s_volume_lock);
@@ -88,7 +96,11 @@ static void d_device_volume_ensure_init(void)
     spin_unlock(&s_volume_lock);
 }
 
-/* _locked helpers touch metadata only; backend calls always run outside this lock. */
+/**
+ * @brief 更新在途媒体回调的超时标记。
+ * @param[in] now 当前毫秒计时值。
+ * @note 调用者必须已持有 s_volume_lock；仅更新元数据。
+ */
 static void d_device_volume_deadline_locked(uint32_t now)
 {
     uint8_t expired = s_volume.state.is_in_progress &&
@@ -99,6 +111,13 @@ static void d_device_volume_deadline_locked(uint32_t now)
     }
 }
 
+/**
+ * @brief 从最新期望音量构造带请求编号及后端代次的新请求。
+ * @param[in] action 绝对设置、相对调整或静音动作。
+ * @param[in] value 动作对应的音量、步长或静音值。
+ * @param[out] request 接收新请求。
+ * @note 调用者必须持有 s_volume_lock。
+ */
 static void d_device_volume_desired_locked(d_volume_action_e action, int value,
                                            d_volume_request_t *request)
 {
@@ -126,6 +145,11 @@ static void d_device_volume_desired_locked(d_volume_action_e action, int value,
     request->generation = s_volume.state.backend_generation;
 }
 
+/**
+ * @brief 记录当前执行请求与超时起点。
+ * @param[in] request 即将执行的音量请求。
+ * @note 调用者必须持有 s_volume_lock。
+ */
 static void d_device_volume_begin_locked(const d_volume_request_t *request)
 {
     s_volume.active = *request;
@@ -135,6 +159,12 @@ static void d_device_volume_begin_locked(const d_volume_request_t *request)
     s_volume.state.revision++;
 }
 
+/**
+ * @brief 核对请求编号与代次后发布音量执行结果。
+ * @param[in] request 已执行请求的副本。
+ * @param[in] result 后端执行结果。
+ * @note 函数自行加锁；旧请求不覆盖当前执行状态。
+ */
 static void d_device_volume_complete(const d_volume_request_t *request, d_err_t result)
 {
     spin_lock(&s_volume_lock);
@@ -168,6 +198,14 @@ static void d_device_volume_complete(const d_volume_request_t *request, d_err_t 
          (unsigned)request->percent, result);
 }
 
+/**
+ * @brief 在单个待执行槽中受理音量请求并唤醒工作任务。
+ * @param[in] action 音量动作。
+ * @param[in] value 动作参数。
+ * @param[out] request_id 可选输出，失败为 0，受理后为非零编号。
+ * @return D_OK 表示已受理；未就绪或静默、超时等阻塞条件返回对应错误。
+ * @note 唤醒失败时请求仍保留，工作任务轮询可继续消费。
+ */
 static d_err_t d_device_volume_submit(d_volume_action_e action, int value,
                                       uint32_t *request_id)
 {
@@ -205,7 +243,7 @@ static d_err_t d_device_volume_submit(d_volume_action_e action, int value,
         *request_id = request.id;
     }
 #if D_FEATURE_QWEN || D_LOCAL_PROMPT_ENABLE
-    /* Polling covers a failed post; replacing the pending slot needs no new wake. */
+    /* 轮询兜底唤醒失败；替换待执行槽不需要再次唤醒。 */
     if (!replaced && os_sem_post(&s_volume.wake) != OS_NO_ERR) {
         LOGW(TAG, "wake failed; retained request=%u", (unsigned)request.id);
     }
@@ -215,6 +253,9 @@ static d_err_t d_device_volume_submit(d_volume_action_e action, int value,
     return D_OK;
 }
 
+/**
+ * @brief 校验范围并受理绝对音量；完整合同见 d_device_volume.h。
+ */
 d_err_t d_device_volume_request_set(uint8_t percent, uint32_t *request_id)
 {
     if (request_id != NULL) {
@@ -226,11 +267,17 @@ d_err_t d_device_volume_request_set(uint8_t percent, uint32_t *request_id)
     return d_device_volume_submit(D_VOLUME_SET, percent, request_id);
 }
 
+/**
+ * @brief 受理相对音量请求；完整合同见 d_device_volume.h。
+ */
 d_err_t d_device_volume_request_adjust(int8_t step, uint32_t *request_id)
 {
     return d_device_volume_submit(D_VOLUME_ADJUST, step, request_id);
 }
 
+/**
+ * @brief 校验布尔值并受理静音请求；完整合同见 d_device_volume.h。
+ */
 d_err_t d_device_volume_request_mute(uint8_t is_mute, uint32_t *request_id)
 {
     if (request_id != NULL) {
@@ -243,6 +290,11 @@ d_err_t d_device_volume_request_mute(uint8_t is_mute, uint32_t *request_id)
 }
 
 #if D_FEATURE_QWEN || D_LOCAL_PROMPT_ENABLE
+/**
+ * @brief 优先执行一版闹铃音量操作或恢复媒体音量。
+ * @return 执行过一项工作返回 1，无可执行工作返回 0。
+ * @note 后端在锁外调用；版本或代次变化时不发布旧结果。释放失败仍保留占用。
+ */
 static uint8_t d_device_volume_process_alert(void)
 {
     d_device_volume_alert_snapshot_t work;
@@ -280,6 +332,11 @@ static uint8_t d_device_volume_process_alert(void)
     return 1U;
 }
 
+/**
+ * @brief 持续优先处理闹铃占用，再消费媒体音量请求。
+ * @param[in] context 任务兼容参数，本实现不使用。
+ * @note 后端回调在锁外执行；无工作时限时等待信号量。
+ */
 static void d_device_volume_worker(void *context)
 {
     d_volume_request_t request;
@@ -299,7 +356,7 @@ static void d_device_volume_worker(void *context)
         }
         spin_unlock(&s_volume_lock);
         if (has_work) {
-            /* Consume this job's wake even when a continuously busy worker never pends. */
+            /* 连续繁忙时也消费本项唤醒计数，避免积累无效通知。 */
             (void)os_sem_accept(&s_volume.wake);
             d_device_volume_complete(&request,
                 backend.set_volume(request.percent, backend.context));
@@ -310,6 +367,9 @@ static void d_device_volume_worker(void *context)
 }
 #endif
 
+/**
+ * @brief 建立一次性持久音量工作任务；完整合同见 d_device_volume.h。
+ */
 d_err_t d_device_volume_service_init(void)
 {
     d_err_t result = D_ERR_NOT_READY;
@@ -331,7 +391,7 @@ d_err_t d_device_volume_service_init(void)
                     d_device_volume_worker, NULL) == OS_NO_ERR) {
         result = D_OK;
     }
-    /* The static wake object is retained; no timed-out caller can free it. */
+    /* 静态唤醒对象持续保留，超时调用者不能释放它。 */
 #endif
     spin_lock(&s_volume_lock);
     s_volume.state.service_error = result;
@@ -342,6 +402,9 @@ d_err_t d_device_volume_service_init(void)
     return result;
 }
 
+/**
+ * @brief 复制当前状态及准入视图；完整合同见 d_device_volume.h。
+ */
 void d_device_volume_get_snapshot(d_device_volume_snapshot_t *snapshot)
 {
     if (snapshot == NULL) {
@@ -356,6 +419,12 @@ void d_device_volume_get_snapshot(d_device_volume_snapshot_t *snapshot)
     spin_unlock(&s_volume_lock);
 }
 
+/**
+ * @brief 在没有异步或闹铃占用时同步执行一次音量变更。
+ * @param[in] action 音量动作。
+ * @param[in] value 动作参数。
+ * @return 占用返回 D_ERR_BUSY，否则返回后端结果；无后端时按成功更新缓存。
+ */
 static d_err_t d_device_volume_run_sync(d_volume_action_e action, int value)
 {
     d_volume_request_t request;
@@ -380,11 +449,17 @@ static d_err_t d_device_volume_run_sync(d_volume_action_e action, int value)
     return result;
 }
 
+/**
+ * @brief 同步默认音量缓存；完整合同见 d_device_volume.h。
+ */
 d_err_t d_device_volume_init(void)
 {
     return d_device_volume_run_sync(D_VOLUME_ADJUST, 0);
 }
 
+/**
+ * @brief 读取已确认音量；完整合同见 d_device_volume.h。
+ */
 uint8_t d_device_volume_get(void)
 {
     d_device_volume_snapshot_t snapshot;
@@ -392,27 +467,45 @@ uint8_t d_device_volume_get(void)
     return snapshot.volume_percent;
 }
 
+/**
+ * @brief 同步设置音量；完整合同见 d_device_volume.h。
+ */
 d_err_t d_device_volume_set(uint8_t percent)
 {
     return d_device_volume_run_sync(D_VOLUME_SET, percent);
 }
 
+/**
+ * @brief 同步调整音量；完整合同见 d_device_volume.h。
+ */
 d_err_t d_device_volume_adjust(int8_t step)
 {
     return d_device_volume_run_sync(D_VOLUME_ADJUST, step);
 }
 
+/**
+ * @brief 同步更新静音状态；完整合同见 d_device_volume.h。
+ */
 d_err_t d_device_volume_set_mute(uint8_t is_mute)
 {
     return d_device_volume_run_sync(D_VOLUME_MUTE, is_mute != 0U);
 }
 
+/**
+ * @brief 比较当前媒体后端的回调与上下文身份。
+ * @param[in] backend 已验证非空的待比较后端。
+ * @return 两项均相同时返回非零，否则返回 0。
+ * @note 调用者在持有 s_volume_lock 时使用。
+ */
 static uint8_t d_device_volume_backend_matches(const d_device_volume_backend_t *backend)
 {
     return s_volume.backend.set_volume == backend->set_volume &&
         s_volume.backend.context == backend->context;
 }
 
+/**
+ * @brief 注册媒体后端并同步缓存；完整合同见 d_device_volume.h。
+ */
 d_err_t d_device_volume_register_backend(const d_device_volume_backend_t *backend)
 {
     d_err_t result;
@@ -444,6 +537,8 @@ d_err_t d_device_volume_register_backend(const d_device_volume_backend_t *backen
         memset(&s_volume.backend, 0, sizeof(s_volume.backend));
         s_volume.is_detaching = 0U;
     }
+    /* 锁外同步期间可能先进入注销流程，发布就绪前需再次核对。 */
+    if (result == D_OK && s_volume.is_detaching) result = D_ERR_BUSY;
     s_volume.state.is_backend_ready = result == D_OK && !s_volume.is_detaching;
     s_volume.state.is_confirmed = result == D_OK;
     s_volume.state.is_in_progress = 0U;
@@ -453,6 +548,9 @@ d_err_t d_device_volume_register_backend(const d_device_volume_backend_t *backen
     return result;
 }
 
+/**
+ * @brief 解除匹配后端并拒绝新工作；完整合同见 d_device_volume.h。
+ */
 d_err_t d_device_volume_unregister_backend(const d_device_volume_backend_t *backend)
 {
     if (backend == NULL || backend->set_volume == NULL) {
@@ -489,6 +587,9 @@ d_err_t d_device_volume_unregister_backend(const d_device_volume_backend_t *back
     return D_OK;
 }
 
+/**
+ * @brief 进入静默准入状态；完整合同见 d_device_volume.h。
+ */
 void d_device_volume_quiesce_begin(void)
 {
     d_device_volume_ensure_init();
@@ -498,6 +599,9 @@ void d_device_volume_quiesce_begin(void)
     spin_unlock(&s_volume_lock);
 }
 
+/**
+ * @brief 解除静默准入状态；完整合同见 d_device_volume.h。
+ */
 void d_device_volume_quiesce_cancel(void)
 {
     d_device_volume_ensure_init();
@@ -507,6 +611,9 @@ void d_device_volume_quiesce_cancel(void)
     spin_unlock(&s_volume_lock);
 }
 
+/**
+ * @brief 限时等待所有音量占用空闲；完整合同见 d_device_volume.h。
+ */
 d_err_t d_device_volume_wait_idle(uint32_t timeout_ms)
 {
     d_device_volume_snapshot_t snapshot;
@@ -525,6 +632,9 @@ d_err_t d_device_volume_wait_idle(uint32_t timeout_ms)
     }
 }
 
+/**
+ * @brief 注册静态闹铃后端；完整合同见 d_device_volume.h。
+ */
 d_err_t d_device_volume_register_alert_backend(const d_device_volume_backend_t *backend)
 {
     if (backend == NULL || backend->set_volume == NULL) return D_ERR_INVALID_ARG;
@@ -539,6 +649,9 @@ d_err_t d_device_volume_register_alert_backend(const d_device_volume_backend_t *
     return D_OK;
 }
 
+/**
+ * @brief 受理闹铃音量占用；完整合同见 d_device_volume.h。
+ */
 d_err_t d_device_volume_alert_begin(uint32_t token, uint8_t percent)
 {
     if (!token || percent < 1U || percent > 100U) return D_ERR_INVALID_ARG;
@@ -547,8 +660,8 @@ d_err_t d_device_volume_alert_begin(uint32_t token, uint8_t percent)
     if (!s_volume.state.is_service_ready || !s_volume.alert_backend.set_volume) {
         spin_unlock(&s_volume_lock); return D_ERR_NOT_READY;
     }
-    /* Detach already owns the transition: its worker cannot process a new
-     * alert lease, and the lease would in turn prevent detach from completing. */
+    /* 注销已占有转换流程，工作任务不能处理新闹铃占用；
+     * 此时再接受占用会反过来阻塞注销完成。 */
     if (s_volume.state.is_quiescing || s_volume.is_detaching || (s_volume.alert.held && token != s_volume.alert.token &&
         (uint32_t)(token - s_volume.alert.token) >= 0x80000000U)) {
         spin_unlock(&s_volume_lock); return D_ERR_BUSY;
@@ -567,6 +680,9 @@ d_err_t d_device_volume_alert_begin(uint32_t token, uint8_t percent)
     return D_OK;
 }
 
+/**
+ * @brief 受理匹配代次的占用释放；完整合同见 d_device_volume.h。
+ */
 d_err_t d_device_volume_alert_end(uint32_t token)
 {
     d_device_volume_ensure_init();
@@ -585,6 +701,9 @@ d_err_t d_device_volume_alert_end(uint32_t token)
     return D_OK;
 }
 
+/**
+ * @brief 复制闹铃音量状态及超时视图；完整合同见 d_device_volume.h。
+ */
 void d_device_volume_get_alert_snapshot(d_device_volume_alert_snapshot_t *snapshot)
 {
     if (snapshot == NULL) return;

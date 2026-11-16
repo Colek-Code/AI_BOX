@@ -1,6 +1,6 @@
 /**
  * @file tablet_shell_panel.c
- * @brief Slide-out control and settings panels for the GC9307 tablet shell.
+ * @brief 横屏外壳的控制面板滑动动画与设置覆盖层。
  */
 
 #include "config/app_config.h"
@@ -43,6 +43,9 @@ static lv_obj_t *s_settings_panel;
 static uint8_t s_control_panel_visible;
 static uint8_t s_settings_visible;
 
+/**
+ * @brief 清空面板引用与可见状态，不删除父容器对象。
+ */
 static void tablet_panel_reset_refs(void)
 {
     s_control_panel = NULL;
@@ -52,6 +55,10 @@ static void tablet_panel_reset_refs(void)
     s_settings_visible = 0;
 }
 
+/**
+ * @brief 清除样式并允许事件和手势冒泡。
+ * @param[in,out] obj 待调整的 LVGL 对象；为空时不处理。
+ */
 static void tablet_panel_clean_obj(lv_obj_t *obj)
 {
     if (obj != NULL) {
@@ -61,6 +68,10 @@ static void tablet_panel_clean_obj(lv_obj_t *obj)
     }
 }
 
+/**
+ * @brief 清除手势冒泡，让对象自行接收面板手势。
+ * @param[in,out] obj 待调整的 LVGL 对象；为空时不处理。
+ */
 static void tablet_panel_accept_gesture(lv_obj_t *obj)
 {
     if (obj == NULL) {
@@ -69,6 +80,14 @@ static void tablet_panel_accept_gesture(lv_obj_t *obj)
     lv_obj_remove_flag(obj, LV_OBJ_FLAG_GESTURE_BUBBLE);
 }
 
+/**
+ * @brief 创建带字体、颜色及冒泡标志的面板标签。
+ * @param[in,out] parent 承载新建子对象的父容器。
+ * @param[in] text 复制的显示文本。
+ * @param[in] font 持续有效的借用字体。
+ * @param[in] color 文字颜色。
+ * @return 新标签，分配失败返回 NULL。
+ */
 static lv_obj_t *tablet_panel_label(lv_obj_t *parent, const char *text, const lv_font_t *font, lv_color_t color)
 {
     lv_obj_t *label = lv_label_create(parent);
@@ -86,6 +105,13 @@ static lv_obj_t *tablet_panel_label(lv_obj_t *parent, const char *text, const lv
     return label;
 }
 
+/**
+ * @brief 创建控制面板固定样式按钮。
+ * @param[in,out] parent 承载新建子对象的父容器。
+ * @param[in] w 按钮宽度。
+ * @param[in] h 按钮高度。
+ * @return 新按钮，分配失败返回 NULL。
+ */
 static lv_obj_t *tablet_panel_button(lv_obj_t *parent, int32_t w, int32_t h)
 {
     lv_obj_t *button = lv_button_create(parent);
@@ -107,6 +133,12 @@ static lv_obj_t *tablet_panel_button(lv_obj_t *parent, int32_t w, int32_t h)
     return button;
 }
 
+/**
+ * @brief 创建一行静态设置标题与说明值。
+ * @param[in,out] parent 承载新建子对象的父容器。
+ * @param[in] item 静态行描述，文字由标签复制。
+ * @return 成功返回 0；参数或分配失败返回 -1。
+ */
 static int tablet_panel_create_setting_row(lv_obj_t *parent, const tablet_setting_row_t *item)
 {
     lv_obj_t *row;
@@ -146,6 +178,10 @@ static int tablet_panel_create_setting_row(lv_obj_t *parent, const tablet_settin
     return 0;
 }
 
+/**
+ * @brief 在收起动画结束时隐藏其用户数据中的对象。
+ * @param[in] anim LVGL 动画完成回调对象。
+ */
 static void tablet_panel_hide_completed(lv_anim_t *anim)
 {
     lv_obj_t *obj = (lv_obj_t *)lv_anim_get_user_data(anim);
@@ -155,6 +191,12 @@ static void tablet_panel_hide_completed(lv_anim_t *anim)
     }
 }
 
+/**
+ * @brief 取消同对象旧纵向动画并移动到目标坐标，可选结束后隐藏。
+ * @param[in,out] obj 待调整的 LVGL 对象；为空时不处理。
+ * @param[in] to 目标纵坐标。
+ * @param[in] hide_on_complete 非零在结束时隐藏对象。
+ */
 static void tablet_panel_anim_y(lv_obj_t *obj, int32_t to, uint8_t hide_on_complete)
 {
     lv_anim_t anim;
@@ -187,6 +229,9 @@ static void tablet_panel_anim_y(lv_obj_t *obj, int32_t to, uint8_t hide_on_compl
     lv_anim_start(&anim);
 }
 
+/**
+ * @brief 同步清除设置可见标记并隐藏已有设置面板。
+ */
 static void tablet_panel_hide_settings(void)
 {
     if (s_settings_panel == NULL) {
@@ -196,6 +241,9 @@ static void tablet_panel_hide_settings(void)
     lv_obj_add_flag(s_settings_panel, LV_OBJ_FLAG_HIDDEN);
 }
 
+/**
+ * @brief 以竖向动画显示或隐藏控制中心，并同步遮罩；完整合同见 tablet_shell_panel.h。
+ */
 void tablet_shell_panel_show_control(uint8_t visible)
 {
     visible = visible ? 1U : 0U;
@@ -222,6 +270,9 @@ void tablet_shell_panel_show_control(uint8_t visible)
     }
 }
 
+/**
+ * @brief 切换设置面板可见性，显示设置时关闭控制中心；完整合同见 tablet_shell_panel.h。
+ */
 void tablet_shell_panel_toggle_settings(void)
 {
     if (s_settings_panel == NULL) {
@@ -238,17 +289,29 @@ void tablet_shell_panel_toggle_settings(void)
     }
 }
 
+/**
+ * @brief 隐藏设置面板并请求控制中心收起动画；完整合同见 tablet_shell_panel.h。
+ */
 void tablet_shell_panel_hide_all(void)
 {
     tablet_panel_hide_settings();
     tablet_shell_panel_show_control(0);
 }
 
+/**
+ * @brief 按对象身份检查是否为当前面板遮罩；完整合同见 tablet_shell_panel.h。
+ */
 uint8_t tablet_shell_panel_is_scrim(lv_obj_t *obj)
 {
     return (uint8_t)(obj == s_panel_scrim);
 }
 
+/**
+ * @brief 创建覆盖内容区的半透明可点击遮罩并注册面板事件。
+ * @param[in,out] parent 承载新建子对象的父容器。
+ * @param[in] gesture_cb 面板事件处理回调。
+ * @return 成功返回 0，分配失败返回 -1。
+ */
 static int tablet_panel_create_scrim(lv_obj_t *parent, lv_event_cb_t gesture_cb)
 {
     s_panel_scrim = lv_obj_create(parent);
@@ -266,6 +329,11 @@ static int tablet_panel_create_scrim(lv_obj_t *parent, lv_event_cb_t gesture_cb)
     return 0;
 }
 
+/**
+ * @brief 创建控制中心四个静态快捷项。
+ * @param[in,out] parent 承载新建子对象的父容器。
+ * @return 成功返回 0，分配失败返回 -1。
+ */
 static int tablet_panel_create_tiles(lv_obj_t *parent)
 {
     lv_obj_t *row;
@@ -306,6 +374,12 @@ static int tablet_panel_create_tiles(lv_obj_t *parent)
     return 0;
 }
 
+/**
+ * @brief 创建初始位于屏幕外的控制中心及快捷项。
+ * @param[in,out] parent 承载新建子对象的父容器。
+ * @param[in] gesture_cb 控制面板事件回调。
+ * @return 成功返回 0，子对象分配失败返回 -1。
+ */
 static int tablet_panel_create_control(lv_obj_t *parent, lv_event_cb_t gesture_cb)
 {
     lv_obj_t *label;
@@ -338,6 +412,11 @@ static int tablet_panel_create_control(lv_obj_t *parent, lv_event_cb_t gesture_c
     return tablet_panel_create_tiles(s_control_panel);
 }
 
+/**
+ * @brief 创建可竖向滚动的静态设置说明面板。
+ * @param[in,out] parent 承载新建子对象的父容器。
+ * @return 成功返回 0，任一行分配失败返回 -1。
+ */
 static int tablet_panel_create_settings(lv_obj_t *parent)
 {
     lv_obj_t *label;
@@ -378,6 +457,9 @@ static int tablet_panel_create_settings(lv_obj_t *parent)
     return 0;
 }
 
+/**
+ * @brief 创建遮罩、控制中心和设置面板；完整合同见 tablet_shell_panel.h。
+ */
 int tablet_shell_panel_create(lv_obj_t *parent, lv_event_cb_t gesture_cb)
 {
     tablet_panel_reset_refs();

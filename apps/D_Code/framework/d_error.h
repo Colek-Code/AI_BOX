@@ -1,6 +1,6 @@
 /**
  * @file    d_error.h
- * @brief   D_Code 统一错误码定义
+ * @brief   定义 framework 共用错误码；具体业务的受理、完成及资源状态由模块合同解释。
  */
 
 #ifndef D_ERROR_H

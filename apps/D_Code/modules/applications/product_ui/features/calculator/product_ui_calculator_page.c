@@ -1,7 +1,4 @@
-/**
- * @file product_ui_calculator_page.c
- * @brief Product UI calculator keypad and page registration.
- */
+/** @file product_ui_calculator_page.c @brief 计算器键盘、结果面板及页面注册；算术状态由模型持有。 */
 
 #include "config/app_config.h"
 
@@ -99,6 +96,10 @@ static const product_ui_calculator_key_spec_t s_calculator_keys[] = {
 
 static product_ui_calculator_page_t s_calculator_page;
 
+/**
+ * @brief 清除对象默认样式及交互、滚动和冒泡标志，为显式布局做准备。
+ * @param[in,out] obj 调用链保证有效的 LVGL 对象。
+ */
 static void product_ui_calculator_clean(lv_obj_t *obj)
 {
     lv_obj_remove_style_all(obj);
@@ -109,6 +110,12 @@ static void product_ui_calculator_clean(lv_obj_t *obj)
                       LV_OBJ_FLAG_EVENT_BUBBLE);
 }
 
+/**
+ * @brief 创建使用主题样式且不接收点击或冒泡的标签。
+ * @param[in,out] parent 新标签的父对象。
+ * @param[in] style 标签使用的主题样式。
+ * @return 成功返回父对象拥有的标签，失败返回 NULL。
+ */
 static lv_obj_t *product_ui_calculator_label_create(
     lv_obj_t *parent, product_ui_style_e style)
 {
@@ -124,6 +131,9 @@ static lv_obj_t *product_ui_calculator_label_create(
     return label;
 }
 
+/**
+ * @brief 从模型更新显示及表达式，按文字长度选择字号并投影错误颜色。
+ */
 static void product_ui_calculator_refresh(void)
 {
     product_ui_calculator_model_t *model = &s_calculator_page.model;
@@ -144,6 +154,10 @@ static void product_ui_calculator_refresh(void)
                          PRODUCT_UI_COLOR_DANGER_TEXT : PRODUCT_UI_COLOR_TEXT), 0);
 }
 
+/**
+ * @brief 把静态键规格对应的逻辑键交给模型并刷新显示。
+ * @param[in] event 点击事件，用户数据借用静态键规格。
+ */
 static void product_ui_calculator_key_cb(lv_event_t *event)
 {
     const product_ui_calculator_key_spec_t *spec;
@@ -170,6 +184,11 @@ static void product_ui_calculator_key_cb(lv_event_t *event)
     product_ui_calculator_refresh();
 }
 
+/**
+ * @brief 创建结果及表达式所在的显示面板并配置布局。
+ * @param[in,out] content 页面内容父容器。
+ * @return 成功返回 0；任一创建失败返回 -1，部分对象仍由页面树拥有。
+ */
 static int product_ui_calculator_display_create(lv_obj_t *content)
 {
     lv_obj_t *display_box;
@@ -216,13 +235,17 @@ static int product_ui_calculator_display_create(lv_obj_t *content)
     return 0;
 }
 
+/**
+ * @brief 创建借用静态键规格的按钮及其标签。
+ * @param[in,out] keypad 键盘父容器。
+ * @param[in] spec 须覆盖按钮生命周期的静态键规格。
+ * @return 成功返回父对象拥有的按钮；失败返回 NULL，标签失败时删除按钮。
+ */
 static lv_obj_t *product_ui_calculator_button_create(
     lv_obj_t *keypad, const product_ui_calculator_key_spec_t *spec)
 {
     lv_obj_t *button;
     lv_obj_t *label;
-    product_ui_color_e background = PRODUCT_UI_COLOR_SURFACE;
-    product_ui_color_e foreground = PRODUCT_UI_COLOR_TEXT;
 
     button = lv_button_create(keypad);
     if (button == NULL) {
@@ -230,22 +253,6 @@ static lv_obj_t *product_ui_calculator_button_create(
     }
     product_ui_calculator_clean(button);
     lv_obj_add_flag(button, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_add_style(button, product_ui_style(PRODUCT_UI_STYLE_INTERACTIVE), 0);
-    lv_obj_add_style(button, product_ui_style(PRODUCT_UI_STYLE_PRESSED),
-                     LV_STATE_PRESSED);
-    if (spec->is_action) {
-        background = PRODUCT_UI_COLOR_ACTION;
-        foreground = PRODUCT_UI_COLOR_ACTION_TEXT;
-    } else if (spec->is_danger) {
-        background = PRODUCT_UI_COLOR_ACTION_DANGER;
-        foreground = PRODUCT_UI_COLOR_ACTION_TEXT;
-    }
-    lv_obj_set_style_bg_color(button, product_ui_color(background), 0);
-    if (spec->is_action || spec->is_danger) {
-        lv_obj_set_style_bg_color(button, lv_color_darken(product_ui_color(background), LV_OPA_20),
-                                  LV_STATE_PRESSED);
-    }
-    lv_obj_set_style_pad_all(button, 0, 0);
     lv_obj_add_event_cb(button, product_ui_calculator_key_cb,
                         LV_EVENT_CLICKED, (void *)spec);
 
@@ -255,11 +262,19 @@ static lv_obj_t *product_ui_calculator_button_create(
         return NULL;
     }
     lv_label_set_text(label, spec->label);
-    lv_obj_set_style_text_color(label, product_ui_color(foreground), 0);
+    product_ui_button_style(button, spec->is_action ? PRODUCT_UI_BUTTON_PRIMARY :
+        spec->is_danger ? PRODUCT_UI_BUTTON_DANGER : PRODUCT_UI_BUTTON_SECONDARY);
+    lv_obj_set_style_pad_all(button, 0, 0);
+    lv_obj_set_style_text_font(label, product_ui_font(PRODUCT_UI_FONT_BODY), 0);
     lv_obj_center(label);
     return button;
 }
 
+/**
+ * @brief 创建五列四行键盘并按静态键表配置每个按钮。
+ * @param[in,out] content 页面内容父容器。
+ * @return 完整创建返回 0；容器或按钮失败返回 -1，已有对象交页面树清理。
+ */
 static int product_ui_calculator_keypad_create(lv_obj_t *content)
 {
     lv_obj_t *keypad;
@@ -308,6 +323,9 @@ static int product_ui_calculator_keypad_create(lv_obj_t *content)
     return 0;
 }
 
+/**
+ * @brief 创建计算器页面框架、显示面板和二十键网格并初始化模型。
+ */
 int product_ui_calculator_page_create(lv_obj_t *parent)
 {
     static const product_ui_page_spec_t page_spec = {
@@ -344,6 +362,10 @@ int product_ui_calculator_page_create(lv_obj_t *parent)
     return 0;
 }
 
+/**
+ * @brief 向公共 Product UI 运行时传递页面周期。
+ * @param[in] elapsed_ms 本轮经过的毫秒数。
+ */
 static void product_ui_calculator_page_update(uint32_t elapsed_ms)
 {
     product_ui_process(elapsed_ms);
@@ -360,6 +382,9 @@ static page_desc_t s_product_ui_calculator_desc = {
     .ops = &s_product_ui_calculator_ops,
 };
 
+/**
+ * @brief 把静态计算器页面描述注册到页面管理器。
+ */
 int product_ui_calculator_register_page(int page_type)
 {
     s_product_ui_calculator_desc.page_type = page_type;

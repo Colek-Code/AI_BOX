@@ -6,71 +6,34 @@
 # 3. 确认 ulimit -n 的结果足够大（建议大于8096），否则链接可能会因为打开文件太多而失败
 #   可以通过 ulimit -n 8096 来设置一个较大的值
 # 支持的目标
-# make ac791n_wifi_camera
-# make ac791n_scan_box
-# make ac791n_wifi_ipc
-# make ac791n_wifi_story_machine
-# make ac791n_demo_demo_ble
-# make ac791n_demo_demo_wifi_ext
-# make ac791n_demo_demo_edr
+# make ac791n_D_Code_elf（仅编译）
+# make ac791n_D_Code / ac791n_D_Code_keep_vm（编译并下载）
 # make ac791n_demo_demo_ui
 # make ac791n_demo_demo_hello
-# make ac791n_demo_demo_devkitboard
+# make ac791n_demo_demo_edr
 # make ac791n_demo_demo_uvc
 # make ac791n_demo_demo_video
-# make ac791n_demo_demo_audio
 # make ac791n_demo_demo_wifi
-# make ac791n_D_Code
+# make ac791n_demo_demo_wifi_ext
+# make ac791n_demo_demo_devkitboard
+# make ac791n_demo_demo_audio
+# make ac791n_demo_demo_ble
+# make ac791n_wifi_camera
+# make ac791n_wifi_story_machine
+# make ac791n_wifi_ipc
+# make ac791n_scan_box
 
-.PHONY: all clean ac791n_wifi_camera ac791n_scan_box ac791n_wifi_ipc ac791n_wifi_story_machine ac791n_demo_demo_ble ac791n_demo_demo_wifi_ext ac791n_demo_demo_edr ac791n_demo_demo_ui ac791n_demo_demo_hello ac791n_demo_demo_devkitboard ac791n_demo_demo_uvc ac791n_demo_demo_video ac791n_demo_demo_audio ac791n_demo_demo_wifi ac791n_D_Code ac791n_D_Code_keep_vm clean_ac791n_wifi_camera clean_ac791n_scan_box clean_ac791n_wifi_ipc clean_ac791n_wifi_story_machine clean_ac791n_demo_demo_ble clean_ac791n_demo_demo_wifi_ext clean_ac791n_demo_demo_edr clean_ac791n_demo_demo_ui clean_ac791n_demo_demo_hello clean_ac791n_demo_demo_devkitboard clean_ac791n_demo_demo_uvc clean_ac791n_demo_demo_video clean_ac791n_demo_demo_audio clean_ac791n_demo_demo_wifi clean_ac791n_D_Code
+.PHONY: all clean ac791n_demo_demo_ui ac791n_demo_demo_hello ac791n_demo_demo_edr ac791n_demo_demo_uvc ac791n_demo_demo_video ac791n_demo_demo_wifi ac791n_demo_demo_wifi_ext ac791n_demo_demo_devkitboard ac791n_demo_demo_audio ac791n_demo_demo_ble ac791n_wifi_camera ac791n_wifi_story_machine ac791n_wifi_ipc ac791n_scan_box clean_ac791n_demo_demo_ui clean_ac791n_demo_demo_hello clean_ac791n_demo_demo_edr clean_ac791n_demo_demo_uvc clean_ac791n_demo_demo_video clean_ac791n_demo_demo_wifi clean_ac791n_demo_demo_wifi_ext clean_ac791n_demo_demo_devkitboard clean_ac791n_demo_demo_audio clean_ac791n_demo_demo_ble clean_ac791n_wifi_camera clean_ac791n_wifi_story_machine clean_ac791n_wifi_ipc clean_ac791n_scan_box
 
-all: ac791n_wifi_camera ac791n_scan_box ac791n_wifi_ipc ac791n_wifi_story_machine ac791n_demo_demo_ble ac791n_demo_demo_wifi_ext ac791n_demo_demo_edr ac791n_demo_demo_ui ac791n_demo_demo_hello ac791n_demo_demo_devkitboard ac791n_demo_demo_uvc ac791n_demo_demo_video ac791n_demo_demo_audio ac791n_demo_demo_wifi ac791n_D_Code
+# 各方案共用 cpu/wl82/tools 输出；仅串行化本分派器，
+# 递归 Make 仍可并行编译自身对象。
+.NOTPARALLEL:
+
+all: ac791n_demo_demo_ui ac791n_demo_demo_hello ac791n_demo_demo_edr ac791n_demo_demo_uvc ac791n_demo_demo_video ac791n_demo_demo_wifi ac791n_demo_demo_wifi_ext ac791n_demo_demo_devkitboard ac791n_demo_demo_audio ac791n_demo_demo_ble ac791n_wifi_camera ac791n_wifi_story_machine ac791n_wifi_ipc ac791n_scan_box
 	@echo +ALL DONE
 
-clean: clean_ac791n_wifi_camera clean_ac791n_scan_box clean_ac791n_wifi_ipc clean_ac791n_wifi_story_machine clean_ac791n_demo_demo_ble clean_ac791n_demo_demo_wifi_ext clean_ac791n_demo_demo_edr clean_ac791n_demo_demo_ui clean_ac791n_demo_demo_hello clean_ac791n_demo_demo_devkitboard clean_ac791n_demo_demo_uvc clean_ac791n_demo_demo_video clean_ac791n_demo_demo_audio clean_ac791n_demo_demo_wifi clean_ac791n_D_Code
+clean: clean_ac791n_demo_demo_ui clean_ac791n_demo_demo_hello clean_ac791n_demo_demo_edr clean_ac791n_demo_demo_uvc clean_ac791n_demo_demo_video clean_ac791n_demo_demo_wifi clean_ac791n_demo_demo_wifi_ext clean_ac791n_demo_demo_devkitboard clean_ac791n_demo_demo_audio clean_ac791n_demo_demo_ble clean_ac791n_wifi_camera clean_ac791n_wifi_story_machine clean_ac791n_wifi_ipc clean_ac791n_scan_box
 	@echo +CLEAN DONE
-
-ac791n_wifi_camera:
-	$(MAKE) -C apps/wifi_camera/board/wl82 -f Makefile
-
-clean_ac791n_wifi_camera:
-	$(MAKE) -C apps/wifi_camera/board/wl82 -f Makefile clean
-
-ac791n_scan_box:
-	$(MAKE) -C apps/scan_box/board/wl82 -f Makefile
-
-clean_ac791n_scan_box:
-	$(MAKE) -C apps/scan_box/board/wl82 -f Makefile clean
-
-ac791n_wifi_ipc:
-	$(MAKE) -C apps/wifi_ipc/board/wl82 -f Makefile
-
-clean_ac791n_wifi_ipc:
-	$(MAKE) -C apps/wifi_ipc/board/wl82 -f Makefile clean
-
-ac791n_wifi_story_machine:
-	$(MAKE) -C apps/wifi_story_machine/board/wl82 -f Makefile
-
-clean_ac791n_wifi_story_machine:
-	$(MAKE) -C apps/wifi_story_machine/board/wl82 -f Makefile clean
-
-ac791n_demo_demo_ble:
-	$(MAKE) -C apps/demo/demo_ble/board/wl82 -f Makefile
-
-clean_ac791n_demo_demo_ble:
-	$(MAKE) -C apps/demo/demo_ble/board/wl82 -f Makefile clean
-
-ac791n_demo_demo_wifi_ext:
-	$(MAKE) -C apps/demo/demo_wifi_ext/board/wl82 -f Makefile
-
-clean_ac791n_demo_demo_wifi_ext:
-	$(MAKE) -C apps/demo/demo_wifi_ext/board/wl82 -f Makefile clean
-
-ac791n_demo_demo_edr:
-	$(MAKE) -C apps/demo/demo_edr/board/wl82 -f Makefile
-
-clean_ac791n_demo_demo_edr:
-	$(MAKE) -C apps/demo/demo_edr/board/wl82 -f Makefile clean
 
 ac791n_demo_demo_ui:
 	$(MAKE) -C apps/demo/demo_ui/board/wl82 -f Makefile
@@ -84,11 +47,11 @@ ac791n_demo_demo_hello:
 clean_ac791n_demo_demo_hello:
 	$(MAKE) -C apps/demo/demo_hello/board/wl82 -f Makefile clean
 
-ac791n_demo_demo_devkitboard:
-	$(MAKE) -C apps/demo/demo_DevKitBoard/board/wl82 -f Makefile
+ac791n_demo_demo_edr:
+	$(MAKE) -C apps/demo/demo_edr/board/wl82 -f Makefile
 
-clean_ac791n_demo_demo_devkitboard:
-	$(MAKE) -C apps/demo/demo_DevKitBoard/board/wl82 -f Makefile clean
+clean_ac791n_demo_demo_edr:
+	$(MAKE) -C apps/demo/demo_edr/board/wl82 -f Makefile clean
 
 ac791n_demo_demo_uvc:
 	$(MAKE) -C apps/demo/demo_uvc/board/wl82 -f Makefile
@@ -102,17 +65,66 @@ ac791n_demo_demo_video:
 clean_ac791n_demo_demo_video:
 	$(MAKE) -C apps/demo/demo_video/board/wl82 -f Makefile clean
 
+ac791n_demo_demo_wifi:
+	$(MAKE) -C apps/demo/demo_wifi/board/wl82 -f Makefile
+
+clean_ac791n_demo_demo_wifi:
+	$(MAKE) -C apps/demo/demo_wifi/board/wl82 -f Makefile clean
+
+ac791n_demo_demo_wifi_ext:
+	$(MAKE) -C apps/demo/demo_wifi_ext/board/wl82 -f Makefile
+
+clean_ac791n_demo_demo_wifi_ext:
+	$(MAKE) -C apps/demo/demo_wifi_ext/board/wl82 -f Makefile clean
+
+ac791n_demo_demo_devkitboard:
+	$(MAKE) -C apps/demo/demo_DevKitBoard/board/wl82 -f Makefile
+
+clean_ac791n_demo_demo_devkitboard:
+	$(MAKE) -C apps/demo/demo_DevKitBoard/board/wl82 -f Makefile clean
+
 ac791n_demo_demo_audio:
 	$(MAKE) -C apps/demo/demo_audio/board/wl82 -f Makefile
 
 clean_ac791n_demo_demo_audio:
 	$(MAKE) -C apps/demo/demo_audio/board/wl82 -f Makefile clean
 
-ac791n_demo_demo_wifi:
-	$(MAKE) -C apps/demo/demo_wifi/board/wl82 -f Makefile
+ac791n_demo_demo_ble:
+	$(MAKE) -C apps/demo/demo_ble/board/wl82 -f Makefile
 
-clean_ac791n_demo_demo_wifi:
-	$(MAKE) -C apps/demo/demo_wifi/board/wl82 -f Makefile clean
+clean_ac791n_demo_demo_ble:
+	$(MAKE) -C apps/demo/demo_ble/board/wl82 -f Makefile clean
+
+ac791n_wifi_camera:
+	$(MAKE) -C apps/wifi_camera/board/wl82 -f Makefile
+
+clean_ac791n_wifi_camera:
+	$(MAKE) -C apps/wifi_camera/board/wl82 -f Makefile clean
+
+ac791n_wifi_story_machine:
+	$(MAKE) -C apps/wifi_story_machine/board/wl82 -f Makefile
+
+clean_ac791n_wifi_story_machine:
+	$(MAKE) -C apps/wifi_story_machine/board/wl82 -f Makefile clean
+
+ac791n_wifi_ipc:
+	$(MAKE) -C apps/wifi_ipc/board/wl82 -f Makefile
+
+clean_ac791n_wifi_ipc:
+	$(MAKE) -C apps/wifi_ipc/board/wl82 -f Makefile clean
+
+ac791n_scan_box:
+	$(MAKE) -C apps/scan_box/board/wl82 -f Makefile
+
+clean_ac791n_scan_box:
+	$(MAKE) -C apps/scan_box/board/wl82 -f Makefile clean
+
+.PHONY: ac791n_D_Code_elf ac791n_D_Code ac791n_D_Code_keep_vm clean_ac791n_D_Code
+all: ac791n_D_Code
+clean: clean_ac791n_D_Code
+
+ac791n_D_Code_elf:
+	$(MAKE) -C apps/D_Code/board/wl82 -f Makefile firmware_elf
 
 ac791n_D_Code:
 	$(MAKE) -C apps/D_Code/board/wl82 -f Makefile

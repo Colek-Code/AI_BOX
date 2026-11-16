@@ -1,3 +1,4 @@
+/** @file brtc_service.c @brief 基于原厂示例的百度智能体事件、云实例与后台生命周期适配。 */
 //*********************************************************************************//
 //                              BRTC 百度 RTC 智能体服务                          //
 //                                                                                 //
@@ -38,7 +39,7 @@
 #define AGENT_RECOVER_NOTICE    "AgentRe.mp3"
 #endif
 
-/* HTTP POST Body */
+/* HTTP POST 请求正文。 */
 #ifdef D_BRTC_ENABLE_G722
 #define BRTC_POST_DATA \
     "{ \"app_id\": \"" D_BRTC_APP_ID "\", " \
@@ -70,14 +71,53 @@
 /* 头文件未声明的平台层函数 */
 extern int  app_sdk_audio_play_pause(bool pause);
 
-/* 其他模块可能未提供的函数（weak 默认实现，链接时可被强符号覆盖） */
+/**
+ * @brief 为可选提示音模块提供弱兼容入口。
+ * @param[in] path 兼容路径，默认实现不使用。
+ * @return 默认固定返回 0，不播放音频。
+ * @note 链接到强实现时以实际提供者合同为准。
+ */
 int  __attribute__((weak)) play_mix_file(const char *path)              { return 0; }
+/**
+ * @brief 为可选网络音乐提供暂停弱入口。
+ * @param[in] pause 兼容暂停值，默认不使用。
+ * @return 默认固定返回 0，不操作设备。
+ */
 int  __attribute__((weak)) sa_net_music_audio_play_pause(bool pause)    { return 0; }
+/**
+ * @brief 为可选外部音乐提供播放弱入口。
+ * @param[in] url 兼容 URL，默认不使用。
+ * @param[in] type 兼容播放选择，默认不使用。
+ * @note 默认无操作，实际音乐功能取决于链接的强实现。
+ */
 void __attribute__((weak)) sa_audio_play(const char *url, bool type)    { }
+/**
+ * @brief 为可选播放器提供绝对音量弱入口。
+ * @param[in] step 兼容音量值，默认不使用。
+ * @return 默认固定返回 0，不改音量。
+ */
 int  __attribute__((weak)) set_dec_volume(int step)                     { return 0; }
+/**
+ * @brief 为可选播放器提供相对音量弱入口。
+ * @param[in] step 兼容步长，默认不使用。
+ * @return 默认固定返回 0，不改音量。
+ */
 int  __attribute__((weak)) set_dec_volume_step(int step)                { return 0; }
+/**
+ * @brief 查询外部网络音乐的弱兼容入口。
+ * @return 默认返回 0，不报告网络音乐。
+ */
 int  __attribute__((weak)) sa_audio_is_net_music(void)                  { return 0; }
+/**
+ * @brief 为可选 MP3 音量恢复提供弱入口。
+ * @return 默认固定返回 0，不改音量。
+ */
 int  __attribute__((weak)) mp3_set_dec_volume_reset(void)               { return 0; }
+/**
+ * @brief 为可选 MP3 静音提供弱入口。
+ * @param[in] volume 兼容参数，默认不使用。
+ * @return 默认固定返回 0，不改音量。
+ */
 int  __attribute__((weak)) mp3_set_dec_volume_mute(int volume)          { return 0; }
 
 //*********************************************************************************//
@@ -131,12 +171,21 @@ static struct {
 //                              SDK 事件回调（13 个）                               //
 //*********************************************************************************//
 
+/**
+ * @brief 记录 SDK 错误并发布 BRTC 错误事件。
+ * @param[in] errCode SDK 错误码。
+ * @param[in] errMsg 可空 SDK 错误文本。
+ */
 static void on_error_cb(int errCode, const char *errMsg)
 {
     LOGE(TAG, "onError: %d %s", errCode, errMsg ? errMsg : "");
     d_event_post(EVT_BRTC_ERROR, NULL, 0);
 }
 
+/**
+ * @brief 桥接登录及呼叫结果，并在呼叫成功后确保实时 ASR 启用。
+ * @param[in] state SDK 呼叫阶段。
+ */
 static void on_call_state_change_cb(AGentCallState state)
 {
     LOGI(TAG, "onCallStateChange: %d", state);
@@ -165,6 +214,10 @@ static void on_call_state_change_cb(AGentCallState state)
     }
 }
 
+/**
+ * @brief 桥接连接、重连与首次异常断连事实。
+ * @param[in] state SDK 连接状态。
+ */
 static void on_connection_state_change_cb(AGentConnectState state)
 {
     LOGI(TAG, "onConnectionStateChange: %d", state);
@@ -181,6 +234,13 @@ static void on_connection_state_change_cb(AGentConnectState state)
     }
 }
 
+/**
+ * @brief 把用户 ASR 有界复制到值事件并更新空闲计时。
+ * @param[in] text 至少 text_len 字节的非空字幕。
+ * @param[in] text_len 字幕有效长度。
+ * @param[in] final 是否为最终识别结果。
+ * @param[in] info SDK 扩展信息，当前不使用。
+ */
 static void on_user_asr_subtitle_cb(const char *text, size_t text_len, bool final, const ASRExtInfo *info)
 {
     LOGI(TAG, "ASR[%s]: %.*s", final ? "FIN" : "MID", (int)text_len, text);
@@ -192,6 +252,11 @@ static void on_user_asr_subtitle_cb(const char *text, size_t text_len, bool fina
     d_event_post(EVT_BRTC_ASR_USER, &asr, sizeof(asr));
 }
 
+/**
+ * @brief 把 AI 字幕有界复制到事件并更新空闲计时。
+ * @param[in] text 可空、零结尾字幕。
+ * @param[in] final 是否最终片段。
+ */
 static void on_ai_agent_subtitle_cb(const char *text, bool final)
 {
     LOGI(TAG, "AI[%s]: %s", final ? "FIN" : "MID", text ? text : "");
@@ -202,6 +267,10 @@ static void on_ai_agent_subtitle_cb(const char *text, bool final)
     d_event_post(EVT_BRTC_ASR_AGENT, &asr, sizeof(asr));
 }
 
+/**
+ * @brief 保存 TTS 说话状态，按协作标记交接音乐与 RTC 设备并发事件。
+ * @param[in] speaking SDK 当前是否正在说话。
+ */
 static void on_ai_agent_speaking_cb(bool speaking)
 {
     g_brtc_speaking_tts = speaking;
@@ -224,6 +293,12 @@ static void on_ai_agent_speaking_cb(bool speaking)
     d_event_post(EVT_BRTC_AI_SPEAKING, &val, sizeof(val));
 }
 
+/**
+ * @brief 解析音量与播放控制，桥接有界调用值，并发送兼容 ok 结果。
+ * @param[in] id SDK 函数调用编号。
+ * @param[in] params SDK 提供的 JSON 参数。
+ * @note ok 为当前兼容回执，不代表所有本地动作已经有受检完成确认。
+ */
 static void on_function_call_cb(const char *id, const char *params)
 {
     LOGI(TAG, "FunctionCall: id=%s, params=%s", id ? id : "", params ? params : "");
@@ -286,6 +361,11 @@ static void on_function_call_cb(const char *id, const char *params)
     }
 }
 
+/**
+ * @brief 按 TTS 是否正在播放决定立即或延迟启动音乐，并发布值事件。
+ * @param[in] path 可空播放 URL。
+ * @param[in] start true 开始，false 停止。
+ */
 static void on_audio_player_op_cb(const char *path, bool start)
 {
     LOGI(TAG, "AudioPlayerOp: %s path=%s", start ? "START" : "STOP", path ? path : "");
@@ -314,7 +394,9 @@ static void on_audio_player_op_cb(const char *path, bool start)
     d_event_post(EVT_BRTC_PLAYER_OP, &op, sizeof(op));
 }
 
-/* 订阅端 RTP 就绪回调：此时 voip_play 已创建，音频接收通道已通，可安全发送 TTS */
+/**
+ * @brief 在订阅端播放通路就绪后向 TTS 提交欢迎语。
+ */
 static void on_play_ready_notify(void)
 {
     LOGI(TAG, "Play ready — sending welcome TTS");
@@ -323,6 +405,9 @@ static void on_play_ready_notify(void)
     }
 }
 
+/**
+ * @brief 发布媒体运行状态，确保实时 ASR 并预热 DAC 与注册播放就绪回调。
+ */
 static void on_media_setup_cb(void)
 {
     LOGI(TAG, "onMediaSetup — 媒体就绪");
@@ -340,9 +425,26 @@ static void on_media_setup_cb(void)
     app_sdk_audio_play_prewarm();
 }
 
+/**
+ * @brief 提供 SDK 音频数据回调，当前不消费外部音频。
+ * @param[in] data SDK 借用音频字节，当前不使用。
+ * @param[in] len 字节数，当前不使用。
+ */
 static void on_audio_data_cb(const uint8_t *data, size_t len) { }
+/**
+ * @brief 提供 SDK 视频数据回调，当前不消费视频。
+ * @param[in] data SDK 借用视频字节，当前不使用。
+ * @param[in] len 字节数，当前不使用。
+ * @param[in] w 宽度，当前不使用。
+ * @param[in] h 高度，当前不使用。
+ */
 static void on_video_data_cb(const uint8_t *data, size_t len, int w, int h) { }
 
+/**
+ * @brief 桥接 License 结果，失败时锁存退出原因。
+ * @param[in] result SDK 授权是否通过。
+ * @note 失败路径在当前回调上下文延时 10 个节拍。
+ */
 static void on_license_result_cb(bool result)
 {
     LOGI(TAG, "onLicenseResult: %s", result ? "PASS" : "FAIL");
@@ -356,6 +458,12 @@ static void on_license_result_cb(bool result)
     }
 }
 
+/**
+ * @brief 记录远端事件并识别音乐开始、结束标记。
+ * @param[in] data 至少 len 字节的 SDK 事件。
+ * @param[in] len 有效字节数。
+ * @note 当前识别分支不执行额外业务动作。
+ */
 static void on_agent_event_updated_cb(const uint8_t *data, size_t len)
 {
     LOGI(TAG, "AgentEventUpdated: %.*s, len:%d", (int)len, data, (int)len);
@@ -395,11 +503,12 @@ typedef enum {
 } brtc_http_method_t;
 
 /**
- * @brief 发送 HTTP 请求（GET 或 POST），返回响应 body 副本（调用者需 free）
- * @param method   BRTC_HTTP_GET 或 BRTC_HTTP_POST
- * @param url      请求 URL
- * @param json_body POST 时的 body（GET 时传 NULL）
- * @return 响应字符串指针, NULL=失败
+ * @brief 同步执行 HTTP GET 或 POST，复制正文后统一释放 HTTP 对象。
+ * @param[in] method GET 或 POST。
+ * @param[in] url 非空 URL。
+ * @param[in] json_body POST 正文；为空时按 GET 处理。
+ * @return 调用者拥有的零结尾正文，失败返回 NULL。
+ * @note 返回正文由调用者 free；当前日志沿用已有响应输出行为。
  */
 static char *brtc_http_request(brtc_http_method_t method, const char *url, const char *json_body)
 {
@@ -453,19 +562,31 @@ static char *brtc_http_request(brtc_http_method_t method, const char *url, const
     return result;
 }
 
-/* 便捷包装 */
+/**
+ * @brief 以 POST 方式调用通用 HTTP 请求。
+ * @param[in] url 请求 URL。
+ * @param[in] json_body 请求正文。
+ * @return 调用者拥有的正文，失败返回 NULL。
+ */
 static inline char *brtc_http_post(const char *url, const char *json_body)
 {
     return brtc_http_request(BRTC_HTTP_POST, url, json_body);
 }
 
+/**
+ * @brief 以 GET 方式调用通用 HTTP 请求。
+ * @param[in] url 请求 URL。
+ * @return 调用者拥有的正文，失败返回 NULL。
+ */
 static inline char *brtc_http_get(const char *url)
 {
     return brtc_http_request(BRTC_HTTP_GET, url, NULL);
 }
 
 /**
- * @brief 停止 AI Agent 实例
+ * @brief 从启动响应提取实例编号并尽力提交停止实例请求。
+ * @param[in] json_resp 可空、零结尾的原始启动响应。
+ * @note 无有效编号或 HTTP 失败时无完成反馈。
  */
 static void brtc_stop_agent_instance(const char *json_resp)
 {
@@ -500,6 +621,10 @@ static void brtc_stop_agent_instance(const char *json_resp)
 //                  填充引擎默认参数                //
 //*********************************************************************************//
 
+/**
+ * @brief 向已清零参数对象填充编译配置与 SDK 默认选择。
+ * @param[in,out] params 非空引擎参数对象。
+ */
 static void brtc_set_user_params(AgentEngineParams *params)
 {
     snprintf(params->agent_platform_url, sizeof(params->agent_platform_url),
@@ -528,6 +653,11 @@ static void brtc_set_user_params(AgentEngineParams *params)
 //            引擎创建 + 初始化 + 呼叫任务                                          //
 //*********************************************************************************//
 
+/**
+ * @brief 接收自有远端参数，创建并初始化引擎后发起呼叫。
+ * @param[in] arg 可空堆分配参数；本任务复制后释放。
+ * @note 创建或初始化失败销毁已建引擎并回到 IDLE，不提供外部 join 回执。
+ */
 static void brtc_engine_open_task(void *arg)
 {
     struct AgentEngineParams *pArg = (struct AgentEngineParams *)arg;
@@ -577,6 +707,11 @@ static void brtc_engine_open_task(void *arg)
 //              超时监控任务                                                        //
 //*********************************************************************************//
 
+/**
+ * @brief 监督异常、授权、网络与空闲退出，并在 TTS 结束后恢复延迟音乐。
+ * @param[in] priv 任务兼容参数，本实现不使用。
+ * @note 退出时销毁引擎、尽力停止服务端实例并释放保存响应；阶段标记不构成跨线程序列化保证。
+ */
 static void brtc_timer_task(void *priv)
 {
     LOGI(TAG, "BRTC 监控任务启动");
@@ -675,6 +810,11 @@ static void brtc_timer_task(void *priv)
 //       主任务：HTTP 换 Token + fork 引擎任务 + 监控任务                           //
 //*********************************************************************************//
 
+/**
+ * @brief 请求云端实例，保存响应并创建引擎与监控任务。
+ * @param[in] priv 任务兼容参数，本实现不使用。
+ * @note 参数所有权在引擎任务创建成功后转移；监控任务创建返回值当前只记录后续 PID，不作为成功回执。
+ */
 static void brtc_agent_task(void *priv)
 {
     LOGI(TAG, "=== BRTC 启动流程 ===");
@@ -761,6 +901,11 @@ static void brtc_agent_task(void *priv)
 //                              WiFi 事件订阅回调                                  //
 //*********************************************************************************//
 
+/**
+ * @brief 联网事件自动启动，断网事件更新退出事实。
+ * @param[in] event 非空 WiFi 值事件。
+ * @param[in] user_data 订阅上下文，本实现不使用。
+ */
 static void brtc_on_wifi_event(const d_event_t *event, void *user_data)
 {
     if (event->id == EVT_WIFI_CONNECTED) {
@@ -780,6 +925,9 @@ static void brtc_on_wifi_event(const d_event_t *event, void *user_data)
 //                              公开 API                                            //
 //*********************************************************************************//
 
+/**
+ * @brief 清空上下文并订阅 WiFi 事件，不直接连接智能体；完整合同见 brtc_service.h。
+ */
 d_err_t brtc_service_init(void)
 {
     memset(&brtc_ctx, 0, sizeof(brtc_ctx));
@@ -796,6 +944,9 @@ d_err_t brtc_service_init(void)
     return D_OK;
 }
 
+/**
+ * @brief 在空闲状态创建后台 HTTP 换令牌及引擎启动流程；完整合同见 brtc_service.h。
+ */
 d_err_t brtc_service_start(void)
 {
     int ret;
@@ -818,6 +969,9 @@ d_err_t brtc_service_start(void)
     return D_OK;
 }
 
+/**
+ * @brief 请求监控任务停止智能体与相关后台资源；完整合同见 brtc_service.h。
+ */
 d_err_t brtc_service_stop(void)
 {
     if (brtc_ctx.state == BRTC_STATE_IDLE) {
@@ -830,6 +984,9 @@ d_err_t brtc_service_stop(void)
     return D_OK;
 }
 
+/**
+ * @brief 在引擎运行阶段向智能体提交文本；完整合同见 brtc_service.h。
+ */
 void brtc_service_send_text(const char *text)
 {
     if (brtc_ctx.engine && brtc_ctx.state == BRTC_STATE_RUNNING) {
@@ -837,6 +994,9 @@ void brtc_service_send_text(const char *text)
     }
 }
 
+/**
+ * @brief 在引擎运行阶段提交直接 TTS 播报文本；完整合同见 brtc_service.h。
+ */
 void brtc_service_send_tts(const char *text)
 {
     if (brtc_ctx.engine && brtc_ctx.state == BRTC_STATE_RUNNING) {
@@ -844,6 +1004,9 @@ void brtc_service_send_tts(const char *text)
     }
 }
 
+/**
+ * @brief 引擎运行时提交打断请求；完整合同见 brtc_service.h。
+ */
 void brtc_service_interrupt(void)
 {
     if (brtc_ctx.engine && brtc_ctx.state == BRTC_STATE_RUNNING) {
@@ -851,31 +1014,49 @@ void brtc_service_interrupt(void)
     }
 }
 
+/**
+ * @brief 按当前阶段判断是否已进入呼叫或后续阶段；完整合同见 brtc_service.h。
+ */
 bool brtc_service_is_running(void)
 {
     return brtc_ctx.state >= BRTC_STATE_CALLING;
 }
 
+/**
+ * @brief 读取监控任务发布的可响应退出标记；完整合同见 brtc_service.h。
+ */
 bool app_brtc_agent_can_exit(void)
 {
     return g_brtc_agent_can_exit;
 }
 
+/**
+ * @brief 读取 SDK 回调维护的 AI TTS 播放标记；完整合同见 brtc_service.h。
+ */
 bool brtc_aiagent_tts_busy(void)
 {
     return g_brtc_speaking_tts;
 }
 
+/**
+ * @brief 设置 RTC 与外部音乐共用设备的协作标记；完整合同见 brtc_service.h。
+ */
 void brtc_audio_device_need_used_set(bool used)
 {
     g_audio_device_multi_used = used;
 }
 
+/**
+ * @brief 读取音频设备交接协作标记；完整合同见 brtc_service.h。
+ */
 bool brtc_audio_device_need_used_get(void)
 {
     return g_audio_device_multi_used;
 }
 
+/**
+ * @brief 记录快速退出选择并标记网络离线、异常退出，同时请求音乐停止；完整合同见 brtc_service.h。
+ */
 void app_sdk_should_close(int quickly)
 {
     g_brtc_agent_exit_quickly = (quickly != 0);
@@ -885,6 +1066,9 @@ void app_sdk_should_close(int quickly)
     sa_audio_play("", 0);
 }
 
+/**
+ * @brief 先禁用实时 ASR，再切换云端长文本录音状态；完整合同见 brtc_service.h。
+ */
 void app_brtc_agent_longtext_mode(bool enable)
 {
     if (!brtc_ctx.engine) return;
@@ -897,6 +1081,9 @@ void app_brtc_agent_longtext_mode(bool enable)
     }
 }
 
+/**
+ * @brief 存在引擎时提交实时 ASR 启用或禁用事件；完整合同见 brtc_service.h。
+ */
 void app_brtc_agent_asr_realtime(bool enable)
 {
     if (!brtc_ctx.engine) return;

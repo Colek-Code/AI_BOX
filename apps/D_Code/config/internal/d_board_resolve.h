@@ -1,6 +1,6 @@
 /**
  * @file d_board_resolve.h
- * @brief Resolve the selected board into hardware-owned firmware macros.
+ * @brief 将板型选择解析为硬件所属的固件宏，不承载应用功能策略。
  */
 
 #ifndef D_BOARD_RESOLVE_H
@@ -8,7 +8,7 @@
 
 #include "board/wl82/d_board_memory_config.h"
 
-/* Common display infrastructure used by every supported root UI. */
+/* 所有受支持的根界面共用的显示基础能力。 */
 #define D_LCD_ENABLE
 #define D_LVGL_ENABLE
 
@@ -33,7 +33,12 @@
 #define D_LCD_BACKLIGHT_PWM_ENABLE
 #endif
 
-/* A visual capture owns the diagnostic UART bandwidth. */
+/* 显式启用的 Product UI 配置复用显示模块已有的有界时序。 */
+#if D_BOARD_IS_GC9307 && D_DEBUG_UI_PERFORMANCE
+#define D_GC9307_FRAME_TRACE_ENABLE 1
+#endif
+
+/* 画面采集独占诊断 UART 带宽。 */
 #if D_DEBUG_VISUAL_CAPTURE
 #undef D_GC9307_FRAME_TRACE_ENABLE
 #undef D_PRODUCT_UI_PAGER_TRACE_ENABLE

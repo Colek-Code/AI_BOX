@@ -1,7 +1,4 @@
-/**
- * @file product_ui_time_domain.h
- * @brief LVGL-free bounded time, alarm and calendar event domain.
- */
+/** @file product_ui_time_domain.h @brief 无 LVGL 依赖的有限时间、闹钟桥接及日程 RAM 域；调用方负责串行。 */
 
 #ifndef PRODUCT_UI_TIME_DOMAIN_H
 #define PRODUCT_UI_TIME_DOMAIN_H
@@ -74,7 +71,7 @@ typedef enum {
     PRODUCT_UI_ALARM_SCHEDULE_FORTNIGHT,
 } product_ui_alarm_schedule_e;
 
-/* Persistent identities; never use a view's menu index as the stored value. */
+/** 持久化的作息模板身份，不以视图菜单下标作为存储值。 */
 typedef enum {
     PRODUCT_UI_ALARM_ROUTINE_BASIC = 0,
     PRODUCT_UI_ALARM_ROUTINE_DOUBLE_REST = 1,
@@ -88,7 +85,7 @@ typedef struct {
     uint8_t alternate_mask;
     uint8_t routine_template;
     product_ui_alarm_schedule_e schedule;
-    /* ONCE: execution date; FORTNIGHT: week-one Monday; WEEKLY: ignored. */
+    /**< 单次为执行日期，双周为第一周周一，每周计划忽略此字段。 */
     product_ui_date_t date;
     uint8_t hour;
     uint8_t minute;
@@ -106,14 +103,9 @@ typedef struct {
     char location[PRODUCT_UI_TIME_DOMAIN_EVENT_LOCATION_SIZE];
 } product_ui_calendar_event_t;
 
-/**
- * Snapshot contract:
- * - The snapshot is always structurally readable.
- * - wall_time_valid is zero unless capability is AVAILABLE.
- * - alarm_runtime_available requires both AVAILABLE and wall_time_valid.
- * - Alarm/event records remain readable while wall-clock capability is absent.
- * - next_alarm fields are invalid when alarm_runtime_available is zero.
- */
+/** 值快照始终可按结构读取。墙钟有效要求 capability 为 AVAILABLE；
+ * 闹钟运行时还要求 wall_time_valid。无墙钟时闹钟及日程记录仍可读取；
+ * alarm_runtime_available 为零时不可使用 next_alarm 字段。 */
 typedef struct {
     uint32_t generation;
     product_ui_time_capability_e capability;
@@ -195,7 +187,7 @@ typedef struct {
     uint32_t affected_id;
 } product_ui_time_domain_command_result_t;
 
-/** Alarm storage belongs to the runtime. This pure-C bridge owns no shadow records. */
+/** 闹钟记录由运行时持有；纯 C 桥接只复制摘要，不拥有影子记录。 */
 typedef struct {
     uint32_t generation;
     uint32_t next_id;
@@ -211,38 +203,90 @@ typedef struct {
     product_ui_time_result_e (*execute)(const product_ui_time_domain_command_t *command, uint32_t *affected_id);
 } product_ui_time_alarm_backend_t;
 
-/** UI/bootstrap thread only; callbacks and their static owner outlive all pages. */
+/**
+ * @brief 绑定静态闹钟后端并重置已观察的闹钟代次。
+ * @param[in] backend 借用的静态后端描述；NULL 清除绑定。
+ * @note 仅在 UI／启动串行上下文使用；后端及回调所有者须覆盖所有页面生命周期，不在本域维护影子闹钟。
+ */
 void product_ui_time_domain_bind_alarms(const product_ui_time_alarm_backend_t *backend);
 
 /**
- * Initialize the UI-owned wall/event cache. Bound persistent alarms are not reset.
- * The owner must serialize command and snapshot calls; no internal lock is used.
+ * @brief 重置 UI 拥有的墙钟能力及日程 RAM 缓存，保留已绑定的持久闹钟。
+ * @note 无内部锁，调用方须串行组织命令及快照；init 和 RESET 均推进独立日程代次，避免活页面旧缓存命中。
  */
 void product_ui_time_domain_init(void);
 
 /**
- * Execute one bounded state mutation.
- * Alarm/event CRUD remains available without a wall clock. SET_WALL_TIME and
- * next-alarm scheduling require capability AVAILABLE.
+ * @brief 同步执行一条有限状态变更并输出结果、当前代次及受影响编号。
+ * @param[in] command 借用的命令值；不保留输入指针。
+ * @param[out] result 可为空，非空时接收返回结果、代次与受影响编号。
+ * @return 成功返回 TIME_OK；参数、能力、记录、容量或后端冲突返回对应时间域错误。
+ * @note 无墙钟时仍可操作闹钟／日程；设置墙钟要求 AVAILABLE。成功日程操作即使同值也推进日程代次，失败不发布新代次。
  */
 product_ui_time_result_e product_ui_time_domain_execute(
     const product_ui_time_domain_command_t *command,
     product_ui_time_domain_command_result_t *result);
 
-/** Copy the current fixed-capacity state into caller-owned storage. */
+/**
+ * @brief 复制固定容量墙钟、闹钟与日程状态。
+ * @param[out] snapshot 接收调用方拥有的完整值副本。
+ * @return 成功返回 TIME_OK；空输出返回 INVALID_ARGUMENT。
+ * @note 闹钟由后端拷贝；来源缺失时仍可读取本域日程。读取可能因观察到新的后端代次而推进总内容代次，不保证多次后端拷贝是同一原子快照。
+ */
 product_ui_time_result_e product_ui_time_domain_get_snapshot(
     product_ui_time_domain_snapshot_t *snapshot);
+/**
+ * @brief 读取不含记录数组的域摘要，并观察闹钟后端代次。
+ * @param[out] summary 接收能力、有效时间、计数及可用的下次闹钟。
+ * @return 成功返回 TIME_OK；空输出返回 INVALID_ARGUMENT。
+ * @note 仍扫描固定容量日程槽统计数量；无锁且后端回调同步调用，所有调用须由 owner 串行。
+ */
 product_ui_time_result_e product_ui_time_domain_get_summary(
     product_ui_time_domain_summary_t *summary);
+/**
+ * @brief 从绑定闹钟后端复制指定逻辑下标的记录。
+ * @param[in] index 闹钟后端定义的逻辑下标，不是持久编号。
+ * @param[out] alarm 接收闹钟值副本，失败时不得使用。
+ * @return 空输出返回 INVALID_ARGUMENT；无绑定返回 UNAVAILABLE；其余原样返回后端结果。
+ */
 product_ui_time_result_e product_ui_time_domain_get_alarm(
     uint8_t index, product_ui_alarm_t *alarm);
+/**
+ * @brief 按有效槽顺序复制指定逻辑下标的日程。
+ * @param[in] index 从零开始的逻辑下标，不是物理槽或记录编号。
+ * @param[out] event 接收日程值副本，失败时不写入。
+ * @return 成功返回 TIME_OK；空输出返回 INVALID_ARGUMENT；没有对应条目返回 NOT_FOUND。
+ */
 product_ui_time_result_e product_ui_time_domain_get_event(
     uint8_t index, product_ui_calendar_event_t *event);
 
+/**
+ * @brief 读取仅由初始化／RESET 及成功日程变更推进的非零缓存代次。
+ * @return 当前日程代次；只允许相等比较，不将大小或差值解释为事件数。
+ * @note 内存读取不扫描记录、不执行 IO；墙钟及闹钟变化不影响它，沿用 UI 调用方串行合同。
+ */
+uint32_t product_ui_time_domain_get_event_revision(void);
+
+/**
+ * @brief 校验完整公历日期及二十四小时制时分秒。
+ * @param[in] value 借用的日期时间值，年份为 1 至 MAX_YEAR。
+ * @return 有效返回 TIME_OK；空指针、日期或时分秒越界返回 INVALID_ARGUMENT。
+ */
 product_ui_time_result_e product_ui_time_domain_validate_datetime(
     const product_ui_datetime_t *value);
+/**
+ * @brief 校验闹钟启用位、时分、周期掩码及相应计划约束。
+ * @param[in] alarm 借用的闹钟值。
+ * @return 符合计划合同返回 TIME_OK，否则返回 INVALID_ARGUMENT。
+ * @note 单次必须有合法日期且无重复位；周计划兼容未使用的旧日期；双周要求交替模板、非空两周掩码及受支持范围内的首周周一。此处不校验标签文字。
+ */
 product_ui_time_result_e product_ui_time_domain_validate_alarm(
     const product_ui_alarm_t *alarm);
+/**
+ * @brief 校验日程布尔位、开始结束日期时间及先后关系。
+ * @param[in] event 借用的日程值；本函数不校验或修改标题和地点。
+ * @return 合法且开始不晚于结束返回 TIME_OK，否则返回 INVALID_ARGUMENT。
+ */
 product_ui_time_result_e product_ui_time_domain_validate_event(
     const product_ui_calendar_event_t *event);
 

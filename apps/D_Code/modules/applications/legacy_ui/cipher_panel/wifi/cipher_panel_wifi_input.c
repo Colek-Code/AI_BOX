@@ -1,7 +1,4 @@
-/**
- * @file cipher_panel_wifi_input.c
- * @brief Password input panel for the cipher panel WiFi page.
- */
+/** @file cipher_panel_wifi_input.c @brief 旧根 UI 密码面板、静态键盘布局及异步对象关闭。 */
 #include "config/app_config.h"
 #if defined(D_LVGL_ENABLE) && (D_UI_TARGET == D_UI_CIPHER_PANEL) && (D_FEATURE_WIFI)
 
@@ -79,11 +76,17 @@ static const lv_buttonmatrix_ctrl_t s_wifi_kb_ctrl_special[] = {
 
 static void cipher_wifi_input_close_async(void);
 
+/**
+ * @brief 查询静态输入层引用是否存在。
+ */
 uint8_t cipher_wifi_input_is_open(void)
 {
     return s_input_layer != NULL ? 1U : 0U;
 }
 
+/**
+ * @brief 输入提示标签存在时复制状态文字及颜色。
+ */
 void cipher_wifi_input_set_message(const char *text, uint32_t color)
 {
     if ((s_prompt_msg == NULL) || (text == NULL)) {
@@ -93,6 +96,9 @@ void cipher_wifi_input_set_message(const char *text, uint32_t color)
     lv_obj_set_style_text_color(s_prompt_msg, lv_color_hex(color), 0);
 }
 
+/**
+ * @brief 只清空输入层对象、回调及候选网络引用，不删除实际对象。
+ */
 void cipher_wifi_input_reset(void)
 {
     s_input_layer = NULL;
@@ -106,6 +112,9 @@ void cipher_wifi_input_reset(void)
     memset(&s_selected, 0, sizeof(s_selected));
 }
 
+/**
+ * @brief 同步删除当前密码层并清空候选网络及回调借用。
+ */
 void cipher_wifi_input_close(void)
 {
     if (s_input_layer != NULL) {
@@ -114,6 +123,9 @@ void cipher_wifi_input_close(void)
     cipher_wifi_input_reset();
 }
 
+/**
+ * @brief 预约当前层异步删除后立即撤销全局引用，不继续保留密码上下文。
+ */
 static void cipher_wifi_input_close_async(void)
 {
     if (s_input_layer != NULL) {
@@ -122,12 +134,21 @@ static void cipher_wifi_input_close_async(void)
     cipher_wifi_input_reset();
 }
 
+/**
+ * @brief 取消事件只预约密码层异步关闭。
+ * @param[in] e 取消事件，当前未读取载荷。
+ */
 static void cipher_wifi_input_cancel_event(lv_event_t *e)
 {
     (void)e;
     cipher_wifi_input_close_async();
 }
 
+/**
+ * @brief 密码非空时同步调用连接受理回调，接受后清密码并延后删除输入层。
+ * @param[in] e 确认事件，当前未读取载荷。
+ * @note 回调只借用本次 SSID／密码并须返回前复制，不应在回调内删除当前输入层。非零是受理，不代表 DHCP 或保存完成。
+ */
 static void cipher_wifi_input_connect_event(lv_event_t *e)
 {
     const char *pwd;
@@ -149,6 +170,10 @@ static void cipher_wifi_input_connect_event(lv_event_t *e)
     cipher_wifi_input_close_async();
 }
 
+/**
+ * @brief 文本区点击／聚焦关联键盘，READY 受理连接，CANCEL 延后关闭。
+ * @param[in] e 文本输入事件。
+ */
 static void cipher_wifi_input_password_event(lv_event_t *e)
 {
     lv_event_code_t code = lv_event_get_code(e);
@@ -167,6 +192,10 @@ static void cipher_wifi_input_password_event(lv_event_t *e)
     }
 }
 
+/**
+ * @brief 切换密码掩码及操作图标，恢复文本焦点与键盘关联。
+ * @param[in] e 密码可见性按钮事件，当前未读取载荷。
+ */
 static void cipher_wifi_input_eye_event(lv_event_t *e)
 {
     bool is_hidden;
@@ -187,6 +216,17 @@ static void cipher_wifi_input_eye_event(lv_event_t *e)
     }
 }
 
+/**
+ * @brief 创建输入卡内固定高操作按钮并绑定持久点击回调。
+ * @param[in,out] parent 按钮父卡片。
+ * @param[in] text 本次传给文字构造器复制的文字。
+ * @param[in] x 局部横坐标。
+ * @param[in] y 局部纵坐标。
+ * @param[in] w 按钮宽度。
+ * @param[in] accent 边框及文字 RGB 强调色。
+ * @param[in] cb 持续有效的点击回调。
+ * @return 成功返回父树拥有的按钮，按钮创建失败为 NULL；文字子对象不单独汇总错误。
+ */
 static lv_obj_t *cipher_wifi_input_action_button(lv_obj_t *parent,
                                                  const char *text,
                                                  int x, int y, int w,
@@ -214,6 +254,10 @@ static lv_obj_t *cipher_wifi_input_action_button(lv_obj_t *parent,
     return btn;
 }
 
+/**
+ * @brief 设置密码文本区的旧根主题。
+ * @param[in,out] textarea 借用文本区，NULL 时忽略。
+ */
 static void cipher_wifi_input_style_textarea(lv_obj_t *textarea)
 {
     if (textarea == NULL) {
@@ -228,6 +272,10 @@ static void cipher_wifi_input_style_textarea(lv_obj_t *textarea)
     lv_obj_set_style_text_color(textarea, lv_color_hex(CIPHER_TEXT), 0);
 }
 
+/**
+ * @brief 创建密码可见性操作及图标，引用留给输入层。
+ * @return 按钮及图标创建成功为 1，否则为 0；部分按钮交层清理。
+ */
 static uint8_t cipher_wifi_input_create_eye_button(void)
 {
     lv_obj_t *btn = lv_btn_create(s_prompt);
@@ -254,6 +302,11 @@ static uint8_t cipher_wifi_input_create_eye_button(void)
     return s_password_eye_label != NULL ? 1U : 0U;
 }
 
+/**
+ * @brief 创建全屏不透明且可接管输入的密码层，并移到前景。
+ * @param[in,out] parent 输入层父容器。
+ * @return 成功返回父树拥有的层，失败为 NULL。
+ */
 static lv_obj_t *cipher_wifi_input_create_layer(lv_obj_t *parent)
 {
     lv_obj_t *layer = lv_obj_create(parent);
@@ -274,6 +327,10 @@ static lv_obj_t *cipher_wifi_input_create_layer(lv_obj_t *parent)
     return layer;
 }
 
+/**
+ * @brief 创建当前候选网络的输入提示卡及网络／认证说明。
+ * @return 卡片创建成功为 1，否则为 0；内部文字分配不单独反馈。
+ */
 static uint8_t cipher_wifi_input_create_prompt_card(void)
 {
     s_prompt = cipher_row(s_input_layer, 12, CIPHER_WIFI_PROMPT_Y,
@@ -293,6 +350,10 @@ static uint8_t cipher_wifi_input_create_prompt_card(void)
     return 1U;
 }
 
+/**
+ * @brief 创建有界单行密码文本区、全部事件处理及可见性按钮。
+ * @return 必要对象及可见性按钮成功为 1，否则为 0。
+ */
 static uint8_t cipher_wifi_input_create_password_area(void)
 {
     s_password_area = lv_textarea_create(s_prompt);
@@ -311,6 +372,9 @@ static uint8_t cipher_wifi_input_create_password_area(void)
     return cipher_wifi_input_create_eye_button();
 }
 
+/**
+ * @brief 尝试创建提示、连接及取消操作，当前 void 路径不汇总分配结果。
+ */
 static void cipher_wifi_input_create_actions(void)
 {
     s_prompt_msg = cipher_text(s_prompt, "OK to connect",
@@ -324,6 +388,10 @@ static void cipher_wifi_input_create_actions(void)
                                     cipher_wifi_input_cancel_event);
 }
 
+/**
+ * @brief 安装静态小写、大写及符号键盘布局。
+ * @param[in,out] keyboard 借用键盘，NULL 时忽略。
+ */
 static void cipher_wifi_input_apply_keyboard_map(lv_obj_t *keyboard)
 {
     if (keyboard == NULL) {
@@ -337,6 +405,10 @@ static void cipher_wifi_input_apply_keyboard_map(lv_obj_t *keyboard)
                         s_wifi_kb_map_special, s_wifi_kb_ctrl_special);
 }
 
+/**
+ * @brief 设置旧根键盘项间距及拉丁文字体。
+ * @param[in,out] keyboard 借用键盘，NULL 时忽略。
+ */
 static void cipher_wifi_input_style_keyboard(lv_obj_t *keyboard)
 {
     if (keyboard == NULL) {
@@ -348,6 +420,10 @@ static void cipher_wifi_input_style_keyboard(lv_obj_t *keyboard)
                                LV_PART_ITEMS);
 }
 
+/**
+ * @brief 创建键盘并显式左上定位，关联已存在密码文本区。
+ * @note 失败保留已创建输入卡，当前不发布整层可重试创建状态。
+ */
 static void cipher_wifi_input_create_keyboard(void)
 {
     s_keyboard = lv_keyboard_create(s_input_layer);
@@ -364,6 +440,9 @@ static void cipher_wifi_input_create_keyboard(void)
     lv_obj_move_to_index(s_keyboard, -1);
 }
 
+/**
+ * @brief 关闭旧密码层、复制候选网络并创建输入卡与静态布局键盘。
+ */
 void cipher_wifi_input_open(lv_obj_t *parent,
                             const wifi_service_scan_result_t *item,
                             cipher_wifi_input_connect_cb_t connect_cb,

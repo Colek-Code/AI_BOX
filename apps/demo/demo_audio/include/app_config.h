@@ -18,7 +18,7 @@
 #define CONFIG_DEBUG_ENABLE                     // 打印开关
 // #define CONFIG_DEC_DIGITAL_VOLUME_ENABLE     //数字音量淡入淡出功能
 // #define CONFIG_DEC_ANALOG_VOLUME_ENABLE      //模拟音量淡入淡出功能
-// #define CONFIG_SPECTRUM_FFT_EFFECT_ENABLE    //频谱运算
+#define CONFIG_SPECTRUM_FFT_EFFECT_ENABLE    //频谱运算
 
 #define CONFIG_LOCAL_MUSIC_MODE_ENABLE      //mode:本地播放模式使能
 #define CONFIG_RECORDER_MODE_ENABLE         //mode:录音模式使能
@@ -77,6 +77,8 @@
 #define CONFIG_AAC_ENC_ENABLE
 #define CONFIG_OGG_DEC_ENABLE
 #define CONFIG_MIDI_CTRL_DEC_ENABLE
+
+#define CONFIG_MIDI_DEC_ADDR //midi音色地址访问
 
 #define CONFIG_AUDIO_MIX_ENABLE              //打开叠音功能
 #define CONFIG_AUDIO_PS_ENABLE               //打开变调变速功能

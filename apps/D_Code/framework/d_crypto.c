@@ -20,6 +20,7 @@
 
 #include <string.h>
 #include "system/includes.h"    /* rand32(), os_time_get() */
+#include "system/spinlock.h"
 #include <stdlib.h>              /* srand() */
 
 #define TAG "CRYPTO"
@@ -29,7 +30,11 @@
 //                              内部工具                                            //
 //*********************************************************************************//
 
-/* 单字节转两位小写 hex */
+/**
+ * @brief 把一个字节写为两个小写十六进制字符，不追加 NUL。
+ * @param[in] b 待转换字节。
+ * @param[out] out 至少两个字节的有效缓冲区。
+ */
 static void byte_to_hex(unsigned char b, char *out)
 {
     static const char s_hex[] = "0123456789abcdef";
@@ -37,7 +42,12 @@ static void byte_to_hex(unsigned char b, char *out)
     out[1] = s_hex[b & 0x0F];
 }
 
-/* 二进制数组转小写 hex 字符串 */
+/**
+ * @brief 把二进制数组转换为小写十六进制字符串并补 NUL。
+ * @param[in] bin 至少 bin_len 字节的数据。
+ * @param[in] bin_len 非负数据长度，由内部调用方保证。
+ * @param[out] hex 至少 2*bin_len+1 字节的缓冲区。
+ */
 static void bin_to_hex(const unsigned char *bin, int bin_len, char *hex)
 {
     int i;
@@ -51,32 +61,52 @@ static void bin_to_hex(const unsigned char *bin, int bin_len, char *hex)
 //                              NTP 时间管理                                       //
 //*********************************************************************************//
 
-static volatile unsigned long long s_ntp_epoch_sec = 0;
-static volatile u32 s_ntp_local_tick = 0;   /* NTP 校时时刻的本地 tick */
-static volatile int s_ntp_synced = 0;
+static DEFINE_SPINLOCK(s_ntp_lock);
+static unsigned long long s_ntp_epoch_sec = 0;
+static u32 s_ntp_local_tick = 0;   /* NTP 校时时刻的本地 tick */
+static int s_ntp_synced = 0;
 
+/**
+ * @brief 更新校时基准；完整接口合同见 d_crypto.h。
+ */
 void d_crypto_set_ntp_time(unsigned long long epoch_sec)
 {
+    spin_lock(&s_ntp_lock);
     s_ntp_epoch_sec  = epoch_sec;
     s_ntp_local_tick = os_time_get();
     s_ntp_synced     = 1;
+    spin_unlock(&s_ntp_lock);
     LOGI(TAG, "NTP 校时: epoch=%llu", epoch_sec);
 }
 
+/**
+ * @brief 读取校时状态；完整接口合同见 d_crypto.h。
+ */
 int d_crypto_timestamp_inited(void)
 {
-    return s_ntp_synced;
+    int synced;
+    spin_lock(&s_ntp_lock);
+    synced = s_ntp_synced;
+    spin_unlock(&s_ntp_lock);
+    return synced;
 }
 
+/**
+ * @brief 在锁内读取时间基准并推进毫秒时间；完整接口合同见 d_crypto.h。
+ */
 unsigned long long d_get_timestamp_ms(void)
 {
+    unsigned long long ms;
+    spin_lock(&s_ntp_lock);
     if (s_ntp_synced) {
         /* NTP 基准 + 本地 tick 差值（tick 单位 10ms） */
         u32 elapsed_tick = os_time_get() - s_ntp_local_tick;
-        unsigned long long ms = (unsigned long long)s_ntp_epoch_sec * 1000ULL
+        ms = (unsigned long long)s_ntp_epoch_sec * 1000ULL
                               + (unsigned long long)elapsed_tick * 10ULL;
+        spin_unlock(&s_ntp_lock);
         return ms;
     }
+    spin_unlock(&s_ntp_lock);
 
     /* 保留既有签名兼容值；它不是当前时间，调用方须另查校时状态。 */
     LOGW(TAG, "NTP 未校时，返回固定兼容时间戳，当前时间不可信");
@@ -87,6 +117,9 @@ unsigned long long d_get_timestamp_ms(void)
 //                              HMAC-SHA256                                         //
 //*********************************************************************************//
 
+/**
+ * @brief 计算 HMAC 摘要并编码输出；完整接口合同见 d_crypto.h。
+ */
 d_err_t d_hmac_sha256(const unsigned char *key, int key_len,
                       const unsigned char *data, int data_len,
                       char *out_hex)
@@ -117,7 +150,13 @@ d_err_t d_hmac_sha256(const unsigned char *key, int key_len,
 //                              RSA-SHA256 签名                                    //
 //*********************************************************************************//
 
-/* mbedtls RNG 回调：使用硬件 rand32() */
+/**
+ * @brief 为 mbedTLS 运算填充 rand32 随机字节。
+ * @param[in] ctx mbedTLS 透传上下文，当前未使用。
+ * @param[out] output 至少 len 字节的有效缓冲区。
+ * @param[in] len 需要填充的字节数。
+ * @return 始终返回 0；此适配器没有可报告的硬件随机错误状态。
+ */
 static int hw_rng_callback(void *ctx, unsigned char *output, size_t len)
 {
     (void)ctx;
@@ -133,6 +172,9 @@ static int hw_rng_callback(void *ctx, unsigned char *output, size_t len)
     return 0;
 }
 
+/**
+ * @brief 执行 RSA 签名并集中释放临时密钥上下文；完整接口合同见 d_crypto.h。
+ */
 d_err_t d_rsa_sha256_sign(const char *pkey_pem,
                           const unsigned char *data, int data_len,
                           char *out_hex, size_t out_capacity)
@@ -201,6 +243,9 @@ cleanup:
 //                              随机 nonce                                         //
 //*********************************************************************************//
 
+/**
+ * @brief 生成随机十六进制字符串；完整接口合同见 d_crypto.h。
+ */
 void d_generate_nonce(char *buf, int len)
 {
     if (!buf || len <= 1) return;
@@ -234,9 +279,12 @@ void d_generate_nonce(char *buf, int len)
 }
 
 //*********************************************************************************//
-//                              canonical string                                   //
+//                              规范签名原文                                       //
 //*********************************************************************************//
 
+/**
+ * @brief 检查容量后顺序拼接签名原文；完整接口合同见 d_crypto.h。
+ */
 int d_build_canonical(const char *parts[], int count, char *out, int out_size)
 {
     if (!parts || count <= 0 || !out || out_size <= 0) {

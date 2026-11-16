@@ -1,3 +1,8 @@
+/**
+ * @file d_touch_gesture.c
+ * @brief 在 HYN 任务内识别软件点击/滑动并同步通知观察者，不持有 UI 对象。
+ */
+
 #include "config/app_config.h"
 
 #if defined(D_LCD_ENABLE) && defined(D_TOUCH_HYN_DRIVER_ENABLE)
@@ -38,17 +43,33 @@ typedef struct {
 
 static d_touch_gesture_state_t s_touch_gesture;
 
+/**
+ * @brief 计算两次原生坐标的有符号差。
+ * @param[in] end 终点坐标。
+ * @param[in] start 起点坐标。
+ * @return end-start 的 s16 转换值。
+ */
 static s16 touch_delta_u16(u16 end, u16 start)
 {
     return (s16)((s32)end - (s32)start);
 }
 
+/**
+ * @brief 把有符号位移转成无符号幅度。
+ * @param[in] value 16 位有符号位移。
+ * @return 位移绝对值，以 u16 表示。
+ */
 static u16 touch_abs_s16(s16 value)
 {
     return (value < 0) ? (u16)(-value) : (u16)value;
 }
 
 #ifdef D_TOUCH_GESTURE_LOG_ENABLE
+/**
+ * @brief 选择不改变既有日志格式的手势名称。
+ * @param[in] type 手势事件类型。
+ * @return 已知类型的静态日志名称；未知类型为原有 unknown 字符串。
+ */
 static const char *touch_event_name(d_touch_gesture_event_type_t type)
 {
     switch (type) {
@@ -76,6 +97,13 @@ static const char *touch_event_name(d_touch_gesture_event_type_t type)
 }
 #endif
 
+/**
+ * @brief 把原生样本转换为逻辑事件并同步通知观察者。
+ * @param[in] type 本次事件类型。
+ * @param[in] sample 借用的原生样本，NULL 时不处理。
+ * @param[in] duration_ms 本事件关联的时间值；双击使用两次点击间隔，其他事件由调用方给定。
+ * @note 点和向量使用本次方向查询转换；事件只在栈上存在，回调不在 LVGL 线程执行。
+ */
 static void touch_emit_event(d_touch_gesture_event_type_t type,
                              const d_touch_gesture_sample_t *sample, u32 duration_ms)
 {
@@ -114,6 +142,12 @@ static void touch_emit_event(d_touch_gesture_event_type_t type,
 }
 
 #ifdef D_TOUCH_GESTURE_ENABLE
+/**
+ * @brief 按相邻点击的时间和距离选择单击或双击，并更新双击记忆。
+ * @param[in] sample 已通过点击位移/时长条件的有效样本。
+ * @param[in] duration_ms 本次按压持续毫秒数。
+ * @note 双击事件的时间字段改用两次点击间隔，成功识别后清双击记忆。
+ */
 static void touch_emit_tap(const d_touch_gesture_sample_t *sample, u32 duration_ms)
 {
     d_touch_gesture_sample_t tap_sample = *sample;
@@ -140,6 +174,12 @@ static void touch_emit_tap(const d_touch_gesture_sample_t *sample, u32 duration_
     s_touch_gesture.last_tap_ms = sample->timestamp_ms;
 }
 
+/**
+ * @brief 从跟踪起点计算逻辑总位移、幅度及持续时间。
+ * @param[in] sample 正常结束样本。
+ * @param[out] motion 有效运动描述，包含复制样本及统计。
+ * @note 合成手势描述主接触，将样本点数设为 1；不把正常松手报告的零点数沿用为手势点数。
+ */
 static void touch_prepare_motion(const d_touch_gesture_sample_t *sample,
                                  d_touch_gesture_motion_t *motion)
 {
@@ -149,7 +189,7 @@ static void touch_prepare_motion(const d_touch_gesture_sample_t *sample,
     motion->event_sample = *sample;
     motion->event_sample.dx = dx;
     motion->event_sample.dy = dy;
-    /* Release reports zero contacts; synthesized gestures describe the primary contact. */
+    /* 正常松手报告零接触点；合成手势描述本次主接触。 */
     motion->event_sample.points = 1;
     d_screen_gc9307_hyn_delta_to_logical(dx, dy, &motion->logical_dx, &motion->logical_dy);
     motion->abs_dx = touch_abs_s16((s16)motion->logical_dx);
@@ -157,6 +197,10 @@ static void touch_prepare_motion(const d_touch_gesture_sample_t *sample,
     motion->duration_ms = sample->timestamp_ms - s_touch_gesture.start_ms;
 }
 
+/**
+ * @brief 按已有时长、距离及轴优势阈值结算一次已跟踪手势。
+ * @param[in] sample 结束样本；关闭识别时不读取。
+ */
 static void touch_finish_gesture(const d_touch_gesture_sample_t *sample)
 {
     d_touch_gesture_motion_t motion;
@@ -195,24 +239,37 @@ static void touch_finish_gesture(const d_touch_gesture_sample_t *sample)
     }
 }
 #else
+/**
+ * @brief 软件手势关闭时保留空结算入口，不生成高级手势。
+ * @param[in] sample 结束样本；关闭识别时不读取。
+ */
 static void touch_finish_gesture(const d_touch_gesture_sample_t *sample)
 {
     (void)sample;
 }
 #endif
 
+/**
+ * @brief 登记观察回调；完整合同见 d_touch_gesture.h。
+ */
 d_err_t d_touch_gesture_set_event_cb(d_touch_gesture_event_cb_t cb)
 {
     s_touch_gesture.event_cb = cb;
     return D_OK;
 }
 
+/**
+ * @brief 取消本地手势跟踪；完整合同见 d_touch_gesture.h。
+ */
 void d_touch_gesture_reset(void)
 {
     s_touch_gesture.tracking = 0;
     s_touch_gesture.last_tap_valid = 0;
 }
 
+/**
+ * @brief 报告有效按下；完整合同见 d_touch_gesture.h。
+ */
 void d_touch_gesture_report_down(const d_touch_gesture_sample_t *sample)
 {
     d_touch_gesture_sample_t event_sample;
@@ -230,6 +287,9 @@ void d_touch_gesture_report_down(const d_touch_gesture_sample_t *sample)
     touch_emit_event(D_TOUCH_GESTURE_EVENT_DOWN, &event_sample, 0);
 }
 
+/**
+ * @brief 报告有效移动；完整合同见 d_touch_gesture.h。
+ */
 void d_touch_gesture_report_move(const d_touch_gesture_sample_t *sample)
 {
     u32 duration_ms;
@@ -242,6 +302,9 @@ void d_touch_gesture_report_move(const d_touch_gesture_sample_t *sample)
     touch_emit_event(D_TOUCH_GESTURE_EVENT_MOVE, sample, duration_ms);
 }
 
+/**
+ * @brief 报告正常松手并尝试识别手势；完整合同见 d_touch_gesture.h。
+ */
 void d_touch_gesture_report_up(const d_touch_gesture_sample_t *sample)
 {
     d_touch_gesture_sample_t event_sample;

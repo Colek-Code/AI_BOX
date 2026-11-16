@@ -1,4 +1,4 @@
-/** @file product_ui_settings_time_page.c @brief Explicit boot-local time control without RTC writes. */
+/** @file product_ui_settings_time_page.c @brief 本次开机的软件时间编辑及显式确认，不写 RTC。 */
 #include "config/app_config.h"
 #if defined(D_LVGL_ENABLE) && (D_UI_TARGET == D_UI_PRODUCT)
 #include "product_ui_settings_details.h"
@@ -23,6 +23,9 @@ static struct {
     uint8_t pending, dirty, armed, confirmed, day_count;
 } s_time;
 
+/**
+ * @brief 撤销当前手势资格、推进非零输入代次并取消全部滚轮绑定。
+ */
 static void product_ui_time_cancel_input(void)
 {
     uint8_t index;
@@ -31,15 +34,37 @@ static void product_ui_time_cancel_input(void)
     for (index = 0U; index < 5U; index++) product_ui_time_roller_cancel(&s_time.bindings[index]);
 }
 
+/**
+ * @brief 仅在单槽为空时保存一个页面动作，避免事件回调中直接修改时间。
+ * @param[in] action 页面动作编号。
+ * @param[in] value 动作携带的滚轮选项或零。
+ */
 static void product_ui_time_queue(uint8_t action, uint16_t value)
 { if (s_time.pending == TIME_NONE) { s_time.pending = action; s_time.value = value; } }
 
+/**
+ * @brief 把滚轮字段及选项序号排入页面动作槽。
+ * @param[in] binding 借用的滚轮绑定，其 field 指明目标日期时间字段。
+ * @param[in] selected 当前选项下标。
+ */
 static void product_ui_time_changed(product_ui_time_roller_t *binding, uint16_t selected)
 { product_ui_time_queue(binding->field, selected); }
 
+/**
+ * @brief 把应用手动时间动作排入页面周期。
+ * @param[in] event 点击事件，当前不读取载荷。
+ */
 static void product_ui_time_save_cb(lv_event_t *event) { (void)event; product_ui_time_queue(TIME_SAVE, 0U); }
+/**
+ * @brief 把返回动作排入页面周期，以便检查草稿及确认。
+ * @param[in] event 点击事件，当前不读取载荷。
+ */
 static void product_ui_time_back_cb(lv_event_t *event) { (void)event; product_ui_time_queue(TIME_BACK, 0U); }
 
+/**
+ * @brief 校验同对象、同代次的完整按压后排入恢复自动校时动作。
+ * @param[in] event 自动校时按钮事件。
+ */
 static void product_ui_time_auto_cb(lv_event_t *event)
 {
     lv_event_code_t code = lv_event_get_code(event);
@@ -54,6 +79,10 @@ static void product_ui_time_auto_cb(lv_event_t *event)
     }
 }
 
+/**
+ * @brief 滚动开始撤销旧输入资格，并请求组合帧避免滚动残留。
+ * @param[in] event 只处理目标与当前目标相同的滚动阶段事件。
+ */
 static void product_ui_time_scrolled(lv_event_t *event)
 {
     lv_event_code_t code = lv_event_get_code(event);
@@ -63,6 +92,9 @@ static void product_ui_time_scrolled(lv_event_t *event)
     d_screen_request_composed_frame();
 }
 
+/**
+ * @brief 按草稿年月调整日选项，重绑滚轮并显示真实时钟来源及草稿状态。
+ */
 static void product_ui_time_form_refresh(void)
 {
     uint16_t values[5] = {s_time.draft.date.year - PRODUCT_UI_CLOCK_MIN_YEAR, s_time.draft.date.month - 1U,
@@ -88,23 +120,48 @@ static void product_ui_time_form_refresh(void)
     if (strcmp(lv_label_get_text(s_time.status), text)) lv_label_set_text(s_time.status, text);
 }
 
+/**
+ * @brief 确认接受且页面仍存在时标记已确认，并重排原操作。
+ * @param[in] accepted 非零表示用户接受。
+ * @param[in] context 用整数值编码的原动作编号，不是动态对象指针。
+ */
 static void product_ui_time_confirmed(uint8_t accepted, void *context)
 {
     if (accepted && s_time.root) { s_time.confirmed = 1U; product_ui_time_queue((uint8_t)(uintptr_t)context, 0U); }
 }
 
+/**
+ * @brief 消耗既有确认，或创建确认框并捕获本次时钟代次。
+ * @param[in] action 返回、恢复自动或应用手动时间动作。
+ * @return 已确认返回 1；等待新确认或创建失败返回 0。
+ * @note 紧凑布局拒绝时保留原模态可用，页面仍拥有确认及动作的业务身份。
+ */
 static uint8_t product_ui_time_confirm(uint8_t action)
 {
+    lv_obj_t *dialog;
     const char *title = action == TIME_BACK ? "放弃修改" : action == TIME_AUTO ? "恢复自动校时" : "设置手动时间";
     const char *message = action == TIME_BACK ? "未应用的日期与时间将被放弃。" : action == TIME_AUTO ?
         "将等待可信网络时间，重新校准本机时钟。" : "仅本次开机有效，重启需要再次校时。确认后从新时间安排后续闹钟，秒数设为 00。";
     if (s_time.confirmed) { s_time.confirmed = 0U; return 1U; }
     product_ui_time_cancel_input(); s_time.confirm_revision = s_time.clock.revision;
-    if (!product_ui_confirm_dialog_show(title, message, product_ui_time_confirmed, (void *)(uintptr_t)action))
+    if (action == TIME_BACK)
+        dialog = product_ui_danger_dialog_show(title, message, product_ui_time_confirmed, (void *)(uintptr_t)action);
+    else dialog = product_ui_confirm_dialog_show(title, message, product_ui_time_confirmed, (void *)(uintptr_t)action);
+    /* 设置页选择共用紧凑布局；布局拒绝时原模态仍可使用，
+     * 确认及动作的业务所有权仍由本页持有。 */
+    if (dialog != NULL)
+        (void)product_ui_dialog_compact(dialog);
+    else
         product_ui_toast_show("无法显示确认，请重试", 1600U);
     return 0U;
 }
 
+/**
+ * @brief 在页面周期消费动作，编辑草稿或按确认时的时钟代次提交校正。
+ * @param[in] action 页面动作编号。
+ * @param[in] value 滚轮选项序号，年月日按字段映射。
+ * @note 年月变化时钳制日期到当月最大值；校时失败保留草稿，不把确认后的外部时钟变化覆盖掉。
+ */
 static void product_ui_time_apply(uint8_t action, uint16_t value)
 {
     d_err_t result = D_OK;
@@ -134,9 +191,13 @@ static void product_ui_time_apply(uint8_t action, uint16_t value)
     s_time.dirty = 1U;
 }
 
+/**
+ * @brief 创建时间详情框架、五个滚轮及自动校时按钮，以有效时钟或默认日期初始化草稿。
+ */
 int product_ui_settings_time_page_create(lv_obj_t *parent)
 {
     static const product_ui_page_spec_t spec = {.title = "日期与时间", .back_title = "返回", .show_back = 1U,
+        .role = PRODUCT_UI_PAGE_ROLE_SETTINGS,
         .nav_back_cb = product_ui_time_back_cb, .nav_action_text = "应用", .nav_action_cb = product_ui_time_save_cb};
     static const char *const captions[5] = {"年", "月", "日", "小时", "分钟"};
     const char *options[5] = {product_ui_time_years, product_ui_time_months, product_ui_time_day_options(31U), product_ui_time_hours, product_ui_time_minutes};
@@ -171,7 +232,8 @@ int product_ui_settings_time_page_create(lv_obj_t *parent)
         if (!s_time.rollers[index]) goto fail;
         lv_obj_set_pos(s_time.rollers[index], x, y + 24);
     }
-    s_time.auto_button = product_ui_time_button(s_time.root, "恢复自动校时", product_ui_time_auto_cb, NULL);
+    s_time.auto_button = product_ui_time_button_create(s_time.root, &(product_ui_time_button_spec_t){
+        .text = "恢复自动校时", .role = PRODUCT_UI_BUTTON_SECONDARY, .callback = product_ui_time_auto_cb});
     label = product_ui_time_label(s_time.root, "手动范围 2024—2099\n手动时间仅本次开机有效\n万年历查询范围不受影响", PRODUCT_UI_STYLE_CAPTION);
     if (!s_time.auto_button || !label) goto fail;
     lv_obj_set_size(s_time.auto_button, 296, 36); lv_obj_set_pos(s_time.auto_button, 0, 334);
@@ -184,6 +246,10 @@ fail:
     return -1;
 }
 
+/**
+ * @brief 推进公共 UI，读取时钟并消费单个排队动作，再刷新草稿投影。
+ * @param[in] elapsed_ms 本轮页面毫秒数。
+ */
 static void product_ui_settings_time_page_update(uint32_t elapsed_ms)
 {
     uint8_t action;
@@ -198,6 +264,9 @@ static void product_ui_settings_time_page_update(uint32_t elapsed_ms)
     product_ui_time_form_refresh();
 }
 
+/**
+ * @brief 取消输入代次及滚轮，删除编辑子树并清空页面状态。
+ */
 static void product_ui_settings_time_page_destroy(void)
 {
     product_ui_time_cancel_input();
@@ -209,6 +278,11 @@ static void product_ui_settings_time_page_destroy(void)
 static const page_ops_t s_time_ops = {.create = product_ui_settings_time_page_create,
     .destroy = product_ui_settings_time_page_destroy, .update = product_ui_settings_time_page_update, .flags = PAGE_FLAG_NO_GESTURE};
 static page_desc_t s_time_desc = {.name = "日期与时间", .ops = &s_time_ops};
+/**
+ * @brief 注册静态时间详情页面描述。
+ * @param[in] page_type 模块装配分配的页面类型。
+ * @return 原样返回页面管理器注册结果。
+ */
 static int product_ui_settings_time_register_page(int page_type)
 { s_time_desc.page_type = page_type; return page_manager_register(&s_time_desc); }
 D_UI_MODULE_DEFINE(product_settings_time, "日期与时间", LV_SYMBOL_SETTINGS, product_ui_settings_time_register_page, NULL);

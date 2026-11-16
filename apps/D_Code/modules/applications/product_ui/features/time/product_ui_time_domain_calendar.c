@@ -1,11 +1,13 @@
-/**
- * @file product_ui_time_domain_calendar.c
- * @brief Gregorian validation and calendar math for the Product UI time domain.
- */
+/** @file product_ui_time_domain_calendar.c @brief 时间域的公历运算与结构校验，不依赖进程时区或 time_t。 */
 
 #include "modules/applications/product_ui/features/time/product_ui_time_domain_internal.h"
 #include <stddef.h>
 
+/**
+ * @brief 按四百年、百年及四年规则判断公历闰年。
+ * @param[in] year 待判断的公历年份。
+ * @return 闰年返回 1，平年返回 0。
+ */
 static uint8_t product_ui_time_is_leap_year(uint16_t year)
 {
     if ((year % 400U) == 0U) {
@@ -17,6 +19,9 @@ static uint8_t product_ui_time_is_leap_year(uint16_t year)
     return ((year % 4U) == 0U) ? 1U : 0U;
 }
 
+/**
+ * @brief 按公历闰年规则取得月份天数。
+ */
 uint8_t product_ui_time_days_in_month(uint16_t year, uint8_t month)
 {
     static const uint8_t days[] = {
@@ -33,6 +38,9 @@ uint8_t product_ui_time_days_in_month(uint16_t year, uint8_t month)
     return days[month - 1U];
 }
 
+/**
+ * @brief 把非负 UTC epoch 秒转换为固定 UTC+8 公历日期时间。
+ */
 product_ui_time_result_e product_ui_time_utc_to_beijing(
     int64_t utc_seconds, product_ui_datetime_t *out)
 {
@@ -43,7 +51,7 @@ product_ui_time_result_e product_ui_time_utc_to_beijing(
     uint16_t year_days;
     uint8_t month_days;
 
-    /* Bound before adding the offset, including INT64_MAX failure samples. */
+    /* 加时区偏移前先限制范围，包含 INT64_MAX 等失败输入。 */
     if ((out == NULL) || (utc_seconds < 0) || (utc_seconds > 253402271999LL)) {
         return PRODUCT_UI_TIME_ERR_INVALID_ARGUMENT;
     }
@@ -74,6 +82,9 @@ product_ui_time_result_e product_ui_time_utc_to_beijing(
     return PRODUCT_UI_TIME_OK;
 }
 
+/**
+ * @brief 把合法北京时间转换为非负 UTC epoch 秒。
+ */
 product_ui_time_result_e product_ui_time_beijing_to_utc(
     const product_ui_datetime_t *value, int64_t *utc_seconds)
 {
@@ -94,6 +105,11 @@ product_ui_time_result_e product_ui_time_beijing_to_utc(
     return PRODUCT_UI_TIME_OK;
 }
 
+/**
+ * @brief 验证非空公历日期的年份、月份及当月日数。
+ * @param[in] date 借用的公历日期。
+ * @return 合法返回 TIME_OK，否则为 INVALID_ARGUMENT。
+ */
 static product_ui_time_result_e product_ui_time_validate_date(
     const product_ui_date_t *date)
 {
@@ -110,6 +126,9 @@ static product_ui_time_result_e product_ui_time_validate_date(
     return PRODUCT_UI_TIME_OK;
 }
 
+/**
+ * @brief 校验完整公历日期及二十四小时制时分秒。
+ */
 product_ui_time_result_e product_ui_time_domain_validate_datetime(
     const product_ui_datetime_t *value)
 {
@@ -123,6 +142,9 @@ product_ui_time_result_e product_ui_time_domain_validate_datetime(
     return PRODUCT_UI_TIME_OK;
 }
 
+/**
+ * @brief 按日期到秒的顺序比较两个已验证值。
+ */
 int product_ui_time_compare_datetime(const product_ui_datetime_t *left,
                                      const product_ui_datetime_t *right)
 {
@@ -147,6 +169,9 @@ int product_ui_time_compare_datetime(const product_ui_datetime_t *left,
     return 0;
 }
 
+/**
+ * @brief 将合法公历日期原地推进一天，处理月末及闰年。
+ */
 product_ui_time_result_e product_ui_time_add_one_day(product_ui_date_t *date)
 {
     uint8_t max_day;
@@ -174,6 +199,9 @@ product_ui_time_result_e product_ui_time_add_one_day(product_ui_date_t *date)
     return PRODUCT_UI_TIME_OK;
 }
 
+/**
+ * @brief 计算已验证公历日期的星期编号。
+ */
 uint8_t product_ui_time_weekday(const product_ui_date_t *date)
 {
     static const uint8_t offsets[] = {
@@ -189,6 +217,9 @@ uint8_t product_ui_time_weekday(const product_ui_date_t *date)
                       date->day) % 7U);
 }
 
+/**
+ * @brief 校验闹钟启用位、时分、周期掩码及相应计划约束。
+ */
 product_ui_time_result_e product_ui_time_domain_validate_alarm(
     const product_ui_alarm_t *alarm)
 {
@@ -207,7 +238,7 @@ product_ui_time_result_e product_ui_time_domain_validate_alarm(
         return PRODUCT_UI_TIME_OK;
     }
     if (alarm->schedule == PRODUCT_UI_ALARM_SCHEDULE_WEEKLY) {
-        /* Old weekly records can contain an unused once-date. Keep accepting it. */
+        /* 旧每周记录可能留有未使用的单次日期；继续兼容，不用该字段判无效。 */
         return alarm->repeat_mask && !alarm->alternate_mask &&
             alarm->routine_template <= PRODUCT_UI_ALARM_ROUTINE_SINGLE_REST ?
             PRODUCT_UI_TIME_OK : PRODUCT_UI_TIME_ERR_INVALID_ARGUMENT;
@@ -222,6 +253,9 @@ product_ui_time_result_e product_ui_time_domain_validate_alarm(
     return PRODUCT_UI_TIME_ERR_INVALID_ARGUMENT;
 }
 
+/**
+ * @brief 校验日程布尔位、开始结束日期时间及先后关系。
+ */
 product_ui_time_result_e product_ui_time_domain_validate_event(
     const product_ui_calendar_event_t *event)
 {

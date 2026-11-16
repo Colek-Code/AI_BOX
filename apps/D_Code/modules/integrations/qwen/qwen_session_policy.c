@@ -1,7 +1,10 @@
-/** @file qwen_session_policy.c @brief Pure policy, serialized by the service. */
+/** @file qwen_session_policy.c @brief 由服务串行访问的纯会话策略，不操作 SDK 资源。 */
 #include "qwen_session_policy.h"
 #include <string.h>
 
+/**
+ * @brief 清空并初始化纯会话策略；完整合同见 qwen_session_policy.h。
+ */
 void qwen_session_policy_init(qwen_session_policy_t *policy, uint8_t automatic)
 {
     memset(policy, 0, sizeof(*policy));
@@ -9,6 +12,9 @@ void qwen_session_policy_init(qwen_session_policy_t *policy, uint8_t automatic)
     policy->automatic = automatic;
 }
 
+/**
+ * @brief 请求后台清理并使旧认证与连接事实失效；完整合同见 qwen_session_policy.h。
+ */
 void qwen_session_policy_cleanup(qwen_session_policy_t *policy, uint8_t preserve)
 {
     if (!preserve && policy->requested) {
@@ -24,6 +30,9 @@ void qwen_session_policy_cleanup(qwen_session_policy_t *policy, uint8_t preserve
     policy->revision++;
 }
 
+/**
+ * @brief 更新网络事实，离线时请求清理，自动模式恢复时保留启动意图；完整合同见 qwen_session_policy.h。
+ */
 void qwen_session_policy_network(qwen_session_policy_t *policy, uint8_t ready)
 {
     if (policy->wifi_ready == ready) return;
@@ -37,6 +46,9 @@ void qwen_session_policy_network(qwen_session_policy_t *policy, uint8_t ready)
     }
 }
 
+/**
+ * @brief 更新运行资格，资格撤销时清除意图并申请清理；完整合同见 qwen_session_policy.h。
+ */
 void qwen_session_policy_runtime(qwen_session_policy_t *policy, uint8_t allowed)
 {
     if (policy->runtime_allowed == allowed) return;
@@ -45,6 +57,9 @@ void qwen_session_policy_runtime(qwen_session_policy_t *policy, uint8_t allowed)
     if (!allowed) qwen_session_policy_cleanup(policy, 0U);
 }
 
+/**
+ * @brief 在网络、运行资格和清理条件满足时记录启动意图；完整合同见 qwen_session_policy.h。
+ */
 d_err_t qwen_session_policy_start(qwen_session_policy_t *policy)
 {
     if (!policy->initialized || !policy->wifi_ready || !policy->runtime_allowed)
@@ -59,6 +74,9 @@ d_err_t qwen_session_policy_start(qwen_session_policy_t *policy)
     return D_OK;
 }
 
+/**
+ * @brief 撤销启动意图并记录后台清理需求；完整合同见 qwen_session_policy.h。
+ */
 d_err_t qwen_session_policy_stop(qwen_session_policy_t *policy)
 {
     if (!policy->initialized) return D_ERR_NOT_READY;
@@ -69,6 +87,9 @@ d_err_t qwen_session_policy_stop(qwen_session_policy_t *policy)
     return D_OK;
 }
 
+/**
+ * @brief 记录一次后台清理结果，只有 D_OK 才清除待清理状态；完整合同见 qwen_session_policy.h。
+ */
 void qwen_session_policy_set_cleanup_result(qwen_session_policy_t *policy,
                                            d_err_t result, uint8_t fatal)
 {
@@ -81,12 +102,18 @@ void qwen_session_policy_set_cleanup_result(qwen_session_policy_t *policy,
     policy->revision++;
 }
 
+/**
+ * @brief 保存启动错误并撤销会话意图、申请清理；完整合同见 qwen_session_policy.h。
+ */
 void qwen_session_policy_failed(qwen_session_policy_t *policy, d_err_t error)
 {
     policy->start_error = error;
     qwen_session_policy_cleanup(policy, 0U);
 }
 
+/**
+ * @brief 在无清理和致命故障时更新认证就绪状态；完整合同见 qwen_session_policy.h。
+ */
 void qwen_session_policy_auth(qwen_session_policy_t *policy, uint8_t ready)
 {
     if (policy->cleanup_pending || policy->fatal) return;
@@ -97,6 +124,9 @@ void qwen_session_policy_auth(qwen_session_policy_t *policy, uint8_t ready)
     }
 }
 
+/**
+ * @brief 仅在当前策略允许时发布已连接事实；完整合同见 qwen_session_policy.h。
+ */
 void qwen_session_policy_connected(qwen_session_policy_t *policy, uint8_t connected)
 {
     connected = connected && qwen_session_policy_allows(policy);
@@ -106,12 +136,18 @@ void qwen_session_policy_connected(qwen_session_policy_t *policy, uint8_t connec
     }
 }
 
+/**
+ * @brief 检查初始化、网络、运行资格、请求和清理条件是否允许业务；完整合同见 qwen_session_policy.h。
+ */
 uint8_t qwen_session_policy_allows(const qwen_session_policy_t *policy)
 {
     return policy->initialized && policy->wifi_ready && policy->runtime_allowed &&
            policy->requested && !policy->cleanup_pending && !policy->fatal;
 }
 
+/**
+ * @brief 由纯策略生成阶段、错误与可操作性快照；完整合同见 qwen_session_policy.h。
+ */
 void qwen_session_policy_snapshot(const qwen_session_policy_t *policy,
                                  qwen_session_snapshot_t *snapshot)
 {

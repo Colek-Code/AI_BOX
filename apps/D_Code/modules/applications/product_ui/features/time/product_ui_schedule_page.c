@@ -1,7 +1,4 @@
-/**
- * @file product_ui_schedule_page.c
- * @brief Shared event snapshot driven schedule page.
- */
+/** @file product_ui_schedule_page.c @brief 共享日程值驱动的有限列表，页面只保存排序及视口副本。 */
 
 #include "config/app_config.h"
 
@@ -39,8 +36,14 @@ typedef struct {
 } product_ui_schedule_controller_t;
 
 static product_ui_schedule_view_t s_schedule_view;
+static product_ui_row_text_cache_t s_schedule_text[PRODUCT_UI_VIRTUAL_LIST_SLOT_COUNT];
 static product_ui_schedule_controller_t s_schedule_controller;
 
+/**
+ * @brief 把开始日期及完成状态写成有限日程副标题。
+ * @param[out] text 至少二十八字节的输出缓冲。
+ * @param[in] event 调用链保证非空且日期已验证的事件副本。
+ */
 static void product_ui_schedule_format_subtitle(
     char text[28], const product_ui_calendar_event_t *event)
 {
@@ -61,6 +64,12 @@ static void product_ui_schedule_format_subtitle(
     strcpy(&text[11], state);
 }
 
+/**
+ * @brief 按年月日时分秒顺序比较两个已验证时间。
+ * @param[in] left 有效且非空的左值。
+ * @param[in] right 有效且非空的右值。
+ * @return 左值早为 -1，相同为 0，晚为 1。
+ */
 static int product_ui_schedule_datetime_compare(
     const product_ui_datetime_t *left, const product_ui_datetime_t *right)
 {
@@ -85,6 +94,11 @@ static int product_ui_schedule_datetime_compare(
     return left->time.second < right->time.second ? -1 : 1;
 }
 
+/**
+ * @brief 在 UI 串行域读取事件，按开始时间稳定插入构建逻辑下标顺序。
+ * @return 全部记录读取成功返回 0，任一读取失败返回 -1。
+ * @note 失败可能保留部分排序暂存，调用方不得把它提交为新呈现完成。
+ */
 static int product_ui_schedule_order_build(void)
 {
     product_ui_calendar_event_t candidate;
@@ -119,6 +133,15 @@ static int product_ui_schedule_order_build(void)
     return 0;
 }
 
+/**
+ * @brief 按排序下标复制事件到固定槽，输出绑定稳定事件编号的切换行。
+ * @param[in] item_index 排序列表中的逻辑下标。
+ * @param[in] slot_index 固定复用槽下标。
+ * @param[out] spec 接收借用槽内事件及副标题的行规格。
+ * @param[in,out] user_data 页面视图状态，槽内副本会更新。
+ * @return 成功返回 0，页面、下标或记录读取失败返回 -1。
+ * @note 动作由虚拟列表注入并校验，显示槽不代替事件身份。
+ */
 static int product_ui_schedule_row_bind(uint16_t item_index,
                                         uint8_t slot_index,
                                         product_ui_row_spec_t *spec,
@@ -148,6 +171,7 @@ static int product_ui_schedule_row_bind(uint16_t item_index,
                                         event);
     *spec = (product_ui_row_spec_t) {
         .item_key = event->id,
+        .appearance = PRODUCT_UI_ROW_APPEARANCE_INSET,
         .item = row,
         .subtitle = view->slot_subtitles[slot_index],
         /* PRODUCT_UI_VIRTUAL_ACTION_INJECTED */
@@ -159,6 +183,11 @@ static int product_ui_schedule_row_bind(uint16_t item_index,
     return 0;
 }
 
+/**
+ * @brief 重新读取对应事件并按稳定记录编号同步切换完成位，标记内容待刷新。
+ * @param[in] item_index 排序列表逻辑下标。
+ * @param[in,out] user_data 持有排序及刷新标志的页面状态。
+ */
 static void product_ui_schedule_row_action(uint16_t item_index,
                                            void *user_data)
 {
@@ -185,6 +214,11 @@ static void product_ui_schedule_row_action(uint16_t item_index,
     s_schedule_view.refresh_pending = 1U;
 }
 
+/**
+ * @brief 排序完成后创建有限列表与启动期有效说明，恢复保存视口。
+ * @param[in,out] content 列表父容器。
+ * @return 完整创建及刷新返回 0，排序或任一步失败返回 -1。
+ */
 static int product_ui_schedule_add_rows(lv_obj_t *content)
 {
     product_ui_virtual_list_spec_t spec = {
@@ -192,6 +226,7 @@ static int product_ui_schedule_add_rows(lv_obj_t *content)
         .bind_cb = product_ui_schedule_row_bind,
         .action_cb = product_ui_schedule_row_action,
         .user_data = &s_schedule_view,
+        .text_caches = s_schedule_text,
     };
 
     if (product_ui_schedule_order_build() != 0) {
@@ -212,6 +247,12 @@ static int product_ui_schedule_add_rows(lv_obj_t *content)
     return 0;
 }
 
+/**
+ * @brief 只在内容呈现成功时保存总内容及服务代次，并记录列表是否完整。
+ * @param[in] result 呈现结果，零成功。
+ * @param[in] service_revision 对应 EVENT 服务代次。
+ * @return 原样返回 result。
+ */
 static int product_ui_schedule_render_commit(int result,
                                              uint32_t service_revision)
 {
@@ -224,6 +265,11 @@ static int product_ui_schedule_render_commit(int result,
     return result;
 }
 
+/**
+ * @brief 按 EVENT 就绪及总内容代次复用列表或重建反馈，失败不提交新呈现身份。
+ * @param[in] force 非零跳过相同代次优化并主动重呈现。
+ * @return 无需变更或完整呈现返回 0，内容无效、读取／排序或创建失败返回 -1。
+ */
 static int product_ui_schedule_render(uint8_t force)
 {
     product_ui_time_result_e status;
@@ -244,6 +290,7 @@ static int product_ui_schedule_render(uint8_t force)
         }
         s_schedule_view.is_list_ready = 0U;
         lv_obj_clean(s_schedule_view.page.content);
+        memset(s_schedule_text, 0, sizeof(s_schedule_text));
         memset(&s_schedule_view.list, 0, sizeof(s_schedule_view.list));
         s_schedule_view.refresh_pending = 0U;
         return product_ui_schedule_render_commit(
@@ -280,6 +327,7 @@ static int product_ui_schedule_render(uint8_t force)
     }
     s_schedule_view.is_list_ready = 0U;
     lv_obj_clean(s_schedule_view.page.content);
+    memset(s_schedule_text, 0, sizeof(s_schedule_text));
     memset(&s_schedule_view.list, 0, sizeof(s_schedule_view.list));
     s_schedule_view.refresh_pending = 0U;
     if (status != PRODUCT_UI_TIME_OK) {
@@ -299,6 +347,9 @@ static int product_ui_schedule_render(uint8_t force)
         service.revision);
 }
 
+/**
+ * @brief 创建日程框架并从真实事件服务呈现排序列表或反馈。
+ */
 int product_ui_schedule_page_create(lv_obj_t *parent)
 {
     static const product_ui_page_spec_t spec = {
@@ -325,11 +376,17 @@ int product_ui_schedule_page_create(lv_obj_t *parent)
     return product_ui_schedule_render(1U);
 }
 
+/**
+ * @brief 进入页面时强制重新呈现真实事件状态。
+ */
 static void product_ui_schedule_page_enter(void)
 {
     product_ui_schedule_render(1U);
 }
 
+/**
+ * @brief 保存可见逻辑行，再解除页面框架及所有显示副本。
+ */
 static void product_ui_schedule_page_destroy(void)
 {
     if (s_schedule_view.list.root != NULL) {
@@ -337,9 +394,14 @@ static void product_ui_schedule_page_destroy(void)
             product_ui_virtual_list_first_visible(&s_schedule_view.list);
     }
     product_ui_page_view_reset(&s_schedule_view.page);
+    memset(s_schedule_text, 0, sizeof(s_schedule_text));
     memset(&s_schedule_view, 0, sizeof(s_schedule_view));
 }
 
+/**
+ * @brief 推进公共 UI 和列表，优先处理用户变更刷新，再按周期检查域变化。
+ * @param[in] elapsed_ms 本轮页面经过的毫秒数。
+ */
 static void product_ui_schedule_page_update(uint32_t elapsed_ms)
 {
     product_ui_process(elapsed_ms);
@@ -369,6 +431,9 @@ static page_desc_t s_product_ui_schedule_desc = {
     .ops = &s_product_ui_schedule_ops,
 };
 
+/**
+ * @brief 注册静态日程表页面描述。
+ */
 int product_ui_schedule_register_page(int page_type)
 {
     s_product_ui_schedule_desc.page_type = page_type;

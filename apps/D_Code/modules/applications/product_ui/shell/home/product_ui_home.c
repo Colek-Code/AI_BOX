@@ -1,7 +1,4 @@
-/**
- * @file product_ui_home.c
- * @brief Product UI home grid and module navigation.
- */
+/** @file product_ui_home.c @brief Product UI 首页壁纸、有限应用槽、横向分页及统一导航。 */
 
 #include "config/app_config.h"
 
@@ -29,6 +26,7 @@
 #define PRODUCT_UI_HOME_COMMIT_PX        80
 #define PRODUCT_UI_HOME_FLICK_PX         16
 #define PRODUCT_UI_HOME_FLICK_SPEED     450
+#define PRODUCT_UI_HOME_FLICK_SNAP_MIN_MS 68U
 #define PRODUCT_UI_HOME_DOT_SIZE           6
 #define PRODUCT_UI_HOME_DOTS_Y           190
 
@@ -40,6 +38,10 @@ typedef struct {
 
 static product_ui_home_scene_t s_home_scene;
 
+/**
+ * @brief 删除已建壁纸场景并清空其静态引用。
+ * @return 清理后返回 -1，供创建失败路径透传。
+ */
 static int product_ui_home_scene_fail(void)
 {
     if (s_home_scene.root != NULL) {
@@ -49,12 +51,21 @@ static int product_ui_home_scene_fail(void)
     return -1;
 }
 
+/**
+ * @brief 场景根删除时清空背景对象及已绑定壁纸身份。
+ * @param[in] event 场景 DELETE 事件，当前未读取载荷。
+ */
 static void product_ui_home_scene_delete_cb(lv_event_t *event)
 {
     (void)event;
     memset(&s_home_scene, 0, sizeof(s_home_scene));
 }
 
+/**
+ * @brief 创建静态确认壁纸背景，已有场景时复用当前实例。
+ * @param[in,out] parent 首页根容器。
+ * @return 成功或已有场景返回 0，父对象、资源或图像创建失败返回 -1 并清局部场景。
+ */
 static int product_ui_home_scene_create(lv_obj_t *parent)
 {
     product_ui_appearance_snapshot_t appearance;
@@ -98,6 +109,9 @@ static int product_ui_home_scene_create(lv_obj_t *parent)
     return 0;
 }
 
+/**
+ * @brief 把外观服务最新确认的壁纸应用到现有背景，未变时不重绑。
+ */
 void product_ui_home_enter(void)
 {
     product_ui_appearance_snapshot_t appearance;
@@ -118,7 +132,7 @@ typedef struct {
     const d_ui_module_t *module;
 } product_ui_home_hotspot_t;
 
-/* 3x2 grid: larger plates for HD color icons (320 landscape, below STATUS). */
+/* 状态栏下方的三列两行网格，为横屏彩色图标保留较大画布。 */
 static const int32_t s_home_columns[] = {80, 80, 80, LV_GRID_TEMPLATE_LAST};
 static const int32_t s_home_rows[] = {80, 80, LV_GRID_TEMPLATE_LAST};
 
@@ -131,6 +145,8 @@ static const int32_t s_home_rows[] = {80, 80, LV_GRID_TEMPLATE_LAST};
 
 static product_ui_page_view_t s_home_page_view;
 static product_ui_home_hotspot_t s_home_slots[PRODUCT_UI_HOME_PAGE_COUNT][PRODUCT_UI_HOME_SLOT_COUNT];
+/* 仅轮询两个提醒标题，槽重新绑定后不能跨身份复用有效文字缓存。 */
+static product_ui_label_cache_t s_home_notice_text[2];
 static lv_obj_t *s_home_layers[PRODUCT_UI_HOME_PAGE_COUNT];
 static lv_obj_t *s_home_page_dots;
 static uint8_t s_home_page_count;
@@ -150,12 +166,21 @@ static struct {
     uint8_t has_two_layers;
 } s_home_pager;
 
+/**
+ * @brief 清除对象默认样式及滚动能力。
+ * @param[in,out] obj 调用链保证有效的对象。
+ */
 static void product_ui_home_clean_obj(lv_obj_t *obj)
 {
     lv_obj_remove_style_all(obj);
     lv_obj_clear_flag(obj, LV_OBJ_FLAG_SCROLLABLE);
 }
 
+/**
+ * @brief 分页手势未捕获时按槽内静态模块身份执行统一导航。
+ * @param[in] event 应用槽点击事件，用户数据借用槽状态。
+ * @note 拖动之后的旧点击直接忽略；导航失败只提示，不创建替代模块。
+ */
 static void product_ui_home_app_cb(lv_event_t *event)
 {
     product_ui_home_hotspot_t *slot;
@@ -178,6 +203,9 @@ static void product_ui_home_app_cb(lv_event_t *event)
     }
 }
 
+/**
+ * @brief 按已经收敛的当前页更新分页点透明度。
+ */
 static void product_ui_home_update_page_dots(void)
 {
     lv_obj_t *dot;
@@ -195,7 +223,12 @@ static void product_ui_home_update_page_dots(void)
     }
 }
 
-/* Returns 0 and writes *out_id, or -1 when no color art (never alias settings). */
+/**
+ * @brief 显式把单色模块图标身份映射到首页彩色资源编号。
+ * @param[in] icon_id 应用目录提供的图标身份。
+ * @param[out] out_id 成功接收彩色资源编号，失败不改。
+ * @return 找到并写入为 0；空输出或未映射为 -1，不回退成设置图标。
+ */
 static int product_ui_home_color_icon_id(product_ui_icon_id_t icon_id,
                                          product_ui_color_icon_id_t *out_id)
 {
@@ -239,6 +272,14 @@ static int product_ui_home_color_icon_id(product_ui_icon_id_t icon_id,
     }
 }
 
+/**
+ * @brief 按首页顺序键读取静态应用并绑定有限槽，空位使用独立空槽图像。
+ * @param[in] layer_index 调用方保证小于两层的实际图层下标。
+ * @param[in] slot_index 当前层六槽下标。
+ * @param[in] page_index 该层当前应代表的逻辑首页页号。
+ * @return 完整绑定为 0，槽、目录、描述符或资源不符为 -1。
+ * @note 重绑先清提醒文字缓存，不跨应用身份复用已确认标签请求。
+ */
 static int product_ui_home_bind_slot(uint8_t layer_index, uint8_t slot_index, uint8_t page_index)
 {
     product_ui_home_hotspot_t *slot;
@@ -250,6 +291,7 @@ static int product_ui_home_bind_slot(uint8_t layer_index, uint8_t slot_index, ui
         return -1;
     }
     slot = &s_home_slots[layer_index][slot_index];
+    memset(s_home_notice_text, 0, sizeof(s_home_notice_text));
     catalog_index = (uint8_t)(page_index * PRODUCT_UI_HOME_SLOT_COUNT + slot_index);
     slot->app = NULL;
     slot->module = NULL;
@@ -270,6 +312,9 @@ static int product_ui_home_bind_slot(uint8_t layer_index, uint8_t slot_index, ui
     return product_ui_app_slot_bind(&slot->view, &spec);
 }
 
+/**
+ * @brief 撤销两层全部应用槽的完整按压资格及按下外观。
+ */
 static void product_ui_home_cancel_slots(void)
 {
     uint8_t page, index;
@@ -280,6 +325,12 @@ static void product_ui_home_cancel_slots(void)
     }
 }
 
+/**
+ * @brief 按动画位移更新实际图层请求坐标，仅变化时请求组合帧。
+ * @param[in] context 动画上下文，当前未使用。
+ * @param[in] offset 分页整体横向像素位移。
+ * @note 比较目标局部样式而非可能延后布局的坐标；单层回退保持图层在零位。
+ */
 static void product_ui_home_apply_offset(void *context, int32_t offset)
 {
     uint8_t page;
@@ -289,7 +340,7 @@ static void product_ui_home_apply_offset(void *context, int32_t offset)
         if (s_home_layers[page] != NULL) {
             int32_t target_x = s_home_pager.has_two_layers ?
                 offset + page * PRODUCT_UI_SCREEN_W : 0;
-            /* Layout may be deferred; compare the requested position, not stale coordinates. */
+            /* 布局可能延后，比较请求位置而不是过期坐标。 */
             if (lv_obj_get_style_x(s_home_layers[page], LV_PART_MAIN) != target_x) {
                 lv_obj_set_x(s_home_layers[page], target_x);
                 is_changed = 1U;
@@ -299,6 +350,10 @@ static void product_ui_home_apply_offset(void *context, int32_t offset)
     if (is_changed) d_screen_request_composed_frame();
 }
 
+/**
+ * @brief 终态确认当前页，单层回退重绑该逻辑页，再同步分页点和诊断观察请求。
+ * @param[in] context 动画完成上下文，当前未使用。
+ */
 static void product_ui_home_page_settled(void *context)
 {
     uint8_t index;
@@ -311,28 +366,45 @@ static void product_ui_home_page_settled(void *context)
         }
     }
     product_ui_home_update_page_dots();
-    /* Include the final dot and single-layer fallback rebind in the composed frame. */
+    /* 最终分页点及单层回退重绑也须进入组合帧。 */
     if (is_page_changed) d_screen_request_composed_frame();
     product_ui_visual_capture_request(
         s_home_current_page == 0U ? "HM-00" : "HM-02");
 }
 
-static void product_ui_home_switch_page(uint8_t page_index, const char *source)
+/**
+ * @brief 验证目标页并按距离及同向释放速度选择有限吸附时长。
+ * @param[in] page_index 有效目标首页页号。
+ * @param[in] release_velocity 释放时横向像素每秒，负值向左。
+ * @note 先取消槽手势；单层回退或减少动态效果沿用共用终态路径，不改变显示刷新节奏。
+ */
+static void product_ui_home_switch_page(uint8_t page_index, int32_t release_velocity)
 {
-    int32_t target, distance;
-    uint32_t duration;
-    (void)source;
+    int32_t target, distance, delta;
+    uint32_t duration, minimum = PRODUCT_UI_MOTION_ENTER_MS;
     if (page_index >= s_home_page_count) return;
     product_ui_home_cancel_slots();
     s_home_pager.target_page = page_index;
     target = -(int32_t)page_index * PRODUCT_UI_SCREEN_W;
-    distance = LV_ABS(target - s_home_pager.motion.current);
+    delta = target - s_home_pager.motion.current;
+    distance = LV_ABS(delta);
+    duration = (uint32_t)distance;
+    if (((delta < 0 && release_velocity < 0) || (delta > 0 && release_velocity > 0)) &&
+        LV_ABS(release_velocity) >= PRODUCT_UI_HOME_FLICK_SPEED) {
+        /* 指针坐标限定距离及速度；让接近终点的快速甩动及时收敛，
+         * 不改变显示节奏及慢拖策略。 */
+        duration = (uint32_t)distance * 1000U / (uint32_t)LV_ABS(release_velocity);
+        minimum = PRODUCT_UI_HOME_FLICK_SNAP_MIN_MS;
+    }
     duration = s_home_pager.has_two_layers ?
-        LV_CLAMP(PRODUCT_UI_MOTION_ENTER_MS, (uint32_t)distance,
-                 PRODUCT_UI_MOTION_SNAP_MS) : 0U;
+        LV_CLAMP(minimum, duration, PRODUCT_UI_MOTION_SNAP_MS) : 0U;
     product_ui_motion_start(&s_home_pager.motion, target, duration);
 }
 
+/**
+ * @brief 未捕获拖动时，把分页点下标转换为显式切页。
+ * @param[in] event 分页点点击事件。
+ */
 static void product_ui_home_dot_cb(lv_event_t *event)
 {
     lv_obj_t *dot;
@@ -342,10 +414,15 @@ static void product_ui_home_dot_cb(lv_event_t *event)
     index = lv_obj_get_index(dot);
     if (index >= 0 && !s_home_pager.is_captured) {
         s_home_pager.is_tracking = 0U;
-        product_ui_home_switch_page((uint8_t)index, "dot");
+        product_ui_home_switch_page((uint8_t)index, 0);
     }
 }
 
+/**
+ * @brief 把分页范围外的拖动收敛为最大十二像素弹性偏移。
+ * @param[in] offset 按下初始位移加当前指针差。
+ * @return 正常区间原值，越界区间按三分之一并限制弹性距离后的值。
+ */
 static int32_t product_ui_home_drag_offset(int32_t offset)
 {
     int32_t minimum = -(int32_t)(s_home_page_count - 1U) * PRODUCT_UI_SCREEN_W;
@@ -354,6 +431,11 @@ static int32_t product_ui_home_drag_offset(int32_t offset)
     return offset;
 }
 
+/**
+ * @brief 跟踪单个横向分页手势，捕获后取消应用点击，释放按速度或距离决定目标。
+ * @param[in] event 按下、移动、松手、丢失或输入重置事件。
+ * @note 丢失／重置回到按下起始页，旧点击被标记抑制；慢拖和快速近端甩动分别遵守既有时长门限。
+ */
 static void product_ui_home_swipe_cb(lv_event_t *event)
 {
     lv_event_code_t code = lv_event_get_code(event);
@@ -383,7 +465,7 @@ static void product_ui_home_swipe_cb(lv_event_t *event)
     if (code == LV_EVENT_PRESS_LOST || code == LV_EVENT_INDEV_RESET) {
         s_home_pager.is_tracking = 0U;
         s_home_dragged = 1U;
-        product_ui_home_switch_page(s_home_pager.start_page, "cancel");
+        product_ui_home_switch_page(s_home_pager.start_page, 0);
         return;
     }
     if ((code != LV_EVENT_PRESSING && code != LV_EVENT_RELEASED) || indev == NULL) return;
@@ -406,8 +488,10 @@ static void product_ui_home_swipe_cb(lv_event_t *event)
         product_ui_home_cancel_slots();
     }
     if (s_home_pager.is_captured) {
-        product_ui_motion_set(&s_home_pager.motion,
-            product_ui_home_drag_offset(s_home_pager.start_offset + dx));
+        displacement = product_ui_home_drag_offset(s_home_pager.start_offset + dx);
+        if (s_home_pager.motion.is_active || displacement != s_home_pager.motion.current) {
+            product_ui_motion_set(&s_home_pager.motion, displacement);
+        }
     }
     if (code != LV_EVENT_RELEASED) return;
     s_home_pager.is_tracking = 0U;
@@ -420,9 +504,14 @@ static void product_ui_home_swipe_cb(lv_event_t *event)
     } else if (LV_ABS(displacement) >= PRODUCT_UI_HOME_COMMIT_PX) {
         target += displacement < 0 ? 1 : -1;
     }
-    product_ui_home_switch_page((uint8_t)LV_CLAMP(0, target, s_home_page_count - 1), "release");
+    product_ui_home_switch_page((uint8_t)LV_CLAMP(0, target, s_home_page_count - 1), s_home_pager.velocity);
 }
 
+/**
+ * @brief 按逻辑页数创建可点击分页点并同步当前页。
+ * @param[in,out] content 首页内容父容器。
+ * @return 完整创建为 0，任一对象失败为 -1。
+ */
 static int product_ui_home_page_dots_create(lv_obj_t *content)
 {
     lv_obj_t *dot;
@@ -459,6 +548,12 @@ static int product_ui_home_page_dots_create(lv_obj_t *content)
     return 0;
 }
 
+/**
+ * @brief 为一个实际图层创建六个持久应用槽并绑定该逻辑首页页。
+ * @param[in,out] content 首页内容父容器。
+ * @param[in] page 调用方保证有效的实际图层及初始逻辑页号。
+ * @return 完整创建／绑定为 0，任一步失败为 -1，部分层留给上层回退或页面删除。
+ */
 static int product_ui_home_layer_create(lv_obj_t *content, uint8_t page)
 {
     uint8_t index;
@@ -493,6 +588,11 @@ static int product_ui_home_layer_create(lv_obj_t *content, uint8_t page)
     return 0;
 }
 
+/**
+ * @brief 按目录数创建有限页层、分页动画和点，第二层失败时保留单层重绑回退。
+ * @param[in,out] content 首页内容容器，拥有分页动画对象生命周期。
+ * @return 第一层及点完整创建为 0，必要创建失败为 -1。
+ */
 static int product_ui_home_hotspots_create(lv_obj_t *content)
 {
     uint8_t app_count = product_ui_app_registry_home_count();
@@ -520,6 +620,10 @@ static int product_ui_home_hotspots_create(lv_obj_t *content)
     return 0;
 }
 
+/**
+ * @brief 页面删除时解除分页及槽动画，清空全部首页引用并解除页面框架状态。
+ * @param[in] event 首页 DELETE 事件，当前未读取载荷。
+ */
 static void product_ui_home_delete_cb(lv_event_t *event)
 {
     uint8_t page, index;
@@ -531,6 +635,7 @@ static void product_ui_home_delete_cb(lv_event_t *event)
         }
     }
     memset(s_home_slots, 0, sizeof(s_home_slots));
+    memset(s_home_notice_text, 0, sizeof(s_home_notice_text));
     memset(s_home_layers, 0, sizeof(s_home_layers));
     memset(&s_home_pager, 0, sizeof(s_home_pager));
     s_home_page_dots = NULL;
@@ -540,6 +645,9 @@ static void product_ui_home_delete_cb(lv_event_t *event)
     product_ui_page_view_reset(&s_home_page_view);
 }
 
+/**
+ * @brief 创建首页框架、已确认壁纸及最多两页六格应用，绑定横向分页。
+ */
 int product_ui_home_create(lv_obj_t *parent)
 {
     static const product_ui_page_spec_t spec = {
@@ -552,6 +660,7 @@ int product_ui_home_create(lv_obj_t *parent)
     if (parent == NULL) {
         return -1;
     }
+    memset(s_home_notice_text, 0, sizeof(s_home_notice_text));
     started_at = lv_tick_get();
     if (product_ui_page_frame_create_ex(parent, &spec,
                                         &s_home_page_view) != 0) {
@@ -578,6 +687,9 @@ int product_ui_home_create(lv_obj_t *parent)
     return 0;
 }
 
+/**
+ * @brief 推进公共 UI 与壁纸，分页静止时更新提醒标记和真实模块可用性。
+ */
 void product_ui_home_update(uint32_t elapsed_ms)
 {
     uint8_t page, index;
@@ -590,11 +702,11 @@ void product_ui_home_update(uint32_t elapsed_ms)
             product_ui_home_hotspot_t *slot = &s_home_slots[page][index];
             if (slot->module != NULL && slot->view.title != NULL && strcmp(slot->module->id, "pomodoro") == 0) {
                 const char *title = product_ui_pomodoro_notice_pending() ? "番茄钟 ·" : "番茄钟";
-                if (strcmp(lv_label_get_text(slot->view.title), title) != 0) lv_label_set_text(slot->view.title, title);
+                (void)product_ui_label_sync(slot->view.title, title, &s_home_notice_text[0]);
             }
             if (slot->module != NULL && slot->view.title != NULL && strcmp(slot->module->id, "alarm") == 0) {
                 const char *title = product_ui_alarm_notice_pending() ? "闹钟 ·" : "闹钟";
-                if (strcmp(lv_label_get_text(slot->view.title), title) != 0) lv_label_set_text(slot->view.title, title);
+                (void)product_ui_label_sync(slot->view.title, title, &s_home_notice_text[1]);
             }
             if (slot->module != NULL && slot->view.root != NULL &&
                 slot->view.is_enabled != product_ui_module_available(slot->module->id)) {
@@ -605,6 +717,9 @@ void product_ui_home_update(uint32_t elapsed_ms)
     }
 }
 
+/**
+ * @brief 退出时收敛到起始或已预约页面，撤销所有应用槽的旧按压资格。
+ */
 void product_ui_home_exit(void)
 {
     if (s_home_pager.is_tracking) {

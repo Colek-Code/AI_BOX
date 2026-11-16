@@ -1,6 +1,6 @@
 /**
  * @file camera_frame.c
- * @brief Latest-frame ownership; never overwrite an active reader or writer.
+ * @brief 最新帧占用管理，保留在途读者与写者的槽。
  * @author D_Code
  * @date 2026-09-11
  */
@@ -13,14 +13,20 @@
 
 static uint8_t s_camera_scaled_yuv[CAMERA_FRAME_SCALED_BYTES] __attribute__((aligned(32)));
 
+/**
+ * @brief 初始化帧槽元数据；完整合同见 camera_frame.h。
+ */
 void camera_frame_init(camera_frame_pool_t *pool)
 {
-    /* Only at service creation. Session teardown must preserve live leases. */
+    /* 只在服务创建时调用；会话收尾必须保留在途占用。 */
     memset(pool->leases, 0, sizeof(pool->leases));
     pool->sequence = 0U;
     pool->next_process_ms = 0U;
 }
 
+/**
+ * @brief 领取可写帧槽；完整合同见 camera_frame.h。
+ */
 int camera_frame_acquire_write(camera_frame_pool_t *pool, uint32_t session)
 {
     int slot;
@@ -41,6 +47,9 @@ int camera_frame_acquire_write(camera_frame_pool_t *pool, uint32_t session)
     return candidate;
 }
 
+/**
+ * @brief 丢弃无人读取的已就绪帧；完整合同见 camera_frame.h。
+ */
 void camera_frame_discard_ready(camera_frame_pool_t *pool)
 {
     unsigned slot;
@@ -51,6 +60,9 @@ void camera_frame_discard_ready(camera_frame_pool_t *pool)
     }
 }
 
+/**
+ * @brief 发布或归还写槽；完整合同见 camera_frame.h。
+ */
 void camera_frame_finish_write(camera_frame_pool_t *pool, int slot, uint8_t can_publish)
 {
     if (slot < 0 || slot >= (int)CAMERA_FRAME_SLOT_COUNT ||
@@ -69,6 +81,9 @@ void camera_frame_finish_write(camera_frame_pool_t *pool, int slot, uint8_t can_
     pool->leases[slot].state = CAMERA_FRAME_READY;
 }
 
+/**
+ * @brief 领取当前会话的新帧读槽；完整合同见 camera_frame.h。
+ */
 int camera_frame_acquire_read(camera_frame_pool_t *pool, uint32_t session, uint32_t sequence)
 {
     unsigned slot;
@@ -82,6 +97,9 @@ int camera_frame_acquire_read(camera_frame_pool_t *pool, uint32_t session, uint3
     return -1;
 }
 
+/**
+ * @brief 归还像素读槽；完整合同见 camera_frame.h。
+ */
 void camera_frame_release_read(camera_frame_pool_t *pool, int slot)
 {
     if (slot >= 0 && slot < (int)CAMERA_FRAME_SLOT_COUNT &&
@@ -90,6 +108,9 @@ void camera_frame_release_read(camera_frame_pool_t *pool, int slot)
     }
 }
 
+/**
+ * @brief 检查所有槽是否空闲；完整合同见 camera_frame.h。
+ */
 uint8_t camera_frame_is_idle(const camera_frame_pool_t *pool)
 {
     unsigned slot;
@@ -101,17 +122,23 @@ uint8_t camera_frame_is_idle(const camera_frame_pool_t *pool)
     return 1U;
 }
 
+/**
+ * @brief 保持固定处理节拍；完整合同见 camera_frame.h。
+ */
 uint8_t camera_frame_advance_if_due(camera_frame_pool_t *pool, uint32_t now_ms)
 {
     uint32_t late_ms = now_ms - pool->next_process_ms;
     if ((int32_t)late_ms < 0) {
         return 0U;
     }
-    /* Preserve the 100 ms grid with 15 fps input; skip missed deadlines, never catch up. */
+    /* 输入为 15 fps 时仍保持 100 ms 节拍；跳过错过的期限，不追赶积压。 */
     pool->next_process_ms += (late_ms / CAMERA_FRAME_PERIOD_MS + 1U) * CAMERA_FRAME_PERIOD_MS;
     return 1U;
 }
 
+/**
+ * @brief 缩放 YUV 并规范 RGB565 字节序；完整合同见 camera_frame.h。
+ */
 d_err_t camera_frame_convert(uint8_t *input, uint8_t *rgb)
 {
     int scaled_bytes;
@@ -125,8 +152,8 @@ d_err_t camera_frame_convert(uint8_t *input, uint8_t *rgb)
     if (scaled_bytes != (int)CAMERA_FRAME_SCALED_BYTES) {
         return D_ERR_IO;
     }
-    /* Current SDK ignores be and always emits MSB first. Request that format explicitly,
-     * then normalize only the camera image to LVGL's native little-endian RGB565. */
+    /* 当前 SDK 忽略 be 并固定先输出高字节；显式请求该格式，
+     * 再仅将相机图像转换为 LVGL 使用的小端 RGB565。 */
     yuv420p_quto_rgb565(s_camera_scaled_yuv, rgb, CAMERA_PREVIEW_WIDTH, CAMERA_PREVIEW_HEIGHT,
                        CAMERA_FRAME_SDK_RGB565_BIG_ENDIAN);
     for (offset = 0U; offset < CAMERA_PREVIEW_RGB_BYTES; offset += 2U) {

@@ -20,7 +20,13 @@
 /* 2π × 1000 常量 */
 #define TWO_PI_MILLI  6283
 
-/*==================== 平滑插值系统 ====================*/
+/**
+ * @brief 按百分比向目标做整数插值，非零差至少前进一步避免停滞。
+ * @param[in] current 当前值。
+ * @param[in] target 目标值。
+ * @param[in] speed 本次使用的百分比速度，调用链使用配置常量。
+ * @return 本轮新的整数值。
+ */
 
 static int lerp_int(int current, int target, int speed)
 {
@@ -65,7 +71,12 @@ static struct {
     int pr[4];       /* 半径/大小 */
 } s_deco[DECO_SLOT_MAX];
 
-/*==================== 工具函数 ====================*/
+/**
+ * @brief 在半开区间生成伪随机整数。
+ * @param[in] min_val 包含的下界。
+ * @param[in] max_val 不包含的上界。
+ * @return max_val 大于 min_val 时落在 [min_val,max_val)，否则直接返回 min_val。
+ */
 
 static int rand_between(int min_val, int max_val)
 {
@@ -73,12 +84,24 @@ static int rand_between(int min_val, int max_val)
     return min_val + (rand() % (max_val - min_val));
 }
 
+/**
+ * @brief 把毫弧度角度转换为放大一百倍的正弦近似。
+ * @param[in] angle_milli 千分之一弧度单位角度。
+ * @return 截断为整数的 sin(angle_milli/1000)×100。
+ */
 static int sin100(int angle_milli)
 {
     float rad = (float)angle_milli / 1000.0f;
     return (int)(sinf(rad) * 100.0f);
 }
 
+/**
+ * @brief 把整数值限定在调用方给定闭区间。
+ * @param[in] val 候选值。
+ * @param[in] lo 包含的下界。
+ * @param[in] hi 包含的上界，调用方保证不小于 lo。
+ * @return 钳制后的值。
+ */
 static int clamp(int val, int lo, int hi)
 {
     if (val < lo) return lo;
@@ -94,6 +117,12 @@ static struct {
     int count;
 } s_blink;
 
+/**
+ * @brief 按闭眼前快后慢的分段曲线计算眼睛开度。
+ * @param[in] count 当前眨眼阶段经过时间。
+ * @param[in] duration 正的阶段总时长。
+ * @return 正常阶段内二十至一百的开度百分比。
+ */
 static int blink_ease(int count, int duration)
 {
     int frac_x100 = count * 100 / duration;
@@ -107,6 +136,9 @@ static int blink_ease(int count, int duration)
     return 20 + result * 80 / 100;
 }
 
+/**
+ * @brief 初始化睁眼状态及下一次随机切换时刻。
+ */
 static void blink_init(void)
 {
     s_blink.is_blinking = 0;
@@ -114,6 +146,10 @@ static void blink_init(void)
     s_blink.count = 0;
 }
 
+/**
+ * @brief 推进眨眼相位并将开度系数乘到两眼目标开度。
+ * @param[in] interval_ms 本轮经过的毫秒数。
+ */
 static void blink_update(int interval_ms)
 {
     int eye_open = 100;
@@ -138,8 +174,15 @@ static struct {
     int time_ms;
 } s_breath;
 
+/**
+ * @brief 将呼吸相位计数清零。
+ */
 static void breath_init(void) { s_breath.time_ms = 0; }
 
+/**
+ * @brief 推进周期呼吸偏移，炎热情绪使用更快周期及更大幅度。
+ * @param[in] interval_ms 本轮经过的毫秒数。
+ */
 static void breath_update(int interval_ms)
 {
     /* HOT 情绪时呼吸加速（周期减半） */
@@ -160,6 +203,9 @@ static struct {
     int target_y;
 } s_saccade;
 
+/**
+ * @brief 初始化微视目标及随机更新倒计时。
+ */
 static void saccade_init(void)
 {
     s_saccade.next_toggle = rand_between(SACCADE_UPDATE_MIN, SACCADE_UPDATE_MAX);
@@ -167,6 +213,10 @@ static void saccade_init(void)
     s_saccade.target_y = 0;
 }
 
+/**
+ * @brief 到期时选择小范围新注视偏移，并把相同目标应用到两眼。
+ * @param[in] interval_ms 本轮经过的毫秒数。
+ */
 static void saccade_update(int interval_ms)
 {
     s_saccade.next_toggle -= interval_ms;
@@ -188,6 +238,10 @@ static struct {
     int toggle_ms;
 } s_shiver;
 
+/**
+ * @brief 仅寒冷情绪随机改变横向颤抖偏移，其他情绪清零。
+ * @param[in] interval_ms 本轮经过的毫秒数。
+ */
 static void shiver_update(int interval_ms)
 {
     if (s_ctx.emotion != FACE_EMOTION_COLD) {
@@ -211,12 +265,19 @@ static struct {
     int is_open;
 } s_mouth;
 
+/**
+ * @brief 清空嘴巴动画并进入空闲状态。
+ */
 static void mouth_init(void)
 {
     memset(&s_mouth, 0, sizeof(s_mouth));
     s_mouth.state = MOUTH_STATE_IDLE;
 }
 
+/**
+ * @brief 按空闲、思考或有限说话状态计算并钳制嘴巴目标开度。
+ * @param[in] interval_ms 本轮经过的毫秒数。
+ */
 static void mouth_update(int interval_ms)
 {
     s_mouth.time_ms += interval_ms;
@@ -263,6 +324,9 @@ static struct {
     int decaying;
 } s_emotion;
 
+/**
+ * @brief 把目标情绪及衰减状态初始化为中性。
+ */
 static void emotion_init(void)
 {
     s_emotion.target = FACE_EMOTION_NEUTRAL;
@@ -270,7 +334,11 @@ static void emotion_init(void)
     s_emotion.decaying = 0;
 }
 
-/* 根据情绪自动绑定装饰器到 slot 0 */
+/**
+ * @brief 按目标情绪更新槽零的装饰器，变化时初始化其粒子。
+ * @param[in] emo 目标情绪枚举，未映射情绪使用 NONE。
+ * @note 不修改留给手动控制的槽一。
+ */
 static void emotion_auto_deco(face_emotion_t emo)
 {
     face_deco_t deco = FACE_DECO_NONE;
@@ -295,6 +363,10 @@ static void emotion_auto_deco(face_emotion_t emo)
     }
 }
 
+/**
+ * @brief 累计非中性情绪的衰减倒计时，到期恢复中性及默认装饰器。
+ * @param[in] interval_ms 本轮经过的毫秒数。
+ */
 static void emotion_update(int interval_ms)
 {
     if (s_emotion.target != FACE_EMOTION_NEUTRAL && !s_emotion.decaying) {
@@ -311,7 +383,9 @@ static void emotion_update(int interval_ms)
     s_ctx.emotion = s_emotion.target;
 }
 
-/*==================== 平滑插值更新 ====================*/
+/**
+ * @brief 建立眼睛、嘴巴、呼吸及眼睑的初始平滑绘制值。
+ */
 
 static void smooth_init(void)
 {
@@ -328,6 +402,9 @@ static void smooth_init(void)
     s_smooth.eyelid_h[1] = 0;
 }
 
+/**
+ * @brief 按配置速度插值眼睛及嘴巴，叠加情绪眼睑差异并同步呼吸位移。
+ */
 static void smooth_update(void)
 {
     s_smooth.eye_open[0] = lerp_int(s_smooth.eye_open[0], s_ctx.eyes[0].open, LERP_SPEED_FAST);
@@ -371,7 +448,14 @@ static void smooth_update(void)
     }
 }
 
-/*==================== 基本绘图原语 ====================*/
+/**
+ * @brief 用圆角矩形原语绘制不透明实心圆，非正半径忽略。
+ * @param[in,out] layer 当前 Canvas 的借用绘制层。
+ * @param[in] cx 圆心横坐标。
+ * @param[in] cy 圆心纵坐标。
+ * @param[in] r 半径像素。
+ * @param[in] color 填充色。
+ */
 
 static void draw_filled_circle(lv_layer_t *layer, int cx, int cy, int r, lv_color_t color)
 {
@@ -386,6 +470,15 @@ static void draw_filled_circle(lv_layer_t *layer, int cx, int cy, int r, lv_colo
     lv_draw_rect(layer, &dsc, &area);
 }
 
+/**
+ * @brief 在指定像素矩形绘制不透明填充，非正尺寸忽略。
+ * @param[in,out] layer 当前借用绘制层。
+ * @param[in] x 左上横坐标。
+ * @param[in] y 左上纵坐标。
+ * @param[in] w 宽度像素。
+ * @param[in] h 高度像素。
+ * @param[in] color 填充色。
+ */
 static void draw_filled_rect(lv_layer_t *layer, int x, int y, int w, int h, lv_color_t color)
 {
     if (w <= 0 || h <= 0) return;
@@ -399,6 +492,16 @@ static void draw_filled_rect(lv_layer_t *layer, int x, int y, int w, int h, lv_c
     lv_draw_rect(layer, &dsc, &area);
 }
 
+/**
+ * @brief 绘制不透明圆角矩形，非正尺寸忽略。
+ * @param[in,out] layer 当前借用绘制层。
+ * @param[in] x 左上横坐标。
+ * @param[in] y 左上纵坐标。
+ * @param[in] w 宽度像素。
+ * @param[in] h 高度像素。
+ * @param[in] radius 圆角像素半径。
+ * @param[in] color 填充色。
+ */
 static void draw_rounded_rect(lv_layer_t *layer, int x, int y, int w, int h, int radius, lv_color_t color)
 {
     if (w <= 0 || h <= 0) return;
@@ -412,6 +515,16 @@ static void draw_rounded_rect(lv_layer_t *layer, int x, int y, int w, int h, int
     lv_draw_rect(layer, &dsc, &area);
 }
 
+/**
+ * @brief 绘制不透明且两端圆角的线段。
+ * @param[in,out] layer 当前借用绘制层。
+ * @param[in] x1 起点横坐标。
+ * @param[in] y1 起点纵坐标。
+ * @param[in] x2 终点横坐标。
+ * @param[in] y2 终点纵坐标。
+ * @param[in] width 线宽像素。
+ * @param[in] color 线色。
+ */
 static void draw_line(lv_layer_t *layer, int x1, int y1, int x2, int y2, int width, lv_color_t color)
 {
     lv_draw_line_dsc_t dsc;
@@ -426,6 +539,17 @@ static void draw_line(lv_layer_t *layer, int x1, int y1, int x2, int y2, int wid
     lv_draw_line(layer, &dsc);
 }
 
+/**
+ * @brief 用三个顶点绘制不透明填充三角形。
+ * @param[in,out] layer 当前借用绘制层。
+ * @param[in] x1 第一点横坐标。
+ * @param[in] y1 第一点纵坐标。
+ * @param[in] x2 第二点横坐标。
+ * @param[in] y2 第二点纵坐标。
+ * @param[in] x3 第三点横坐标。
+ * @param[in] y3 第三点纵坐标。
+ * @param[in] color 填充色。
+ */
 static void draw_triangle(lv_layer_t *layer, int x1, int y1, int x2, int y2, int x3, int y3, lv_color_t color)
 {
     lv_draw_triangle_dsc_t dsc;
@@ -438,6 +562,17 @@ static void draw_triangle(lv_layer_t *layer, int x1, int y1, int x2, int y2, int
     lv_draw_triangle(layer, &dsc);
 }
 
+/**
+ * @brief 绘制不透明圆角端点圆弧，非正半径忽略。
+ * @param[in,out] layer 当前借用绘制层。
+ * @param[in] cx 圆心横坐标。
+ * @param[in] cy 圆心纵坐标。
+ * @param[in] radius 圆弧半径。
+ * @param[in] start_deg 起始角度，单位度。
+ * @param[in] end_deg 终止角度，单位度。
+ * @param[in] width 弧线宽度。
+ * @param[in] color 弧线颜色。
+ */
 static void draw_arc_stroke(lv_layer_t *layer, int cx, int cy, int radius, int start_deg, int end_deg, int width, lv_color_t color)
 {
     if (radius <= 0) return;
@@ -455,7 +590,11 @@ static void draw_arc_stroke(lv_layer_t *layer, int cx, int cy, int radius, int s
     lv_draw_arc(layer, &dsc);
 }
 
-/*==================== Simple Face 绘制 ====================*/
+/**
+ * @brief 按眼别及平滑注视、呼吸、颤抖状态绘制眼睛圆形，脸型和情绪调整半径。
+ * @param[in,out] layer 当前借用绘制层。
+ * @param[in] side 0 左眼，1 右眼。
+ */
 
 static void draw_eye_simple(lv_layer_t *layer, int side)
 {
@@ -477,6 +616,11 @@ static void draw_eye_simple(lv_layer_t *layer, int side)
         r, s_ctx.fg_color);
 }
 
+/**
+ * @brief 用背景色覆盖眼睛上部，按情绪形成倾斜、笑眼或不对称眼睑。
+ * @param[in,out] layer 当前借用绘制层。
+ * @param[in] side 0 左眼，1 右眼。
+ */
 static void draw_eyelid_simple(lv_layer_t *layer, int side)
 {
     int cx = (side == 0) ? EYE_LEFT_CX : EYE_RIGHT_CX;
@@ -527,6 +671,10 @@ static void draw_eyelid_simple(lv_layer_t *layer, int side)
     }
 }
 
+/**
+ * @brief 按平滑宽高及呼吸／颤抖位移绘制简单脸圆角嘴。
+ * @param[in,out] layer 当前借用绘制层。
+ */
 static void draw_mouth_simple(lv_layer_t *layer)
 {
     int w = s_smooth.mouth_w;
@@ -549,6 +697,11 @@ static void draw_mouth_simple(lv_layer_t *layer)
 #define EYEBROW_W  16
 #define EYEBROW_H   5
 
+/**
+ * @brief 用两半矩形近似狗脸倾斜眉毛，情绪决定内外侧高度。
+ * @param[in,out] layer 当前借用绘制层。
+ * @param[in] side 0 左眉，1 右眉。
+ */
 static void draw_eyebrow(lv_layer_t *layer, int side)
 {
     int cx = (side == 0) ? EYE_LEFT_CX : EYE_RIGHT_CX;
@@ -577,7 +730,10 @@ static void draw_eyebrow(lv_layer_t *layer, int side)
     draw_filled_rect(layer, bx, right_y, EYEBROW_W / 2, EYEBROW_H, s_ctx.fg_color);
 }
 
-/* 狗脸鼻子 */
+/**
+ * @brief 用圆与倒三角组合狗脸鼻子并同步呼吸位移。
+ * @param[in,out] layer 当前借用绘制层。
+ */
 static void draw_nose(lv_layer_t *layer)
 {
     int by = s_smooth.breath_y;
@@ -593,7 +749,10 @@ static void draw_nose(lv_layer_t *layer)
         s_ctx.fg_color);
 }
 
-/* 狗脸嘴巴：用弧线近似 W 形贝塞尔 */
+/**
+ * @brief 用两段弧近似狗脸 W 形嘴，开度足够时追加舌部区域。
+ * @param[in,out] layer 当前借用绘制层。
+ */
 static void draw_mouth_dog(lv_layer_t *layer)
 {
     int by = s_smooth.breath_y;
@@ -627,6 +786,12 @@ static void draw_mouth_dog(lv_layer_t *layer)
 #define DECO_Y  10
 #define DECO_SIZE 40
 
+/**
+ * @brief 推进单个合法装饰器槽的动画，并绘制心形、怒筋、汗滴、竖线或气泡。
+ * @param[in,out] layer 当前借用绘制层。
+ * @param[in] slot 装饰器槽下标，越界或 NONE 时忽略。
+ * @param[in] interval_ms 本轮经过的毫秒数。
+ */
 static void deco_update_and_draw(lv_layer_t *layer, int slot, int interval_ms)
 {
     if (slot < 0 || slot >= DECO_SLOT_MAX) return;
@@ -724,7 +889,11 @@ static void deco_update_and_draw(lv_layer_t *layer, int slot, int interval_ms)
     }
 }
 
-/*==================== 渲染一帧 ====================*/
+/**
+ * @brief 清空 Canvas 背景，绘制当前脸型及装饰器后提交完整绘制层。
+ * @param[in] interval_ms 本轮装饰器动画推进毫秒数，首次创建为零。
+ * @note 只有 Canvas 已存在时操作；静态像素缓冲始终由本模块持有。
+ */
 
 static void render_face(int interval_ms)
 {
@@ -762,7 +931,9 @@ static void render_face(int interval_ms)
     lv_canvas_finish_layer(s_canvas, &layer);
 }
 
-/*==================== 公共接口 ====================*/
+/**
+ * @brief 重置静态动画上下文并创建使用静态 RGB565 缓冲的单实例 Canvas。
+ */
 
 lv_obj_t *face_engine_create(lv_obj_t *parent)
 {
@@ -804,6 +975,9 @@ lv_obj_t *face_engine_create(lv_obj_t *parent)
     return s_canvas;
 }
 
+/**
+ * @brief 依次推进情绪、眨眼、呼吸、微视、颤抖及嘴巴，再插值并绘制完整帧。
+ */
 void face_engine_update(uint32_t interval_ms)
 {
     if (!s_canvas) return;
@@ -822,6 +996,9 @@ void face_engine_update(uint32_t interval_ms)
     render_face(interval_ms);
 }
 
+/**
+ * @brief 设定目标情绪及衰减期限，并同步自动装饰器。
+ */
 void face_engine_set_emotion(face_emotion_t emotion)
 {
     if (emotion >= FACE_EMOTION_COUNT) return;
@@ -831,6 +1008,9 @@ void face_engine_set_emotion(face_emotion_t emotion)
     emotion_auto_deco(emotion);
 }
 
+/**
+ * @brief 切换嘴巴动画状态并重置相位及开合标志，相同状态不操作。
+ */
 void face_engine_set_mouth_state(mouth_state_t state)
 {
     if (s_mouth.state == state) return;
@@ -840,6 +1020,9 @@ void face_engine_set_mouth_state(mouth_state_t state)
     s_mouth.is_open = 0;
 }
 
+/**
+ * @brief 启动 SPEAKING_DURATION 毫秒的随机开合嘴巴动画，随后自动回空闲。
+ */
 void face_engine_start_speaking(void)
 {
     s_mouth.state = MOUTH_STATE_SPEAKING;
@@ -849,12 +1032,18 @@ void face_engine_start_speaking(void)
     s_mouth.is_open = 1;
 }
 
+/**
+ * @brief 设置下次绘制使用的前景及背景色。
+ */
 void face_engine_set_theme(lv_color_t fg, lv_color_t bg)
 {
     s_ctx.fg_color = fg;
     s_ctx.bg_color = bg;
 }
 
+/**
+ * @brief 设置一个装饰器槽并重置该槽动画及粒子位置。
+ */
 void face_engine_set_decorator(int slot, face_deco_t deco)
 {
     if (slot < 0 || slot >= DECO_SLOT_MAX) return;
@@ -868,6 +1057,9 @@ void face_engine_set_decorator(int slot, face_deco_t deco)
     }
 }
 
+/**
+ * @brief 清除两个装饰器槽及其累计时间，后续情绪变化仍可重新装配槽零。
+ */
 void face_engine_clear_decorators(void)
 {
     for (int i = 0; i < DECO_SLOT_MAX; i++) {
@@ -876,11 +1068,17 @@ void face_engine_clear_decorators(void)
     }
 }
 
+/**
+ * @brief 保存脸型选择，后续绘制时 DOG 使用狗脸，其余使用简单脸。
+ */
 void face_engine_set_face_type(face_type_t type)
 {
     s_face_type = type;
 }
 
+/**
+ * @brief 只读借用当前静态表情上下文。
+ */
 const face_context_t *face_engine_get_context(void)
 {
     return &s_ctx;

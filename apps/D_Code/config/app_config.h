@@ -1,7 +1,13 @@
+/**
+ * @file app_config.h
+ * @brief 选择应用功能与根界面；硬件板型由 board_config.h 管理，运行状态不在本配置层保存。
+ */
+
 #ifndef APP_CONFIG_H
 #define APP_CONFIG_H
 
 #include "board_config.h"
+
 
 /*=============================================================================
  * D_Code 功能配置菜单
@@ -43,7 +49,6 @@
 
 #define D_FEATURE_WIFI               1  /* WiFi STA 联网服务。 */
 #define D_FEATURE_BLE_PROVISION      1  /* BLE 配网服务。 */
-#define D_FEATURE_WEBSOCKET          1  /* 自有设备云：Qwen全托管时自动隔离，半托管时必须开启。 */
 
 /*--------------------------------------------------------------------------
  * 4. 可选应用：0 = 关闭，1 = 开启
@@ -52,7 +57,7 @@
 #define D_FEATURE_AI_CHAT            0  /* 旧 HTTP 文本 AI 应用；不控制 Product UI 的 Qwen 入口。 */
 #define D_FEATURE_CAMERA             1  /* Product 实时预览；其他根 UI 保留旧相机选择。 */
 #define D_FEATURE_GALLERY            0  /* 旧版相册应用。 */
-#define D_FEATURE_LOCAL_MUSIC        0  /* 旧版本地音乐服务。 */
+#define D_FEATURE_LOCAL_MUSIC        1  /* TF 本地音乐：插卡扫描，点击播放。 */
 
 /*--------------------------------------------------------------------------
  * 5. 语音与音频：0 = 关闭，1 = 开启
@@ -61,6 +66,8 @@
  *-------------------------------------------------------------------------*/
 
 #define D_FEATURE_QWEN               1  /* Qwen 多模态语音服务。 */
+#define D_FEATURE_AI_ALARM           1  // 启用 AI 本地闹钟工具；是否允许修改由下方开关控制。
+#define D_AI_ALARM_MUTATIONS         0  // 查询闭环确认后才允许 AI 修改及重试保存。
 #define D_FEATURE_XIAOLE_WAKEUP      1  /* 小乐本地唤醒词服务。 */
 #define D_FEATURE_BRTC               0  /* 百度 RTC 智能体。 */
 #define D_FEATURE_RTC_AUDIO          0  /* RTC 音频环回验证。 */
@@ -70,6 +77,7 @@
  *-------------------------------------------------------------------------*/
 
 #define D_FEATURE_OTA                1  /* Product HTTPS OTA；需 16 MB 双备份基线。 */
+#define D_FEATURE_WEBSOCKET          0  /* 通用 WS/WSS；业务显式配置、启动 */
 
 /*--------------------------------------------------------------------------
  * 7. 调试开关：正常固件保持为 0
@@ -78,6 +86,7 @@
 #define D_DEBUG_BOARD_LOG            0  /* 板级启动诊断日志。 */
 #define D_DEBUG_UI_PERFORMANCE       0  /* Product UI 性能/内存统计。 */
 #define D_DEBUG_VISUAL_CAPTURE       0  /* UART2 RGB565 视觉采集。 */
+#define D_DEBUG_AUTH_CODE_READBACK   0  /* 启动时只读核对强制下载工具写入的测试码。 */
 
 /*=============================================================================
  * 内部配置解析区：普通开发者不要修改以下内容

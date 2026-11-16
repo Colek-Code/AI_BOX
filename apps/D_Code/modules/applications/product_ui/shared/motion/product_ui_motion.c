@@ -1,10 +1,10 @@
-/** @file product_ui_motion.c @brief Owned animations with explicit cancellation and completion. */
+/** @file product_ui_motion.c @brief UI 执行器中的有主动画及原生动效策略，统一处理取消与终态。 */
 #include "product_ui_motion.h"
 #if defined(D_LVGL_ENABLE) && (D_UI_TARGET == D_UI_PRODUCT)
 #include "modules/applications/product_ui/runtime/preferences/product_ui_appearance.h"
 #include <string.h>
 
-/* These object flags are reserved by Product UI's native-motion policy. */
+/* 这些对象标志由 Product UI 原生动效策略专用。 */
 #define MOTION_POLICY_BOUND     LV_OBJ_FLAG_USER_1
 #define MOTION_HAD_MOMENTUM     LV_OBJ_FLAG_USER_2
 #define MOTION_HAD_ELASTIC      LV_OBJ_FLAG_USER_3
@@ -18,6 +18,9 @@ static uint32_t s_generation;
 static lv_style_t s_release_style, s_press_style, s_reduced_style;
 static lv_style_transition_dsc_t s_release_transition, s_press_transition, s_no_transition;
 
+/**
+ * @brief 一次性初始化动效样式和外观策略缓存。
+ */
 static void product_ui_motion_init(void)
 {
     static const lv_style_prop_t properties[] = {LV_STYLE_BG_COLOR, LV_STYLE_TEXT_OPA, 0};
@@ -37,12 +40,20 @@ static void product_ui_motion_init(void)
     s_initialized = 1U;
 }
 
+/**
+ * @brief 读取当前缓存的减少动态效果策略，首次调用时初始化样式。
+ */
 uint8_t product_ui_motion_is_reduced(void)
 {
     product_ui_motion_init();
     return s_reduced;
 }
 
+/**
+ * @brief 应用目标终值，并在绑定和代次仍有效时通知完成。
+ * @param[in,out] motion 调用方保证非空的动画状态。
+ * @note 应用回调可重入并改变绑定或代次，完成通知前重新检查。
+ */
 static void product_ui_motion_finish(product_ui_motion_t *motion)
 {
     uint32_t generation = motion->generation;
@@ -54,6 +65,10 @@ static void product_ui_motion_finish(product_ui_motion_t *motion)
     }
 }
 
+/**
+ * @brief 仅为当前有效代次更新插值并调用应用回调。
+ * @param[in] animation LVGL 借用的动画描述，var 指向绑定状态。
+ */
 static void product_ui_motion_exec(lv_anim_t *animation, int32_t value)
 {
     product_ui_motion_t *motion = animation->var;
@@ -63,6 +78,10 @@ static void product_ui_motion_exec(lv_anim_t *animation, int32_t value)
     motion->binding.apply(motion->binding.context, value);
 }
 
+/**
+ * @brief 过滤迟到的完成事件后进入统一终态路径。
+ * @param[in] animation LVGL 借用的动画描述，其用户数据携带代次。
+ */
 static void product_ui_motion_completed(lv_anim_t *animation)
 {
     product_ui_motion_t *motion = animation->var;
@@ -72,6 +91,9 @@ static void product_ui_motion_completed(lv_anim_t *animation)
     }
 }
 
+/**
+ * @brief 使旧代次失效并删除 LVGL 动画，可选择收敛到终态。
+ */
 void product_ui_motion_cancel(product_ui_motion_t *motion, uint8_t finish)
 {
     uint8_t was_active;
@@ -85,6 +107,10 @@ void product_ui_motion_cancel(product_ui_motion_t *motion, uint8_t finish)
     if (finish && was_active && motion->is_bound) product_ui_motion_finish(motion);
 }
 
+/**
+ * @brief 所有者对象删除时解除对应动画绑定。
+ * @param[in] event LVGL 删除事件，用户数据指向动画状态。
+ */
 static void product_ui_motion_deleted(lv_event_t *event)
 {
     product_ui_motion_t *motion = lv_event_get_user_data(event);
@@ -93,6 +119,9 @@ static void product_ui_motion_deleted(lv_event_t *event)
     product_ui_motion_dispose(motion);
 }
 
+/**
+ * @brief 取消动画并从全局链及对象删除回调中解除绑定。
+ */
 void product_ui_motion_dispose(product_ui_motion_t *motion)
 {
     product_ui_motion_t **entry;
@@ -113,6 +142,9 @@ void product_ui_motion_dispose(product_ui_motion_t *motion)
     motion->generation = generation;
 }
 
+/**
+ * @brief 将动画状态绑定到对象、应用回调及可选完成回调。
+ */
 void product_ui_motion_bind(product_ui_motion_t *motion, const product_ui_motion_binding_t *binding)
 {
     if (motion == NULL || binding == NULL || binding->owner == NULL || binding->apply == NULL) return;
@@ -125,6 +157,9 @@ void product_ui_motion_bind(product_ui_motion_t *motion, const product_ui_motion
     lv_obj_add_event_cb(binding->owner, product_ui_motion_deleted, LV_EVENT_DELETE, motion);
 }
 
+/**
+ * @brief 取消在途动画并立即应用一个固定值。
+ */
 void product_ui_motion_set(product_ui_motion_t *motion, int32_t value)
 {
     if (motion == NULL || !motion->is_bound) return;
@@ -133,6 +168,9 @@ void product_ui_motion_set(product_ui_motion_t *motion, int32_t value)
     motion->binding.apply(motion->binding.context, value);
 }
 
+/**
+ * @brief 从当前值向目标启动缓出动画，或直接进入同一终态路径。
+ */
 void product_ui_motion_start(product_ui_motion_t *motion, int32_t target, uint32_t duration_ms)
 {
     lv_anim_t animation;
@@ -155,18 +193,28 @@ void product_ui_motion_start(product_ui_motion_t *motion, int32_t target, uint32
     if (lv_anim_start(&animation) == NULL) product_ui_motion_finish(motion);
 }
 
+/**
+ * @brief 删除开关原生动画并显式应用终值和完成通知。
+ * @param[in,out] object 借用的 LVGL 开关对象。
+ * @note 仅删除动画会使 LVGL 9 的开关滑块停在中间位置，因此先复制描述再执行终态回调。
+ */
 static void product_ui_motion_finish_switch(lv_obj_t *object)
 {
     lv_anim_t *running = lv_anim_get(object, NULL);
     if (running != NULL) {
         lv_anim_t terminal = *running;
-        /* Delete alone leaves LVGL 9's switch knob at its intermediate coordinate. */
+        /* 仅删除动画会把 LVGL 9 开关滑块留在中间坐标，必须显式应用终值。 */
         lv_anim_delete(object, NULL);
         if (terminal.exec_cb != NULL) terminal.exec_cb(terminal.var, terminal.end_value);
         if (terminal.completed_cb != NULL) terminal.completed_cb(&terminal);
     }
 }
 
+/**
+ * @brief 保存原始滚动标志并按策略切换对象过渡样式及开关动画。
+ * @param[in,out] object 待配置的借用对象。
+ * @param[in] reduced 非零关闭惯性、弹性及过渡；零恢复原先存在的滚动能力。
+ */
 static void product_ui_motion_native_policy(lv_obj_t *object, uint8_t reduced)
 {
     uint8_t was_reduced = lv_obj_has_flag(object, MOTION_POLICY_REDUCED);
@@ -181,7 +229,7 @@ static void product_ui_motion_native_policy(lv_obj_t *object, uint8_t reduced)
         lv_obj_add_style(object, release, 0);
         lv_obj_add_style(object, press, LV_STATE_PRESSED);
     } else {
-        /* Replacing the transition style also removes in-flight native style transitions. */
+        /* 替换过渡样式同时清除正在执行的原生样式过渡。 */
         lv_obj_replace_style(object, was_reduced ? &s_reduced_style : &s_release_style, release, 0);
         lv_obj_replace_style(object, was_reduced ? &s_reduced_style : &s_press_style, press, LV_STATE_PRESSED);
     }
@@ -199,6 +247,12 @@ static void product_ui_motion_native_policy(lv_obj_t *object, uint8_t reduced)
     }
 }
 
+/**
+ * @brief 递归处理可见对象树的动效策略及可选按压态清除。
+ * @param[in,out] root 根对象；NULL 或隐藏时跳过该子树。
+ * @param[in] reduced 本次应用的减少动态效果开关。
+ * @param[in] cancel_press 非零时清除可交互对象的按压态。
+ */
 static void product_ui_motion_policy_tree(lv_obj_t *root, uint8_t reduced, uint8_t cancel_press)
 {
     uint32_t index;
@@ -212,12 +266,21 @@ static void product_ui_motion_policy_tree(lv_obj_t *root, uint8_t reduced, uint8
     }
 }
 
+/**
+ * @brief 给可见对象树中的可点击及可滚动对象应用当前原生动效策略。
+ */
 void product_ui_motion_apply_tree(lv_obj_t *root)
 {
     product_ui_motion_init();
     product_ui_motion_policy_tree(root, s_reduced, 0U);
 }
 
+/**
+ * @brief 沿所有者的父链判断动画是否属于给定对象树。
+ * @param[in] motion 已绑定的动画状态。
+ * @param[in] root 待匹配的借用对象树根。
+ * @return 所有者或其祖先等于 root 返回非零，否则返回零。
+ */
 static uint8_t product_ui_motion_in_tree(const product_ui_motion_t *motion, lv_obj_t *root)
 {
     lv_obj_t *owner = motion->binding.owner;
@@ -228,6 +291,9 @@ static uint8_t product_ui_motion_in_tree(const product_ui_motion_t *motion, lv_o
     return 0U;
 }
 
+/**
+ * @brief 完成对象树内的活跃自研动画并清除按压态，收敛原生动效。
+ */
 void product_ui_motion_cancel_tree(lv_obj_t *root)
 {
     product_ui_motion_t *motion;
@@ -242,6 +308,9 @@ void product_ui_motion_cancel_tree(lv_obj_t *root)
     product_ui_motion_policy_tree(root, 1U, 1U);
 }
 
+/**
+ * @brief 同步外观偏好，按需收敛动画并周期刷新活动屏幕及顶层策略。
+ */
 void product_ui_motion_process(uint32_t elapsed_ms)
 {
     product_ui_appearance_snapshot_t appearance;

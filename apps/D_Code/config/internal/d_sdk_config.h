@@ -1,6 +1,6 @@
 /**
  * @file d_sdk_config.h
- * @brief Aggregate the four owner-specific JieLi SDK configuration domains.
+ * @brief 聚合四个按职责拆分的杰理 SDK 配置域，不重复定义各域策略。
  */
 
 #ifndef D_SDK_CONFIG_H

@@ -30,7 +30,10 @@
 //*********************************************************************************//
 //                                  PRODUCT测试相关配置                             //
 //*********************************************************************************//
+/* Credential provisioning must not echo incoming JSON to the serial log. */
+#if !D_QWEN_FACTORY_TEST_BUILD
 #define 	PRODUCT_TEST_DEBUG
+#endif
 //#define 	MSG_TEST_DEBUG
 
 //#define		PRODUCT_SER_STATIC_IP_ENABLE
@@ -94,6 +97,9 @@
 #define STR(x) _STR(x)
 #define DEVICE_TYPE(id, dev) "{\"id\" : \""STR(id)"\", \"type\" : \""STR(dev)"\"}"
 
+#if D_QWEN_FACTORY_TEST_BUILD
+#define DEVICES_LIST "\"devs_list\" : []"
+#else
 #define DEVICES_LIST "\"devs_list\" : [" \
 	DEVICE_TYPE(0,DEV_TYPE_SD)","\
 	DEVICE_TYPE(0,DEV_TYPE_LCD)","\
@@ -109,6 +115,7 @@
 	DEVICE_TYPE(0,DEV_TYPE_KEYPAD)","\
 	DEVICE_TYPE(0,DEV_TYPE_LED)\
 	"]"
+#endif
 
 
 //配置固件信息

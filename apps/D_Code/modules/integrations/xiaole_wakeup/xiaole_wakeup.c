@@ -1,3 +1,4 @@
+/** @file xiaole_wakeup.c @brief 小乐监听、双通道采样、事件代次与库任务退出编排。 */
 #include "config/app_config.h"
 
 #if D_FEATURE_XIAOLE_WAKEUP
@@ -91,6 +92,12 @@ static d_audio_stop_ticket_t s_xiaole_stop;
 static d_err_t xiaole_wakeup_post_cmd(uint32_t cmd, uint32_t generation);
 static d_err_t xiaole_enc_stop_inner(void);
 
+/**
+ * @brief 算法检测有效且仍在监听时投递带代次的唤醒命令。
+ * @param[in] data 算法数据，本实现不使用。
+ * @param[in] len 算法数据长度，本实现不使用。
+ * @param[in] type 检测类型，小于 1 时忽略。
+ */
 static void xiaole_wakeup_callback(void *data, int len, int type)
 {
     uint32_t generation = s_xiaole_ctx.listening_generation;
@@ -104,6 +111,14 @@ static void xiaole_wakeup_callback(void *data, int len, int type)
     (void)xiaole_wakeup_post_cmd(XIAOLE_CMD_WAKEUP, generation);
 }
 
+/**
+ * @brief 拆分交错参考与麦克风 PCM，并向算法提交有界采样。
+ * @param[in] file VFS 兼容参数，本实现不使用。
+ * @param[in] data 交错双通道 16 位 PCM，调用期间借用。
+ * @param[in] len 输入字节数；本次最多处理 XIAOLE_MAX_FRAME_SAMPLES 个双通道样本。
+ * @return 空数据或零长度返回 0；其余按 VFS 合同返回原 len。
+ * @note 超过本地帧上限的尾部不送算法，返回值仍是原输入长度。
+ */
 static int xiaole_enc_vfs_fwrite(void *file, void *data, u32 len)
 {
     short *pcm_data;
@@ -133,12 +148,22 @@ static int xiaole_enc_vfs_fwrite(void *file, void *data, u32 len)
     return (int)len;
 }
 
+/**
+ * @brief 响应静态 VFS 关闭，无独立文件资源。
+ * @param[in] file 兼容参数，本实现不使用。
+ * @return 固定返回 0。
+ */
 static int xiaole_enc_vfs_fclose(void *file)
 {
     (void)file;
     return 0;
 }
 
+/**
+ * @brief 为实时采样 VFS 返回无固定文件长度。
+ * @param[in] file 兼容参数，本实现不使用。
+ * @return 固定返回 0。
+ */
 static int xiaole_enc_vfs_flen(void *file)
 {
     (void)file;
@@ -151,6 +176,12 @@ static const struct audio_vfs_ops s_xiaole_enc_vfs_ops = {
     .flen = xiaole_enc_vfs_flen,
 };
 
+/**
+ * @brief 将编码器错误转换为小乐错误事件。
+ * @param[in] priv 兼容上下文，本实现不使用。
+ * @param[in] argc SDK 参数数量，当前未用于长度校验。
+ * @param[in] argv 事件数组；为空时忽略。
+ */
 static void xiaole_enc_event_handler(void *priv, int argc, int *argv)
 {
     (void)priv;
@@ -165,6 +196,10 @@ static void xiaole_enc_event_handler(void *priv, int argc, int *argv)
     }
 }
 
+/**
+ * @brief 打开可复用编码服务并注册错误回调。
+ * @return 已有或打开成功返回 D_OK；打开失败返回 D_ERR_IO。
+ */
 static d_err_t xiaole_enc_open(void)
 {
     if (s_xiaole_ctx.enc_server != NULL) {
@@ -181,6 +216,12 @@ static d_err_t xiaole_enc_open(void)
     return D_OK;
 }
 
+/**
+ * @brief 由小乐任务初始化算法并打开双通道麦克风采样。
+ * @param[in] generation 本次监听会话代次。
+ * @return 监听已活动或启动成功返回 D_OK；状态冲突返回 D_ERR_BUSY；算法、编码器失败返回 D_ERR_IO。
+ * @note 闭源库初始化失败可能留下部分资源，进入保留故障状态，不宣称已释放。
+ */
 static d_err_t xiaole_enc_start_inner(uint32_t generation)
 {
     union audio_req req = {0};
@@ -192,13 +233,13 @@ static d_err_t xiaole_enc_start_inner(uint32_t generation)
     if (s_xiaole_ctx.state != XIAOLE_STATE_STOPPED || s_xiaole_ctx.algorithm_stop_failed ||
         s_xiaole_ctx.shutting_down) return D_ERR_BUSY;
 
-    /* A duplicate START must not relabel an already running listener. */
+    /* 重复 START 不能改写正在运行的监听会话代次。 */
     s_xiaole_ctx.listening_generation = generation;
     s_xiaole_ctx.state = XIAOLE_STATE_STARTING;
     err = lx_aec_init(D_XIAOLE_MPO_DP, (void *)xiaole_wakeup_callback);
     if (err != 0) {
         LOGE(TAG, "lx init failed: %d", err);
-        /* The closed library may retain partially initialized resources on error. */
+        /* 闭源库在初始化出错时可能保留部分资源。 */
         s_xiaole_ctx.algorithm_stop_failed = 1U;
         s_xiaole_ctx.stop_result = D_ERR_IO;
         s_xiaole_ctx.state = XIAOLE_STATE_STOPPING;
@@ -238,6 +279,11 @@ static d_err_t xiaole_enc_start_inner(uint32_t generation)
     return D_OK;
 }
 
+/**
+ * @brief 先关闭编码采样，再等待算法内部任务退出并释放延迟缓冲。
+ * @return 已停止或完整收尾返回 D_OK；关闭或算法释放失败返回实际错误。
+ * @note 失败保留 STOPPING 及相关资源；算法停止故障需保留至重启。
+ */
 static d_err_t xiaole_enc_stop_inner(void)
 {
     union audio_req req = {0};
@@ -278,6 +324,12 @@ static d_err_t xiaole_enc_stop_inner(void)
     return D_OK;
 }
 
+/**
+ * @brief 顺序执行启动、停止、唤醒与退出命令。
+ * @param[in] cmd XIAOLE_CMD_* 命令。
+ * @param[in] generation 命令绑定的会话代次。
+ * @note 唤醒先成功停止监听才发布 DETECTED；STOP_ACK 在执行后发布票据完成确认。
+ */
 static void xiaole_handle_cmd(uint32_t cmd, uint32_t generation)
 {
     switch (cmd) {
@@ -311,6 +363,10 @@ static void xiaole_handle_cmd(uint32_t cmd, uint32_t generation)
     }
 }
 
+/**
+ * @brief 持续消费小乐命令，退出前执行最后一次停止。
+ * @param[in] priv 任务兼容参数，本实现不使用。
+ */
 static void xiaole_wakeup_task(void *priv)
 {
     int msg[8];
@@ -332,6 +388,12 @@ static void xiaole_wakeup_task(void *priv)
     LOGI(TAG, "task exit");
 }
 
+/**
+ * @brief 向小乐工作队列提交命令与代次。
+ * @param[in] cmd 目标命令。
+ * @param[in] generation 命令绑定代次。
+ * @return 投递成功返回 D_OK；未初始化返回 D_ERR_NOT_READY；队列满返回 D_ERR_FULL。
+ */
 static d_err_t xiaole_wakeup_post_cmd(uint32_t cmd, uint32_t generation)
 {
     if (s_xiaole_ctx.is_initialized == 0U) {
@@ -345,6 +407,9 @@ static d_err_t xiaole_wakeup_post_cmd(uint32_t cmd, uint32_t generation)
     return D_OK;
 }
 
+/**
+ * @brief 创建小乐唤醒工作任务，初始不占用麦克风；完整合同见 xiaole_wakeup.h。
+ */
 d_err_t xiaole_wakeup_init(void)
 {
     if (s_xiaole_ctx.is_initialized != 0U) {
@@ -364,6 +429,9 @@ d_err_t xiaole_wakeup_init(void)
     return D_OK;
 }
 
+/**
+ * @brief 禁止新启动，受检停止后退出并等待工作任务；完整合同见 xiaole_wakeup.h。
+ */
 void xiaole_wakeup_deinit(void)
 {
     if (s_xiaole_ctx.is_initialized == 0U) {
@@ -384,17 +452,26 @@ void xiaole_wakeup_deinit(void)
     memset(&s_xiaole_ctx, 0, sizeof(s_xiaole_ctx));
 }
 
+/**
+ * @brief 受理指定会话代次的监听启动命令；完整合同见 xiaole_wakeup.h。
+ */
 d_err_t xiaole_wakeup_start(uint32_t generation)
 {
     if (s_xiaole_ctx.shutting_down || s_xiaole_ctx.algorithm_stop_failed) return D_ERR_BUSY;
     return xiaole_wakeup_post_cmd(XIAOLE_CMD_START, generation);
 }
 
+/**
+ * @brief 非阻塞投递停止监听命令；完整合同见 xiaole_wakeup.h。
+ */
 d_err_t xiaole_wakeup_stop(void)
 {
     return xiaole_wakeup_post_cmd(XIAOLE_CMD_STOP, 0U);
 }
 
+/**
+ * @brief 后台提交或加入唯一停止请求，并等待完成确认；完整合同见 xiaole_wakeup.h。
+ */
 d_err_t xiaole_wakeup_stop_wait(uint32_t timeout_ms)
 {
     uint32_t start_ms;
@@ -419,6 +496,9 @@ d_err_t xiaole_wakeup_stop_wait(uint32_t timeout_ms)
     return D_ERR_TIMEOUT;
 }
 
+/**
+ * @brief 读取监听是否处于 STARTING 或 LISTENING；完整合同见 xiaole_wakeup.h。
+ */
 int xiaole_wakeup_is_running(void)
 {
     if ((s_xiaole_ctx.state == XIAOLE_STATE_STARTING) ||

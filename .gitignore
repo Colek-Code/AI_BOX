@@ -1,113 +1,67 @@
-# Prerequisites / dep files
-*.d
-
-# Object / link intermediates (tools 下用户明确要保留的见下方 un-ignore)
+# Generated build and analysis output
 *.o
-*.ko
 *.obj
-# 保留 tools 侧用户点名产物
-!cpu/wl82/tools/sdk.elf.o
-
-# 其它架构产物；tools 下 .elf 允许进库（烧录/loader）
-*.elf
-!cpu/wl82/tools/**/*.elf
-
-# Linker MSVC noise
-*.ilk
-*.exp
-
-# Precompiled Headers
-*.gch
-*.pch
-
-# MSVC-style libs (keep GCC *.a for SDK)
-*.lib
-*.la
-*.lo
-
-# Shared objects
-*.so
-*.so.*
-*.dylib
-
-# Executables (generic)
-*.out
-*.app
-*.i*86
-*.x86_64
-*.hex
-
-# Debug files
-*.dSYM/
-*.su
-*.idb
-*.pdb
-*.swp
-
-# Kernel Module Compile Results
-# 勿用 *.mod*：会误伤 include_lib/.../module.modulemap
-*.mod
-*.cmd
-.tmp_versions/
-modules.order
-Module.symvers
-Mkfile.old
-dkms.conf
-
-# 编译目录（仅 objs，勿用 **/obj/：会误伤 lvgl examples/widgets/obj）
-**/objs/
-wl80/
-
-# 通用中间/列表（tools 下 .bc 用户要求可上传）
-*.used
+*.ko
 *.bc
-!cpu/wl82/tools/*.bc
-
-# 本地编辑器临时 / 杂项
-*.tmp
-*~
-*.TMP
-*.log
-1.txt
-null
-.DS_Store
-Thumbs.db
-
-# 密钥与一次性推送脚本（勿进公开库）
-.gitcode_token
-.git/gitcode_token
-push_gitcode_https.ps1
-
-# D_Code local analysis and build outputs
-apps/D_Code/build/out/
-apps/D_Code/board/wl82/obj/
-apps/D_Code/board/wl82/objs/
-compile_commands.json
-.serena/
-__pycache__/
-**/__pycache__/
+*.elf
+*.map
+*.used
+*.d
+*.d.v2
 *.pyc
+*.tmp
+*.log
+*.pdb
+**/objs/
+**/obj/
+**/__pycache__/
+/apps/D_Code/build/out/
+/apps/D_Code/AI_debug/
+/compile_commands.json
+/1.txt
 
-# Private design, test and acceptance workspace; excluded from public sync.
-/project_doc/
-
-# Local credentials and application build products are not publication inputs.
-.env
-.env.*
-*.pfx
-*.p12
+# Local manufacturing inputs and private material
 *.key
 *.key1
 *.mkey
+*.pfx
+*.p12
+*.pcb
+*.PcbDoc
+.env
+.env.*
+/cpu/wl82/tools/activation-code.txt
+/cpu/wl82/tools/auth_test/
+/cpu/wl82/tools/auth_tests/
+/cpu/wl82/tools/.d_code_activation*
+/cpu/wl82/tools/d_code_programmer*
 /cpu/wl82/tools/app.bin
 /cpu/wl82/tools/sdk.elf*
-/cpu/wl82/tools/sdk.map
+/cpu/wl82/tools/jl_isd*
+/cpu/wl82/tools/isd_config.ini
+/cpu/wl82/tools/isd_config_loader.ini
+/cpu/wl82/tools/download.bat
+/cpu/wl82/tools/download.sh
 /cpu/wl82/tools/symbol_tbl.txt
-/cpu/wl82/tools/jl_isd.bin
-/cpu/wl82/tools/jl_isd.fw
-/cpu/wl82/tools/jl_isd.ufw
-/cpu/wl82/tools/jl_isd_extend.bin
+/apps/D_Code/modules/integrations/qwen/private/
 
-# Maintained production-interface regression tests.
-!apps/D_Code/tools/test_d_crypto.py
-!apps/D_Code/tools/test_d_storage.py
+# Private development workspace and local publishing credentials
+/project_doc/
+/My_Stu_Doc/
+/.workflow/
+/.agents/
+/.codex/
+/.serena/
+/.cache/
+/.playwright-mcp/
+/.gitcode_token
+/push_gitcode_https.ps1
+.DS_Store
+Thumbs.db
+
+# Local manufacturing notes and private development tooling
+/cpu/wl82/tools/box已用.txt
+/tools/D_Workflow_Observer/
+/apps/D_Code/board/wl82/*.depend
+/apps/D_Code/board/wl82/*.layout
+/cpu/wl82/*.ld.vendor

@@ -12,8 +12,8 @@
 #if D_FEATURE_GALLERY
 
 /**
- * @brief 相册模块注册
- * @note  由模块系统自动调用
+ * @brief 保留的历史相册注册声明。
+ * @note 当前自研树未提供此符号实现或调用；真实装配使用 d_gallery_page.c 的 D_UI_MODULE_DEFINE 描述符，不能把本声明当作可调用入口。
  */
 void d_gallery_module_register(void);
 

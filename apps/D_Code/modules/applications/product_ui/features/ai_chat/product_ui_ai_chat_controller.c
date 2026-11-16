@@ -1,9 +1,12 @@
-/** @file product_ui_ai_chat_controller.c @brief No LVGL calls or network work. */
+/** @file product_ui_ai_chat_controller.c @brief AI 会话的纯状态投影及可重试字幕呈现合同，不执行 LVGL 或网络工作。 */
 #include "config/app_config.h"
 #if defined(D_LVGL_ENABLE) && (D_UI_TARGET == D_UI_PRODUCT)
 #include "product_ui_ai_chat_controller.h"
 #include <string.h>
 
+/**
+ * @brief 把服务快照映射为静态状态文字、按钮、允许操作和使能状态。
+ */
 void product_ui_ai_chat_describe(const qwen_service_snapshot_t *snapshot,
                                  product_ui_ai_chat_controls_t *controls)
 {
@@ -35,6 +38,13 @@ void product_ui_ai_chat_describe(const qwen_service_snapshot_t *snapshot,
         controls->status = snapshot->state == QWEN_STATE_LISTENING ? "正在聆听" :
             snapshot->state == QWEN_STATE_THINKING ? "正在思考" :
             snapshot->state == QWEN_STATE_PLAYING ? "正在播报" : "对话已连接";
+        if (snapshot->tool.notice == QWEN_TOOL_NOTICE_EXECUTING)
+            controls->status = "正在执行本地指令";
+        else if (snapshot->tool.notice == QWEN_TOOL_NOTICE_WAITING)
+            controls->status = "结果已发送，等待回答";
+        else if (snapshot->tool.notice == QWEN_TOOL_NOTICE_NO_ANSWER)
+            controls->status = snapshot->tool.retry_ready ?
+                "未获回答，可再问一次" : "未获回答，可结束重开";
         controls->button = "结束对话";
         controls->action = PRODUCT_AI_ACTION_STOP;
         controls->enabled = snapshot->session.can_stop;
@@ -60,6 +70,9 @@ void product_ui_ai_chat_describe(const qwen_service_snapshot_t *snapshot,
     }
 }
 
+/**
+ * @brief 读取可用的 Qwen 快照并生成当前操作投影。
+ */
 void product_ui_ai_chat_controls_read(product_ui_ai_chat_controls_t *controls)
 {
     qwen_service_snapshot_t snapshot = {0};
@@ -69,6 +82,9 @@ void product_ui_ai_chat_controls_read(product_ui_ai_chat_controls_t *controls)
     product_ui_ai_chat_describe(&snapshot, controls);
 }
 
+/**
+ * @brief 把显式开始或停止操作交给 Qwen 会话服务。
+ */
 d_err_t product_ui_ai_chat_activate(product_ai_action_e action)
 {
 #if D_FEATURE_QWEN
@@ -80,6 +96,9 @@ d_err_t product_ui_ai_chat_activate(product_ai_action_e action)
     return D_ERR_NOT_READY;
 }
 
+/**
+ * @brief 记录待呈现字幕代次并置位待重试状态。
+ */
 void product_ui_ai_chat_render_begin(product_ui_ai_chat_render_state_t *state,
                                     uint32_t revision)
 {
@@ -88,6 +107,9 @@ void product_ui_ai_chat_render_begin(product_ui_ai_chat_render_state_t *state,
     state->pending = 1U;
 }
 
+/**
+ * @brief 仅在完整呈现成功后清除待处理状态。
+ */
 void product_ui_ai_chat_render_finish(product_ui_ai_chat_render_state_t *state,
                                      uint8_t success)
 {

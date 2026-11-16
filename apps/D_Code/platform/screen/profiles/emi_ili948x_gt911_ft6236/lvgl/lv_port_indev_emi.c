@@ -1,7 +1,7 @@
 /**
  * @file lv_port_indev_emi.c
- * @brief LVGL input port for the EMI/ILI948x/GT911/FT6236 screen profile.
- * D++: Owned by the D_Code EMI/ILI948x/GT911/FT6236 screen profile.
+ * @brief 把 EMI 配置的 GT911/FT6236 状态接入 LVGL，并处理既有页面后备手势。
+ * D++: 归属 D_Code EMI/ILI948x/GT911/FT6236 显示配置。
  */
 
 #include "framework/d_lvgl_port.h"
@@ -27,6 +27,12 @@ typedef struct {
 
 static emi_touch_gesture_t s_gesture;
 
+/**
+ * @brief 按编译期横屏选择变换并裁剪 EMI 原生点。
+ * @param[in,out] x 有效横坐标指针；横屏时可为空并直接返回。
+ * @param[in,out] y 有效纵坐标指针。
+ * @note 竖屏配置不变换；不使用 GC9307 的运行方向或原生坐标规则。
+ */
 static void touchpad_map_to_display(int32_t *x, int32_t *y)
 {
 #if D_LVGL_LOGICAL_LANDSCAPE
@@ -63,6 +69,11 @@ static void touchpad_map_to_display(int32_t *x, int32_t *y)
 #endif
 }
 
+/**
+ * @brief 将非首页的后备手势转给页面管理器。
+ * @param[in] gesture_type 既有编号：1上、2下、3左、4右。
+ * @note 仅 UI/LVGL 线程调用；首页由自身手势逻辑处理。
+ */
 static void touchpad_dispatch_page_gesture(int gesture_type)
 {
 #ifdef D_LVGL_ENABLE
@@ -75,6 +86,12 @@ static void touchpad_dispatch_page_gesture(int gesture_type)
 #endif
 }
 
+/**
+ * @brief 读取经唤醒过滤的 EMI 状态，交给 LVGL 并在正常结束时结算后备手势。
+ * @param[in] indev LVGL 输入对象，当前未直接使用。
+ * @param[out] data LVGL 提供的状态及逻辑坐标输出。
+ * @note 使用本配置的旧状态接口，不具有 HYN 的取消质量快照或代次门禁；不在这里切换硬件/产品方向。
+ */
 static void touchpad_read(lv_indev_t *indev, lv_indev_data_t *data)
 {
     short raw_x;
@@ -124,6 +141,9 @@ static void touchpad_read(lv_indev_t *indev, lv_indev_data_t *data)
     data->point.y = last_y;
 }
 
+/**
+ * @brief 注册 EMI 指针输入及读取回调；通用合同见 framework/d_lvgl_port.h。
+ */
 void lv_port_indev_init(void)
 {
     lv_indev_t *indev_touchpad = lv_indev_create();

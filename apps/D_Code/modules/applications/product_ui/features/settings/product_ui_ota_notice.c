@@ -1,4 +1,4 @@
-/** Global upgrade progress overlay; the page and its draft stay alive beneath. */
+/** @file product_ui_ota_notice.c @brief 升级进度全局浮层，底层设置页面与其草稿继续存活。 */
 #include "config/app_config.h"
 #if D_FEATURE_OTA && defined(D_LVGL_ENABLE) && D_UI_TARGET == D_UI_PRODUCT
 #include "product_ui_ota_notice.h"
@@ -14,6 +14,11 @@ static struct {
     uint8_t pull, power, close_pending, armed;
 } s_notice;
 
+/**
+ * @brief 把 OTA 错误映射为静态中文说明。
+ * @param[in] error OTA 错误枚举。
+ * @return 对应说明的借用指针，未知错误使用服务不可用说明。
+ */
 static const char *product_ui_ota_error_text(ota_error_e error)
 {
     switch (error) {
@@ -30,6 +35,9 @@ static const char *product_ui_ota_error_text(ota_error_e error)
     }
 }
 
+/**
+ * @brief 从升级阶段编号选择静态说明。
+ */
 const char *product_ui_ota_state_text(unsigned state)
 {
     static const char *const texts[] = {"等待检查", "正在检查升级包", "发现可下载升级包",
@@ -38,6 +46,9 @@ const char *product_ui_ota_state_text(unsigned state)
     return state < sizeof(texts) / sizeof(texts[0]) ? texts[state] : "状态未知";
 }
 
+/**
+ * @brief 撤销浮层手势并重置全部输入，对仍按下的输入等待真实松手。
+ */
 static void product_ui_ota_reset_input(void)
 {
     lv_indev_t *input = NULL;
@@ -49,6 +60,10 @@ static void product_ui_ota_reset_input(void)
     }
 }
 
+/**
+ * @brief 只在完整按压后排入关闭意图，重置、丢失或失焦撤销资格。
+ * @param[in] event 关闭按钮事件。
+ */
 static void product_ui_ota_close_input(lv_event_t *event)
 {
     lv_event_code_t code = lv_event_get_code(event);
@@ -60,6 +75,9 @@ static void product_ui_ota_close_input(lv_event_t *event)
                code == LV_EVENT_DEFOCUSED) s_notice.armed = 0U;
 }
 
+/**
+ * @brief 在 UI 线程预建全局升级浮层，再允许上层提交升级请求。
+ */
 int product_ui_ota_notice_prepare(void)
 {
     lv_obj_t *root, *title, *status, *progress, *close;
@@ -74,7 +92,8 @@ int product_ui_ota_notice_prepare(void)
     title = product_ui_time_label(root, "系统升级", PRODUCT_UI_STYLE_TITLE);
     status = product_ui_time_label(root, "正在准备", PRODUCT_UI_STYLE_BODY);
     progress = product_ui_time_label(root, "保持供电，勿长按电源键", PRODUCT_UI_STYLE_CAPTION);
-    close = product_ui_time_button(root, "返回", product_ui_ota_close_input, NULL);
+    close = product_ui_time_button_create(root, &(product_ui_time_button_spec_t){
+        .text = "返回", .role = PRODUCT_UI_BUTTON_SECONDARY, .callback = product_ui_ota_close_input});
     if (!title || !status || !progress || !close) { lv_obj_delete(root); return -1; }
     lv_obj_set_pos(title, 12, 12); lv_obj_set_pos(status, 12, 58);
     lv_obj_set_width(status, 296); lv_label_set_long_mode(status, LV_LABEL_LONG_WRAP);
@@ -92,8 +111,14 @@ int product_ui_ota_notice_prepare(void)
     return 0;
 }
 
+/**
+ * @brief 查询全局升级浮层是否存在并阻断普通导航。
+ */
 uint8_t product_ui_ota_notice_blocking(void) { return s_notice.root != NULL; }
 
+/**
+ * @brief 重置输入、删除浮层并归还本层取得的下拉及自动灭屏占用。
+ */
 static void product_ui_ota_notice_hide(void)
 {
     if (!s_notice.root) return;
@@ -105,11 +130,17 @@ static void product_ui_ota_notice_hide(void)
     d_screen_request_composed_frame();
 }
 
+/**
+ * @brief 仅在 OTA 维护未激活时撤销预建浮层。
+ */
 void product_ui_ota_notice_discard(void)
 {
     if (!ota_service_maintenance_active()) product_ui_ota_notice_hide();
 }
 
+/**
+ * @brief 在 UI 周期投影升级进度，只有后台及维护均结束后才允许关闭。
+ */
 void product_ui_ota_notice_process(void)
 {
     ota_snapshot_t snapshot;

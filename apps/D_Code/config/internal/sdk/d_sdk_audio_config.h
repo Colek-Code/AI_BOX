@@ -1,6 +1,6 @@
 /**
  * @file d_sdk_audio_config.h
- * @brief JieLi audio codec, recorder, DAC, ADC and EQ configuration.
+ * @brief 解析杰理音频编解码、录音、DAC、ADC 及 EQ 的 SDK 配置，不保存运行状态。
  */
 
 #ifndef D_SDK_AUDIO_CONFIG_H
@@ -10,7 +10,7 @@
 #define CONFIG_PCM_DEC_ENABLE
 #define CONFIG_WAV_DEC_ENABLE
 
-/* A standalone reminder does not need cloud codecs or microphone DSP. */
+/* 独立本地提醒不依赖云编解码器或麦克风 DSP。 */
 #if !D_LOCAL_PROMPT_ENABLE || D_FEATURE_QWEN || D_FEATURE_XIAOLE_WAKEUP || \
     D_FEATURE_BRTC || D_FEATURE_RTC_AUDIO || D_FEATURE_LOCAL_MUSIC || defined(D_AUDIO_DEMO)
 #define CONFIG_MIDI_CTRL_DEC_ENABLE
@@ -49,7 +49,7 @@
 #define CONFIG_AEC_ENC_ENABLE
 #define CONFIG_DNS_ENC_ENABLE
 #endif
-#endif /* Full audio feature set; PCM/WAV remain available for local cues. */
+#endif /* 完整音频功能依赖；本地提示仍保留 PCM/WAV。 */
 
 #define CONFIG_LOCAL_MUSIC_EQ_ENABLE        0
 #define CONFIG_LOCAL_MUSIC_DRC_ENABLE       0
@@ -74,7 +74,8 @@
 #define CONFIG_AUDIO_RECORDER_PLAY_FORMAT   "pcm"
 
 #ifndef TCFG_DAC_MUTE_PORT
-#define TCFG_DAC_MUTE_PORT                  IO_PORTB_02
+/* BOX由板级初始化将PB2保持低电平，DAC MUTE不再控制该脚。 */
+#define TCFG_DAC_MUTE_PORT                  0xff
 #endif
 #ifndef TCFG_DAC_MUTE_VALUE
 #define TCFG_DAC_MUTE_VALUE                 0

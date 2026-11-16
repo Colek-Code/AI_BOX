@@ -103,7 +103,7 @@ LOADER_BAUD_RATE=1000000;
 LOADER_ASK_BAUD_RATE=1000000;
 SERIAL_SEND_KEY=YES;
 BEFORE_LOADER_WAIT_TIME=150;
-NEED_RESERVED_4K=YES;//关闭4K保留写NO
+NEED_RESERVED_4K=YES;//关闭4K保留写NO     <XFR>
 #ifdef CONFIG_RELEASE_ENABLE
 CALC_RES_CFG=NO;
 #else
@@ -115,6 +115,7 @@ CALC_RES_CFG=YES; [量产版本严禁打开]
 
 /*#####################################################    UBOOT配置项，请勿随意调整顺序    ##################################################*/
 [SYS_CFG_PARAM]
+//AUTH_CODE=1;  //XFR 一拖八支持认证码
 /*
 #data_width[0 1 2 3 4] 3的时候uboot自动识别2或者4线
 #clk [0-255]
@@ -364,6 +365,12 @@ UIPACKRES_OPT=1;
 PRCT_ADR=0;
 PRCT_LEN=CODE_LEN;
 PRCT_OPT=2;
+
+#if defined CONFIG_NET_UPGRADE_INFO_USE_RESERVED
+HttpUpdate_ADR=AUTO;
+HttpUpdate_LEN=0x1000;
+HttpUpdate_OPT=1;
+#endif
 
 //#烧录后不可升级的资源
 [RESERVED_EXPAND_CONFIG]

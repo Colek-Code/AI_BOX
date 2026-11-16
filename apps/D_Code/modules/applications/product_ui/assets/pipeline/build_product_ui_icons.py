@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build original interface and control-center SVG glyphs as LVGL A4 images."""
+"""将界面及控制中心 SVG 母版转换为 LVGL A4 图标；发布检查使用固定渲染器。"""
 
 from __future__ import annotations
 
@@ -28,21 +28,25 @@ class IconSpec:
     size: int
     optical_size: int
     source_kind: str = "interface"
+    optical_x: float = 0.0
 
     @property
     def source_file(self) -> str:
+        """按图标源名生成 SVG 文件名，不读取或修改母版。"""
         return f"{self.source_name}.svg"
 
 
 def app_icon(enum: str, stem: str, size: int, optical: int) -> IconSpec:
+    """构造界面类图标规格，保留原生尺寸及可见内容尺寸。"""
     return IconSpec(enum, stem, size, optical, "interface")
 
 
-def cc_icon(enum: str, stem: str, size: int, optical: int) -> IconSpec:
-    return IconSpec(enum, stem, size, optical, "control_center")
+def cc_icon(enum: str, stem: str, size: int, optical: int, optical_x: float = 0.0) -> IconSpec:
+    """构造控制中心图标规格，包含明确的横向光学偏移。"""
+    return IconSpec(enum, stem, size, optical, "control_center", optical_x)
 
 
-# Shared functions use one SVG master at each native raster size.
+# 同一功能在各原生栅格尺寸共用一份 SVG 母版。
 ICONS = (
     cc_icon("MUSIC", "media", 28, 24),
     app_icon("CALENDAR", "calendar", 28, 24),
@@ -66,11 +70,13 @@ ICONS = (
     cc_icon("CC_BRIGHTNESS", "brightness", 18, 16),
     cc_icon("CC_VOLUME", "volume", 18, 16),
     cc_icon("CC_PREVIOUS", "previous", 18, 16),
-    cc_icon("CC_PLAY", "play", 18, 16),
+    # 三角形的视觉重心在包围盒中心左侧。
+    cc_icon("CC_PLAY", "play", 18, 16, 0.10),
     cc_icon("CC_PAUSE", "pause", 18, 16),
     cc_icon("CC_NEXT", "next", 18, 16),
     app_icon("AI_CHAT", "ai_chat", 28, 24),
     app_icon("CAMERA", "camera", 28, 24),
+    cc_icon("MEDIA_LIST", "list", 18, 16),
 )
 
 APP_ICONS = tuple(s for s in ICONS if s.source_kind == "interface")
@@ -80,7 +86,7 @@ EXPECTED_RESVG_PY = "0.3.1"
 
 
 def require_resvg_py(expected: str) -> None:
-    """Release and --check require pinned resvg_py; Chromium is preview-only."""
+    """发布及检查模式只接受固定 resvg_py，浏览器仅用于预览。"""
     try:
         import importlib.metadata as metadata
         import resvg_py  # noqa: F401
@@ -100,7 +106,8 @@ def require_resvg_py(expected: str) -> None:
 
 
 def validate_manifest(assets_dir: Path) -> tuple[dict[str, str], dict[str, str]]:
-    # The ABI enum is hand-maintained. Its order must match the generated table.
+    # ABI 枚举由人工维护，其顺序必须与生成表一致。
+    """核对资源清单声明及生成接口顺序。"""
     header = (assets_dir / "product_ui_icons.h").read_text(encoding="utf-8")
     identifiers = re.findall(r"^\s*PRODUCT_UI_ICON_([A-Z0-9_]+),?\s*$", header, re.M)
     identifiers = [name for name in identifiers if name != "COUNT"]
@@ -153,6 +160,7 @@ def validate_manifest(assets_dir: Path) -> tuple[dict[str, str], dict[str, str]]
 
 
 def validate_sources(source_dir: Path, source_hashes: dict[str, str]) -> None:
+    """核对源资源存在性和固定摘要。"""
     missing = sorted(name for name in source_hashes
                      if not (source_dir / name).is_file())
     if missing:
@@ -167,12 +175,14 @@ def validate_sources(source_dir: Path, source_hashes: dict[str, str]) -> None:
 
 
 def resolve_svg_path(assets_dir: Path, spec: IconSpec) -> Path:
+    """按图标类别定位实际 SVG 母版。"""
     if spec.source_kind not in ("interface", "control_center"):
         raise ValueError(f"unknown icon source group: {spec.source_kind}")
     return assets_dir / "source" / spec.source_kind / spec.source_file
 
 
 def render_alpha_chromium(svg_path: Path, size: int) -> Image.Image:
+    """通过显式浏览器预览路径提取透明度。"""
     candidates = (
         shutil.which("msedge"),
         shutil.which("chrome"),
@@ -212,7 +222,8 @@ def render_alpha_chromium(svg_path: Path, size: int) -> Image.Image:
 
 
 def normalize_alpha(alpha: Image.Image, canvas_size: int,
-                    optical_size: int) -> Image.Image:
+                    optical_size: int, optical_x: float = 0.0) -> Image.Image:
+    """将有效透明度内容居中到目标几何。"""
     bounds = alpha.getbbox()
     if bounds is None:
         raise ValueError("SVG rendered an empty icon")
@@ -226,14 +237,17 @@ def normalize_alpha(alpha: Image.Image, canvas_size: int,
     glyph = glyph.resize(glyph_size, Image.Resampling.LANCZOS)
     canvas = Image.new("L", (canvas_size, canvas_size), 0)
     offset = (
-        (canvas_size - glyph.width) // 2,
+        (canvas_size - glyph.width) // 2 + round(optical_x * optical_size),
         (canvas_size - glyph.height) // 2,
     )
+    if offset[0] < 0 or offset[0] + glyph.width > canvas_size:
+        raise ValueError("optical offset would clip the glyph")
     canvas.paste(glyph, offset)
     return canvas
 
 
 def render_alpha(svg_path: Path, spec: IconSpec) -> Image.Image:
+    """通过固定 SVG 渲染器生成图标透明度。"""
     from resvg_py import svg_to_bytes
 
     render_size = spec.size * 4
@@ -245,17 +259,18 @@ def render_alpha(svg_path: Path, spec: IconSpec) -> Image.Image:
     )
     image = Image.open(io.BytesIO(png)).convert("RGBA")
     return normalize_alpha(image.getchannel("A"), spec.size,
-                           spec.optical_size)
+                           spec.optical_size, spec.optical_x)
 
 
 def render_alpha_preview(svg_path: Path, spec: IconSpec) -> Image.Image:
-    """Explicit Chromium/Edge preview path — never used by --check/release."""
+    """显式使用 Chromium 或 Edge 预览，不参与发布检查。"""
     render_size = spec.size * 4
     alpha = render_alpha_chromium(svg_path, render_size)
-    return normalize_alpha(alpha, spec.size, spec.optical_size)
+    return normalize_alpha(alpha, spec.size, spec.optical_size, spec.optical_x)
 
 
 def pack_a4(alpha: Image.Image) -> bytes:
+    """将相邻两个像素的高四位打包为 A4 字节。"""
     pixels = list(alpha.get_flattened_data())
     packed = bytearray()
     for index in range(0, len(pixels), 2):
@@ -268,10 +283,12 @@ def pack_a4(alpha: Image.Image) -> bytes:
 
 
 def c_identifier(spec: IconSpec) -> str:
+    """构造图标对应的 C 标识符。"""
     return spec.enum_name.lower()
 
 
 def write_data(stream, spec: IconSpec, data: bytes) -> None:
+    """输出图标像素数组及静态 LVGL 描述符。"""
     name = c_identifier(spec)
     stream.write(
         "static const LV_ATTRIBUTE_MEM_ALIGN LV_ATTRIBUTE_LARGE_CONST "
@@ -293,11 +310,12 @@ def write_data(stream, spec: IconSpec, data: bytes) -> None:
 
 def write_c(output: Path, rendered: list[tuple[IconSpec, Image.Image]],
             variants: dict[int, list[tuple[IconSpec, Image.Image]]]) -> None:
+    """输出图标查询表、尺寸变体及有界 C 文本。"""
     output.parent.mkdir(parents=True, exist_ok=True)
     with io.StringIO(newline="\n") as stream:
         stream.write("/**\n")
         stream.write(" * @file product_ui_icons.c\n")
-        stream.write(" * @brief Generated Product UI A4 icons from original SVG sources.\n")
+        stream.write(" * @brief 由 SVG 母版生成的 Product UI A4 图标；请修改生成器。\n")
         stream.write(" */\n")
         stream.write('#include "modules/applications/product_ui/assets/product_ui_icons.h"\n\n')
         for spec, alpha in rendered:
@@ -313,7 +331,7 @@ def write_c(output: Path, rendered: list[tuple[IconSpec, Image.Image]],
             )
         stream.write("};\n\n")
         stream.write(
-            "const lv_image_dsc_t *product_ui_icon_get"
+            "/** @brief 按编号借用静态 A4 图标，非法编号返回 NULL。 */\nconst lv_image_dsc_t *product_ui_icon_get"
             "(product_ui_icon_id_t icon_id)\n{\n"
         )
         stream.write(
@@ -328,25 +346,26 @@ def write_c(output: Path, rendered: list[tuple[IconSpec, Image.Image]],
             for spec, _ in entries:
                 stream.write(f"    [PRODUCT_UI_ICON_{spec.enum_name}] = &s_product_ui_icon_{c_identifier(spec)}_{size},\n")
             stream.write("};\n\n")
-        stream.write("const lv_image_dsc_t *product_ui_icon_get_sized(product_ui_icon_id_t icon_id, uint16_t size)\n{\n")
+        stream.write("/** @brief 按编号和已生成尺寸借用静态图标，非法编号或无对应尺寸时返回 NULL。 */\nconst lv_image_dsc_t *product_ui_icon_get_sized(product_ui_icon_id_t icon_id, uint16_t size)\n{\n")
         stream.write("    if (icon_id < 0 || icon_id >= PRODUCT_UI_ICON_COUNT) return NULL;\n    switch (size) {\n")
         for size in variants:
             stream.write(f"    case {size}: return s_icons_{size}[icon_id];\n")
         stream.write("    default: return NULL;\n    }\n}\n")
         lines = stream.getvalue().splitlines(keepends=True)
-    with output.open("w", encoding="ascii", newline="\n") as stream:
+    with output.open("w", encoding="utf-8", newline="\n") as stream:
         for start in range(0, len(lines), 250):
             batch = "".join(lines[start:start + 250])
             offset = stream.tell()
             stream.write(batch)
             stream.flush()
-            with output.open("r", encoding="ascii", newline="") as check:
+            with output.open("r", encoding="utf-8", newline="") as check:
                 check.seek(offset)
                 if check.read(len(batch)) != batch:
                     raise OSError(f"generated icon write mismatch: {output}")
 
 
 def build(assets_dir: Path, preview_dir: Path | None = None) -> None:
+    """渲染已声明 SVG 母版及尺寸变体，保存预览并生成静态 A4 图标 C 文件。"""
     cc_dir = assets_dir / "source" / "control_center"
     missing = sorted(
         str(resolve_svg_path(assets_dir, spec))
@@ -379,6 +398,7 @@ def build(assets_dir: Path, preview_dir: Path | None = None) -> None:
 
 
 def generated_snapshot(assets_dir: Path) -> dict[str, bytes]:
+    """收集实际生成 C 文件及预览图的字节快照。"""
     result = {
         "product_ui_icons.c": (assets_dir / "product_ui_icons.c").read_bytes(),
     }
@@ -390,6 +410,7 @@ def generated_snapshot(assets_dir: Path) -> dict[str, bytes]:
 
 
 def check_build(assets_dir: Path) -> None:
+    """再生成并核对确定性及发布资源新鲜度。"""
     app_dir = assets_dir / "source" / "interface"
     cc_dir = assets_dir / "source" / "control_center"
     if not app_dir.exists():
@@ -423,6 +444,7 @@ def check_build(assets_dir: Path) -> None:
 
 
 def main() -> int:
+    """将界面及控制中心 SVG 母版转换为 LVGL A4 图标；发布检查使用固定渲染器。"""
     import sys
     sys.dont_write_bytecode = True
     from product_ui_workspace import prepare_work_directory

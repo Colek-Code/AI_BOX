@@ -1,6 +1,6 @@
 /**
  * @file product_ui_color_icons.h
- * @brief Color UI icons from ui_pack (LVGL ARGB8888). Generated — do not edit.
+ * @brief 由 ui_pack 生成的 LVGL ARGB8888 彩色图标；请修改生成器。
  */
 
 #ifndef __PRODUCT_UI_COLOR_ICONS_H__
@@ -26,6 +26,12 @@ typedef enum {
     PRODUCT_UI_COLOR_ICON_COUNT
 } product_ui_color_icon_id_t;
 
+/**
+ * @brief 按彩色图标编号借用静态图像描述符。
+ * @param[in] icon_id 合法枚举编号；须不为负且小于 PRODUCT_UI_COLOR_ICON_COUNT。
+ * @return 有效编号对应的静态只读描述符；达到或超过 COUNT 返回 NULL。
+ * @note 实现只检查上界；调用方须保证不传负值。返回值不由调用方释放。
+ */
 const lv_image_dsc_t *product_ui_color_icon_get(
     product_ui_color_icon_id_t icon_id);
 

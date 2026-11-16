@@ -1,3 +1,8 @@
+/**
+ * @file d_lcd_compat.c
+ * @brief 适配板级 LCD 设备、传输及兼容接口；业务和 LVGL 页面策略留在上层。
+ */
+
 #include "config/app_config.h"
 #include "system/includes.h"
 #include "device/device.h"
@@ -28,6 +33,14 @@ static u8 s_spi_async_ready;
 static u8 s_spi_async_degraded;
 static u8 s_spi_recovery_used;
 
+/**
+ * @brief 在 SDK SPI 回调中结束本地在途标志并通知等待者。
+ * @param[in] priv 注册上下文，当前未使用。
+ * @param[in] data SDK 传入的数据指针地址，当前不读取或修改。
+ * @param[in] len SDK 传入的长度地址，当前不读取或修改。
+ * @return 当前始终为 0。
+ * @note 仅在本地仍有在途标志时计回调并发信号；不在此释放上层像素缓冲或调用 LVGL。
+ */
 static int lcd_spi_complete_cb(void *priv, u8 **data, u32 *len)
 {
     (void)priv;
@@ -41,6 +54,11 @@ static int lcd_spi_complete_cb(void *priv, u8 **data, u32 *len)
     return 0;
 }
 
+/**
+ * @brief 创建信号量并注册 SPI 回调、非阻塞及信号量配置。
+ * @return 全部配置成功为 0，否则为 -1；SDK 配置失败时标记降级。
+ * @note 本层不完整回滚已执行的 SDK 设置，不能将失败解释为接口未持有任何资源。
+ */
 static int lcd_spi_async_setup(void)
 {
     int cb_result;
@@ -68,6 +86,13 @@ static int lcd_spi_async_setup(void)
     return 0;
 }
 
+/**
+ * @brief 提交一段 SPI 字节并登记本地在途事实。
+ * @param[in] data 有效源数据，须按上层确认合同保持。
+ * @param[in] len 非零字节数。
+ * @return 参数或句柄无效为 -1；其余沿用 dev_write 结果。
+ * @note 异步不可用时直接转交原写入路径；提交负返回只清本地标志，不声明硬件全局空闲。
+ */
 static int lcd_spi_async_submit(u8 *data, u32 len)
 {
     int result;
@@ -91,11 +116,17 @@ static int lcd_spi_async_submit(u8 *data, u32 len)
     return result;
 }
 
+/**
+ * @brief 查询 GC9307 SPI 异步适配是否已准备且未降级。 完整合同见 d_lcd_compat.h。
+ */
 int d_lcd_spi_async_is_ready(void)
 {
     return s_spi_async_ready && !s_spi_async_degraded;
 }
 
+/**
+ * @brief 等待本适配的在途 SPI 完成通知。 完整合同见 d_lcd_compat.h。
+ */
 int d_lcd_spi_async_wait(u32 timeout_ticks)
 {
     int result;
@@ -124,6 +155,9 @@ int d_lcd_spi_async_wait(u32 timeout_ticks)
     return -1;
 }
 
+/**
+ * @brief 读取累计异步提交和回调计数，供显示所有者诊断。 完整合同见 d_lcd_compat.h。
+ */
 void d_lcd_spi_async_get_counts(u32 *submit_count, u32 *callback_count)
 {
     if (submit_count != NULL) {
@@ -134,6 +168,9 @@ void d_lcd_spi_async_get_counts(u32 *submit_count, u32 *callback_count)
     }
 }
 
+/**
+ * @brief 读取本适配最近一次异步提交前记录的时钟。 完整合同见 d_lcd_compat.h。
+ */
 u32 d_lcd_spi_async_get_last_submit_ms(void)
 {
     return s_spi_last_submit_ms;
@@ -142,7 +179,7 @@ u32 d_lcd_spi_async_get_last_submit_ms(void)
 
 u8 lcd_bk_on = BL_ON;
 u8 lcd_bk_off = BL_OFF;
-/* Resolution remains unpublished until d_lcd_init selects a profile driver. */
+/* 只有 d_lcd_init 选中配置驱动后才公布面板尺寸。 */
 u16 lcd_w = 0;
 u16 lcd_h = 0;
 
@@ -156,6 +193,11 @@ static const struct lcd_device *const d_lcd_drivers[] = {
 #endif
 };
 
+/**
+ * @brief 在编译期驱动列表中按名称查找面板描述符。
+ * @param[in] name 非空且以 NUL 结尾的驱动名，由内部调用方保证。
+ * @return 借用的静态驱动描述符；未找到为 NULL。
+ */
 static const struct lcd_device *d_find_lcd_driver(const char *name)
 {
     for (u32 i = 0; i < (sizeof(d_lcd_drivers) / sizeof(d_lcd_drivers[0])); i++) {
@@ -166,7 +208,9 @@ static const struct lcd_device *d_find_lcd_driver(const char *name)
     return NULL;
 }
 
-// IO 引脚操作函数
+/**
+ * @brief 按绑定平台描述符设置面板复位引脚电平。 完整合同见 d_lcd_compat.h。
+ */
 void lcd_rst_pinstate(u8 state)
 {
     if (lcd_pdata->rst_pin != (u32)-1) {
@@ -174,6 +218,9 @@ void lcd_rst_pinstate(u8 state)
     }
 }
 
+/**
+ * @brief 设置面板片选引脚原始电平。 完整合同见 d_lcd_compat.h。
+ */
 void lcd_cs_pinstate(u8 state)
 {
     if (lcd_pdata->cs_pin != (u32)-1) {
@@ -181,6 +228,9 @@ void lcd_cs_pinstate(u8 state)
     }
 }
 
+/**
+ * @brief 设置面板命令/数据选择引脚电平。 完整合同见 d_lcd_compat.h。
+ */
 void lcd_rs_pinstate(u8 state)
 {
     if (lcd_pdata->rs_pin != (u32)-1) {
@@ -188,6 +238,9 @@ void lcd_rs_pinstate(u8 state)
     }
 }
 
+/**
+ * @brief 设置板级背光引脚的原始电平。 完整合同见 d_lcd_compat.h。
+ */
 void lcd_bl_pinstate(u8 state)
 {
     if ((lcd_pdata != NULL) && (lcd_pdata->bl_pin != (u32)-1)) {
@@ -195,7 +248,9 @@ void lcd_bl_pinstate(u8 state)
     }
 }
 
-// LCD 数据发送
+/**
+ * @brief 向已打开的 LCD 接口提交一个字节。 完整合同见 d_lcd_compat.h。
+ */
 int lcd_send_byte(u8 data)
 {
     if (lcd_hdl) {
@@ -204,6 +259,9 @@ int lcd_send_byte(u8 data)
     return -1;
 }
 
+/**
+ * @brief 向 LCD 接口提交一段像素或命令数据。 完整合同见 d_lcd_compat.h。
+ */
 int lcd_send_map(u8 *map, u32 len)
 {
     if (lcd_hdl) {
@@ -218,6 +276,10 @@ int lcd_send_map(u8 *map, u32 len)
     return -1;
 }
 
+/**
+ * @brief 在已绑定 SPI 接口上调用 SDK 非阻塞写刷新等待。
+ * @note 兼容命令组合使用；无有效句柄或非 SPI 时不操作，void 不暴露结果。
+ */
 static void lcd_spi_write_wait(void)
 {
     if ((lcd_hdl != NULL) && (lcd_pdata != NULL) && (lcd_pdata->lcd_if == LCD_SPI)) {
@@ -225,7 +287,9 @@ static void lcd_spi_write_wait(void)
     }
 }
 
-// 写命令
+/**
+ * @brief 组合片选及命令电平提交一个命令字节，并调用既有 SPI 等待。 完整合同见 d_lcd_compat.h。
+ */
 void WriteCOM(u8 cmd)
 {
     lcd_cs_pinstate(0);
@@ -235,7 +299,9 @@ void WriteCOM(u8 cmd)
     lcd_cs_pinstate(1);
 }
 
-// 写数据（单字节）
+/**
+ * @brief 组合片选及数据电平提交一个数据字节，并调用既有 SPI 等待。 完整合同见 d_lcd_compat.h。
+ */
 void WriteDAT_8(u8 dat)
 {
     lcd_cs_pinstate(0);
@@ -245,7 +311,9 @@ void WriteDAT_8(u8 dat)
     lcd_cs_pinstate(1);
 }
 
-// 写数据（DMA）
+/**
+ * @brief 组合片选及数据电平提交数据块，并沿原路径等待。 完整合同见 d_lcd_compat.h。
+ */
 void WriteDAT_DMA(u8 *dat, u32 len)
 {
     lcd_cs_pinstate(0);
@@ -256,6 +324,9 @@ void WriteDAT_DMA(u8 *dat, u32 len)
 }
 
 #ifdef D_LCD_EMI_ILI948X_ENABLE
+/**
+ * @brief 在 EMI 配置中用静态小块缓冲重复提交纯色 RGB565 像素。 完整合同见 d_lcd_compat.h。
+ */
 void d_lcd_write_solid_pixels(u16 color, u32 pixel_count)
 {
     u32 chunk_pixels;
@@ -288,7 +359,9 @@ void d_lcd_write_solid_pixels(u16 color, u32 pixel_count)
 }
 #endif
 
-// 等待非阻塞写入完成（TE 同步需要）
+/**
+ * @brief 按当前总线调用已有非阻塞写入的等待/刷新入口。 完整合同见 d_lcd_compat.h。
+ */
 void lcd_interface_non_block_wait(void)
 {
     if (lcd_hdl && lcd_pdata) {
@@ -308,6 +381,11 @@ void lcd_interface_non_block_wait(void)
 
 // 屏幕识别函数（通过 D6/D7 引脚读取）
 #ifdef D_LCD_EMI_ILI948X_ENABLE
+/**
+ * @brief 切换 EMI 型号识别引脚 D6/D7 的方向。
+ * @param[in] dir 非零设为输入，零设为输出。
+ * @note 平台描述符须有效；识别完成后恢复输出，避免占用 EMI 数据线。
+ */
 static void lcd_check_pin_io_dir(u8 dir)
 {
     if ((lcd_pdata->check_pin_D6 != (u32)-1) && (lcd_pdata->check_pin_D7 != (u32)-1)) {
@@ -321,6 +399,11 @@ static void lcd_check_pin_io_dir(u8 dir)
     }
 }
 
+/**
+ * @brief 在打开 EMI 前用 D6/D7 电平选择已有面板型号。
+ * @return 两个识别引脚均为高电平时为 1（ILI9488），其余及未配引脚为 0（ILI9481）。
+ * @note 会临时切换引脚方向并在返回前恢复输出，不与正在使用的数据总线并发。
+ */
 static int get_check_pin_io_state(void)
 {
     if ((lcd_pdata->check_pin_D6 != (u32)-1) && (lcd_pdata->check_pin_D7 != (u32)-1)) {
@@ -348,6 +431,10 @@ static int get_check_pin_io_state(void)
 
 // LCD 数据发送完成回调（用于通知 lcd_data_driver）
 extern void lcd_send_ok(void);
+/**
+ * @brief 将 EMI 发送完成通知转交 SDK lcd_data_driver。
+ * @note 由 SDK 中断回调入口执行，不打印高频日志或操作页面。
+ */
 static void lcd_send_ok_callback(void)
 {
     /* 移除频繁的打印，减少日志噪音 */
@@ -355,7 +442,11 @@ static void lcd_send_ok_callback(void)
 }
 #endif /* D_LCD_EMI_ILI948X_ENABLE */
 
-// LCD 接口初始化
+/**
+ * @brief 按已选总线打开设备并登记所需回调及非阻塞模式。
+ * @return 设备成功打开为 0，未支持的总线或打开失败为 -1。
+ * @note GC 异步配置失败仍保留已打开句柄并降级；EMI 当前不把 ioctl 配置错误作为打开失败上报。
+ */
 static int lcd_interface_init(void)
 {
 #ifdef D_LCD_GC9307_SDK_LCD_ENABLE
@@ -367,7 +458,7 @@ static int lcd_interface_init(void)
         lcd_hdl = dev_open(lcd_pdata->spi_id, NULL);
         if (lcd_hdl) {
             int ret = lcd_spi_async_setup();
-            /* D++: Interface open details are migration diagnostics; keep normal boot logs short. */
+            /* D++: 接口打开细节属于迁移诊断，普通启动仅保留简短日志。 */
 #ifdef D_LCD_IF_DIAG_LOG_ENABLE
             printf("[D_CODE] SPI LCD opened id=%s nonblock=%d\n", lcd_pdata->spi_id, ret);
 #endif
@@ -389,7 +480,7 @@ static int lcd_interface_init(void)
             int ret2 = dev_ioctl(lcd_hdl, EMI_USE_SEND_SEM, 1);
             // 设置非阻塞模式（摄像头显示需要）
             int ret3 = dev_ioctl(lcd_hdl, IOCTL_EMI_WRITE_NON_BLOCK, 1);
-            /* D++: EMI callback setup details are useful only during EMI/ILI948x diagnostics. */
+            /* D++: EMI 回调装配细节仅在 EMI/ILI948x 诊断时需要。 */
 #ifdef D_LCD_IF_DIAG_LOG_ENABLE
             printf("[D_CODE] EMI callbacks set: ISR_CB=%d, USE_SEND_SEM=%d, NON_BLOCK=%d\n", ret1, ret2, ret3);
 #endif
@@ -406,7 +497,9 @@ static int lcd_interface_init(void)
     return -1;
 }
 
-// LCD 初始化主函数
+/**
+ * @brief 绑定平台参数、选择面板驱动并初始化总线及面板。 完整合同见 d_lcd_compat.h。
+ */
 int d_lcd_init(const struct lcd_platform_data *pdata)
 {
     if (!pdata) {
@@ -507,7 +600,7 @@ int d_lcd_init(const struct lcd_platform_data *pdata)
 #ifdef D_LCD_EMI_ILI948X_ENABLE
     if (pdata->lcd_if == LCD_EMI) {
     // 启动图像合成任务（摄像头显示需要）
-    /* D++: Compose task startup is expected in EMI/ILI948x mode; detailed prints stay opt-in. */
+    /* D++: EMI/ILI948x 沿原流程启动合成任务，详细日志保持显式开启。 */
 #ifdef D_LCD_IF_DIAG_LOG_ENABLE
     printf("[LCD_DRIVE] Starting picture compose task...\n");
 #endif
@@ -522,7 +615,9 @@ int d_lcd_init(const struct lcd_platform_data *pdata)
     return 0;
 }
 
-// 清屏函数
+/**
+ * @brief 调用已选面板驱动的可选清屏入口。 完整合同见 d_lcd_compat.h。
+ */
 void d_lcd_clear_screen(u16 color)
 {
     if (lcd_dev && lcd_dev->LCD_ClearScreen) {
@@ -530,30 +625,41 @@ void d_lcd_clear_screen(u16 color)
     }
 }
 
-// 获取屏幕宽度
+/**
+ * @brief 读取已选驱动登记的宽度。 完整合同见 d_lcd_compat.h。
+ */
 u16 d_lcd_get_width(void)
 {
     return lcd_w;
 }
 
-// LVGL 显示端口初始化回调（LCD 已在 d_lcd_init 中初始化）
+/**
+ * @brief 保留 LVGL 所需的兼容初始化入口，当前不重复初始化面板。 完整合同见 d_lcd_compat.h。
+ */
 void user_lcd_init(void)
 {
     // LCD 已在 d_lcd_init() 中初始化，此处无需操作
 }
 
-// 获取屏幕高度
+/**
+ * @brief 读取已选驱动登记的高度。 完整合同见 d_lcd_compat.h。
+ */
 u16 d_lcd_get_height(void)
 {
     return lcd_h;
 }
 
-// 填充颜色（别名函数）
+/**
+ * @brief 调用共用清屏入口填充纯色。 完整合同见 d_lcd_compat.h。
+ */
 void d_lcd_fill_color(u16 color)
 {
     d_lcd_clear_screen(color);
 }
 
+/**
+ * @brief 将一块 UI 像素转交所选面板或 EMI 图像合成链路。 完整合同见 d_lcd_compat.h。
+ */
 void lcd_lvgl_full(u16 xs, u16 xe, u16 ys, u16 ye, u8 *img)
 {
 #ifdef D_LCD_GC9307_SDK_LCD_ENABLE
@@ -577,7 +683,7 @@ void lcd_lvgl_full(u16 xs, u16 xe, u16 ys, u16 ye, u8 *img)
 
     u8 mode = get_lcd_show_deta_mode();
 
-    /* D++: EMI flush trace is noisy during normal UI use; errors below remain unconditional. */
+    /* D++: 普通界面不输出高频 EMI 刷新跟踪；下方错误仍无条件报告。 */
 #ifdef D_LCD_EMI_FLUSH_LOG_ENABLE
     if (lcd_lvgl_full_count <= 10) {
         printf("[LCD_LVGL_FULL] #%d mode=%d img=%x area=%d,%d,%d,%d\n",

@@ -20,6 +20,10 @@
 
 
 
+mkey_entry_addr = 0x4000000 + 0x128;
+
+
+
 EXTERN(
 _start
 
@@ -33,6 +37,24 @@ sdfile_vfs_ops
 nor_sdfile_vfs_ops
 clock_timer1
 clock_port
+
+
+clock_sdx
+
+jl_fat_vfs_ops
+video_server_info
+vpkg_server_info
+vpkg_fsys_ops
+avi_pkg_ops
+camera_subdev
+djpeg_subdev
+mjpg_spec_stream_subdev
+uvc_subdev
+
+
+net_jpeg_pkg_ops
+strm_pkg_ops
+net_sys_ops
 audio_server_info
 pcm_decoder_ops
 
@@ -153,7 +175,7 @@ CACHE_RAM_SIZE = FREE_DACHE_WAY*4K+FREE_IACHE_WAY*4K;
 
 MEMORY
 {
-    rom(rx) : ORIGIN = 0x2000120, LENGTH = (8 * 1024 * 1024)
+    rom(rx) : ORIGIN = 0x2000120, LENGTH = (16 * 1024 * 1024)
     sdram(rwx) : ORIGIN = 0x4000120, LENGTH = SDRAM_SIZE
     ram0(rwx) : ORIGIN = 0x1c00000 + TLB_SIZE, LENGTH = RAM0_SIZE
     boot_info(rwx) : ORIGIN = 0x1c00000 + TLB_SIZE + RAM0_SIZE, LENGTH = BOOT_INFO_SIZE
@@ -175,6 +197,7 @@ SECTIONS
         *startup.S.o(.text)
         *(.boot_code)
         *(.text*)
+        *(.jlsp_dns_code .jlsp_dns_code.*)
         *(.rodata*)
 
 
@@ -956,15 +979,6 @@ SECTIONS
         *(.sdram_re_trim_code)
         *(.flushinv_icache)
         *(.volatile_ram_code)
-
-        *(.m4a_dec_lib.text)
-
-
-
-
-
-
-
         *(.dlmalloc_code)
         *(.dlmalloc_const)
         *(.mem_heap_code)
@@ -1286,6 +1300,7 @@ EXTERN(
     lib_lwip_2_2_0_version
     lib_mbedtls_2_2_1_version
     lib_mbedtls_2_26_0_version
+    lib_mbedtls_3_4_0_version
     lib_mdns_version
     lib_mongoose_version
     lib_mqtt_version

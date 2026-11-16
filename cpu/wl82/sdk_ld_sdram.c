@@ -416,6 +416,7 @@ EXTERN(
     lib_lwip_2_2_0_version
     lib_mbedtls_2_2_1_version
     lib_mbedtls_2_26_0_version
+    lib_mbedtls_3_4_0_version
     lib_mdns_version
     lib_mongoose_version
     lib_mqtt_version

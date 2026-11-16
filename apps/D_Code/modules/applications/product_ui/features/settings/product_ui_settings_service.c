@@ -1,7 +1,4 @@
-/**
- * @file product_ui_settings_service.c
- * @brief Honest Product UI settings adapter for the active hardware profile.
- */
+/** @file product_ui_settings_service.c @brief 设置能力、值投影及有限命令；硬件与外观事务由各所有者执行。 */
 
 #include "config/app_config.h"
 
@@ -25,6 +22,10 @@ static OS_MUTEX s_settings_mutex;
 static uint8_t s_settings_mutex_ready;
 static product_ui_settings_snapshot_t s_settings;
 
+/**
+ * @brief 从外观所有者刷新内嵌快照及壁纸投影，不让硬件发布者覆盖。
+ * @param[in,out] snapshot 设置快照，外观初始化结束后才设置相应能力及有效位。
+ */
 static void product_ui_settings_project_appearance(product_ui_settings_snapshot_t *snapshot)
 {
     const uint32_t mask = PRODUCT_UI_SETTING_CAP_WALLPAPER | PRODUCT_UI_SETTING_CAP_REDUCE_MOTION;
@@ -38,6 +39,11 @@ static void product_ui_settings_project_appearance(product_ui_settings_snapshot_
     }
 }
 
+/**
+ * @brief 在持有设置锁时比较并提交投影，只有变化才推进非零代次。
+ * @param[in,out] next 待提交值，其 revision 由本函数规范化。
+ * @return 内容变化并保存返回 1，完全相同返回 0。
+ */
 static uint8_t product_ui_settings_store_locked(product_ui_settings_snapshot_t *next)
 {
     next->revision = s_settings.revision;
@@ -48,6 +54,11 @@ static uint8_t product_ui_settings_store_locked(product_ui_settings_snapshot_t *
     return 1U;
 }
 
+/**
+ * @brief 校验能力及有效位关系、百分比、布尔值和音量状态范围。
+ * @param[in] snapshot 待发布的借用快照。
+ * @return 有效返回 1，空指针或范围不符返回 0。
+ */
 static uint8_t product_ui_settings_snapshot_valid(
     const product_ui_settings_snapshot_t *snapshot)
 {
@@ -65,6 +76,9 @@ static uint8_t product_ui_settings_snapshot_valid(
     return 1U;
 }
 
+/**
+ * @brief 在串行启动阶段建立互斥量并重置设置投影。
+ */
 int product_ui_settings_service_init(void)
 {
     if (!s_settings_mutex_ready) {
@@ -80,6 +94,9 @@ int product_ui_settings_service_init(void)
     return 0;
 }
 
+/**
+ * @brief 验证硬件发布值，重新取外观投影后按实际变化更新设置代次。
+ */
 int product_ui_settings_service_publish(
     const product_ui_settings_snapshot_t *snapshot)
 {
@@ -92,7 +109,7 @@ int product_ui_settings_service_publish(
     }
     next = *snapshot;
     os_mutex_pend(&s_settings_mutex, 0);
-    /* Appearance is a projection, never a field owned by hardware publishers. */
+    /* 外观字段是所有者投影，不由硬件状态发布者拥有。 */
     product_ui_settings_project_appearance(&next);
     is_changed = product_ui_settings_store_locked(&next);
     os_mutex_post(&s_settings_mutex);
@@ -100,6 +117,9 @@ int product_ui_settings_service_publish(
     return 0;
 }
 
+/**
+ * @brief 刷新真实外观投影并在设置互斥量内复制当前状态。
+ */
 int product_ui_settings_service_snapshot(product_ui_settings_snapshot_t *snapshot)
 {
     product_ui_settings_snapshot_t next;
@@ -117,6 +137,9 @@ int product_ui_settings_service_snapshot(product_ui_settings_snapshot_t *snapsho
     return 0;
 }
 
+/**
+ * @brief 选择音量滑条应显示的当前值或目标值。
+ */
 uint8_t product_ui_settings_volume_display(const product_ui_settings_snapshot_t *snapshot)
 {
     if (snapshot == NULL) return 0U;
@@ -126,6 +149,9 @@ uint8_t product_ui_settings_volume_display(const product_ui_settings_snapshot_t 
     return snapshot->volume_percent;
 }
 
+/**
+ * @brief 根据能力、有效位及音量状态判断当前是否允许继续调节。
+ */
 uint8_t product_ui_settings_volume_can_adjust(const product_ui_settings_snapshot_t *snapshot)
 {
     return snapshot != NULL &&
@@ -135,6 +161,9 @@ uint8_t product_ui_settings_volume_can_adjust(const product_ui_settings_snapshot
         snapshot->volume_state != PRODUCT_UI_VOLUME_UNAVAILABLE;
 }
 
+/**
+ * @brief 从音量阶段生成静态中文状态文字。
+ */
 const char *product_ui_settings_volume_status(const product_ui_settings_snapshot_t *snapshot)
 {
     if (snapshot == NULL) return "音量控制不可用";
@@ -148,6 +177,9 @@ const char *product_ui_settings_volume_status(const product_ui_settings_snapshot
     }
 }
 
+/**
+ * @brief 根据外观服务就绪、静默及事务占用筛选保存操作。
+ */
 uint8_t product_ui_settings_appearance_can_save(const product_ui_settings_snapshot_t *snapshot)
 {
     if (snapshot == NULL) return 0U;
@@ -155,6 +187,9 @@ uint8_t product_ui_settings_appearance_can_save(const product_ui_settings_snapsh
         !snapshot->appearance.is_pending && !snapshot->appearance.is_in_progress;
 }
 
+/**
+ * @brief 按外观就绪、维护、超时、事务及保存结果选择状态文字。
+ */
 const char *product_ui_settings_appearance_status(const product_ui_settings_snapshot_t *snapshot)
 {
     if (snapshot == NULL || !snapshot->appearance.is_service_ready) return "外观保存不可用";
@@ -165,6 +200,9 @@ const char *product_ui_settings_appearance_status(const product_ui_settings_snap
     return snapshot->appearance.has_confirmed_record ? "已保存" : "默认外观";
 }
 
+/**
+ * @brief 校验命令后转交外观事务或通用设置处理器。
+ */
 int product_ui_settings_service_command(product_ui_settings_command_e command,
                                         uint8_t value)
 {

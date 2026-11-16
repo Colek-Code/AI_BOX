@@ -1,6 +1,6 @@
 /**
  * @file    qwen_cmd.c
- * @brief   Qwen 业务命令解析实现
+ * @brief   解析 SDK 命令并发布有界值事件，不在回调中等待音量完成。
  * @author  D_Code
  * @date    2026-05-23
  */
@@ -34,6 +34,11 @@ int32_t c_mm_cmd_register(char *domain_name, char *cmd, c_mmi_cmd_func func);
 static char s_qwen_cmd_general_domain[] = "general_command";
 static char s_qwen_cmd_general_change[] = "change";
 
+/**
+ * @brief 借用业务域诊断名称。
+ * @param[in] domain 业务域枚举。
+ * @return 静态名称，未知域返回 unknown。
+ */
 static const char *qwen_cmd_domain_name(qwen_cmd_domain_e domain)
 {
     switch (domain) {
@@ -48,6 +53,11 @@ static const char *qwen_cmd_domain_name(qwen_cmd_domain_e domain)
     }
 }
 
+/**
+ * @brief 借用音量事件诊断名称。
+ * @param[in] event SDK 音量事件。
+ * @return 静态事件名，未知值返回 unknown。
+ */
 static const char *qwen_cmd_volume_event_name(uint32_t event)
 {
     switch (event) {
@@ -66,6 +76,11 @@ static const char *qwen_cmd_volume_event_name(uint32_t event)
     }
 }
 
+/**
+ * @brief 借用应用事件诊断名称。
+ * @param[in] event SDK 应用事件。
+ * @return 静态名称，未列事件返回 other。
+ */
 static const char *qwen_cmd_application_event_name(uint32_t event)
 {
     switch (event) {
@@ -96,6 +111,11 @@ static const char *qwen_cmd_application_event_name(uint32_t event)
     }
 }
 
+/**
+ * @brief 借用翻译事件诊断名称。
+ * @param[in] event SDK 翻译事件。
+ * @return 静态名称，未知值返回 unknown。
+ */
 static const char *qwen_cmd_voice_translate_event_name(uint32_t event)
 {
     switch (event) {
@@ -108,6 +128,12 @@ static const char *qwen_cmd_voice_translate_event_name(uint32_t event)
     }
 }
 
+/**
+ * @brief 有界复制命令文字，截断时仍保留末尾零。
+ * @param[out] dst 目标缓冲。
+ * @param[in] dst_size 缓冲容量。
+ * @param[in] src 可空源文本，为空生成空串。
+ */
 static void qwen_cmd_copy_text(char *dst, uint32_t dst_size, const char *src)
 {
     uint32_t src_len;
@@ -130,6 +156,11 @@ static void qwen_cmd_copy_text(char *dst, uint32_t dst_size, const char *src)
     dst[copy_len] = '\0';
 }
 
+/**
+ * @brief 发布命令值载荷并记录解析与受理诊断。
+ * @param[in] msg 待发布值结构；为空时不处理。
+ * @param[in] action 可空动作诊断名称。
+ */
 static void qwen_cmd_publish(const qwen_cmd_msg_t *msg, const char *action)
 {
     if (msg == NULL) {
@@ -146,6 +177,11 @@ static void qwen_cmd_publish(const qwen_cmd_msg_t *msg, const char *action)
          (action != NULL) ? action : "deferred");
 }
 
+/**
+ * @brief 把 SDK 注册返回映射为服务错误。
+ * @param[in] ret SDK 原始注册结果。
+ * @return 成功、参数、忙分别映射 D_OK、D_ERR_INVALID_ARG、D_ERR_BUSY，其余为 D_ERR_IO。
+ */
 static d_err_t qwen_cmd_map_register_result(int32_t ret)
 {
     if (ret == UTIL_SUCCESS) {
@@ -163,6 +199,13 @@ static d_err_t qwen_cmd_map_register_result(int32_t ret)
     return D_ERR_IO;
 }
 
+/**
+ * @brief 将合法音量命令映射为统一服务的非阻塞请求。
+ * @param[in] event SDK 音量命令。
+ * @param[in] value 绝对设置值；未定义或超过 100 时忽略。
+ * @return 静态诊断字符串 accepted、failed、ignored 或 deferred。
+ * @note accepted 只表示受理，不表示后端已执行。
+ */
 static const char *qwen_cmd_apply_volume(uint32_t event, uint32_t value)
 {
     d_err_t err;
@@ -205,6 +248,9 @@ static const char *qwen_cmd_apply_volume(uint32_t event, uint32_t value)
     return "accepted";
 }
 
+/**
+ * @brief 解析 SDK 音量参数，提交统一音量请求并发布命令值事件；完整合同见 qwen_cmd.h。
+ */
 int32_t qwen_cmd_handle_volume(uint32_t event, void *params)
 {
     qwen_cmd_msg_t msg;
@@ -226,6 +272,9 @@ int32_t qwen_cmd_handle_volume(uint32_t event, void *params)
     return UTIL_SUCCESS;
 }
 
+/**
+ * @brief 解析 SDK 应用或设置名称并发布待上层处理的命令；完整合同见 qwen_cmd.h。
+ */
 int32_t qwen_cmd_handle_application(uint32_t event, void *params)
 {
     qwen_cmd_msg_t msg;
@@ -252,6 +301,9 @@ int32_t qwen_cmd_handle_application(uint32_t event, void *params)
     return UTIL_SUCCESS;
 }
 
+/**
+ * @brief 把 SDK 翻译开始或结束转换为业务命令值事件；完整合同见 qwen_cmd.h。
+ */
 int32_t qwen_cmd_handle_voice_translate(uint32_t event, void *params)
 {
     qwen_cmd_msg_t msg;
@@ -265,6 +317,11 @@ int32_t qwen_cmd_handle_voice_translate(uint32_t event, void *params)
     return UTIL_SUCCESS;
 }
 
+/**
+ * @brief 把 general_command/change 转换为待上层处理的未知域命令。
+ * @param[in] param SDK 兼容文本参数，本实现不使用。
+ * @return 固定返回 UTIL_SUCCESS。
+ */
 static int32_t qwen_cmd_handle_general_change(char *param)
 {
     qwen_cmd_msg_t msg;
@@ -277,6 +334,9 @@ static int32_t qwen_cmd_handle_general_change(char *param)
     return UTIL_SUCCESS;
 }
 
+/**
+ * @brief 分别注册音量、应用、翻译及通用 change 回调；完整合同见 qwen_cmd.h。
+ */
 d_err_t qwen_cmd_register_handlers(void)
 {
     int32_t ret;

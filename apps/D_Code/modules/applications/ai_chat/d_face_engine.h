@@ -21,7 +21,7 @@
 #define FACE_CANVAS_H       200
 
 /* 动画帧率（毫秒/帧） */
-#define FACE_FRAME_INTERVAL 100     /* 10 fps */
+#define FACE_FRAME_INTERVAL 100     /* 每秒十帧的参考周期；调用方自行安排更新节奏。 */
 
 /* 眨眼参数（毫秒） */
 #define BLINK_OPEN_MIN      400
@@ -119,7 +119,7 @@ typedef struct {
 
 /* 表情上下文（整体状态） */
 typedef struct {
-    face_eye_t  eyes[2];        /* 0=left, 1=right */
+    face_eye_t  eyes[2];        /* 0 为左眼，1 为右眼。 */
     int         mouth_open;     /* 0~100，0=闭嘴 */
     int         breath_offset;  /* 呼吸Y偏移，像素 */
     face_emotion_t emotion;
@@ -130,57 +130,68 @@ typedef struct {
 /*==================== 公共接口 ====================*/
 
 /**
- * @brief 初始化表情引擎，创建 Canvas 控件
- * @param parent  父对象（通常是屏幕或容器）
- * @return 表情 Canvas 对象指针，失败返回 NULL
+ * @brief 重置静态动画上下文并创建使用静态 RGB565 缓冲的单实例 Canvas。
+ * @param[in,out] parent 调用方提供的有效 LVGL 父对象。
+ * @return 成功返回父对象拥有的 Canvas，创建失败为 NULL。
+ * @note 仅 LVGL 线程使用；当前无重复创建清理或父对象删除失效监听，不能把静态句柄当作可独立释放的引擎实例。保留 Stack-chan 模型及 RoboEyes 参考归属。
  */
 lv_obj_t *face_engine_create(lv_obj_t *parent);
 
 /**
- * @brief 更新一帧（在 LVGL 主循环中调用）
- * @param interval_ms  距上次调用的毫秒数
+ * @brief 依次推进情绪、眨眼、呼吸、微视、颤抖及嘴巴，再插值并绘制完整帧。
+ * @param[in] interval_ms 本轮经过的毫秒数，调用方须按 UI 动画节奏提供可由内部整数计数表示的间隔。
+ * @note Canvas 尚未创建时忽略；本函数不自行按 FACE_FRAME_INTERVAL 限频，也不提供跨线程互斥。
  */
 void face_engine_update(uint32_t interval_ms);
 
 /**
- * @brief 设置情绪（平滑过渡，5秒后自动衰减回NEUTRAL）
+ * @brief 设定目标情绪及衰减期限，并同步自动装饰器。
+ * @param[in] emotion 合法情绪枚举；达到 COUNT 的值忽略，调用方仍须避免负枚举。
+ * @note 非中性目标在后续 update 累计 EMOTION_DECAY_TIME 后恢复中性，不在调用时立即完成画面插值。
  */
 void face_engine_set_emotion(face_emotion_t emotion);
 
 /**
- * @brief 设置嘴巴状态（动画状态机）
+ * @brief 切换嘴巴动画状态并重置相位及开合标志，相同状态不操作。
+ * @param[in] state 调用方保证合法的嘴巴状态。
+ * @note 本接口不设置说话剩余期限；完整有限说话动画须调用 start_speaking。
  */
 void face_engine_set_mouth_state(mouth_state_t state);
 
 /**
- * @brief 触发说话动画（嘴巴快速开合2秒，然后自动停止）
+ * @brief 启动 SPEAKING_DURATION 毫秒的随机开合嘴巴动画，随后自动回空闲。
  */
 void face_engine_start_speaking(void);
 
 /**
- * @brief 设置主题颜色
+ * @brief 设置下次绘制使用的前景及背景色。
+ * @param[in] fg 眼睛、嘴巴及装饰器前景色。
+ * @param[in] bg 画布背景及眼睑遮挡色。
  */
 void face_engine_set_theme(lv_color_t fg, lv_color_t bg);
 
 /**
- * @brief 设置装饰器（最多2个同时活跃）
- * @param slot  插槽 0 或 1
- * @param deco  装饰器类型，FACE_DECO_NONE 表示关闭
+ * @brief 设置一个装饰器槽并重置该槽动画及粒子位置。
+ * @param[in] slot 0 或 1 的槽下标，越界忽略。
+ * @param[in] deco 合法装饰器枚举，NONE 关闭；调用方避免负值。
+ * @note 槽零也由情绪自动管理，下一次情绪变化可能覆盖；槽一留给手动控制。
  */
 void face_engine_set_decorator(int slot, face_deco_t deco);
 
 /**
- * @brief 清除所有装饰器
+ * @brief 清除两个装饰器槽及其累计时间，后续情绪变化仍可重新装配槽零。
  */
 void face_engine_clear_decorators(void);
 
 /**
- * @brief 设置脸型（简单脸/狗脸）
+ * @brief 保存脸型选择，后续绘制时 DOG 使用狗脸，其余使用简单脸。
+ * @param[in] type 期望使用的脸型枚举。
  */
 void face_engine_set_face_type(face_type_t type);
 
 /**
- * @brief 获取当前表情上下文（只读）
+ * @brief 只读借用当前静态表情上下文。
+ * @return 内部静态上下文指针，不由调用方修改或释放；后续 update 或设置操作可改变内容。
  */
 const face_context_t *face_engine_get_context(void);
 

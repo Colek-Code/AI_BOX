@@ -1,7 +1,7 @@
 /*******************************************************************************
  * Size: 54 px
  * Bpp: 4
- * Font-converter invocation omitted: machine-local font path.
+ * Opts: --size 54 --bpp 4 --format lvgl --font C:\Users\17189\AppData\Local\Temp\Orbitron-VariableFont_wght.ttf --symbols 0123456789:- --no-kerning --lv-include lvgl.h --lv-font-name cipher_clock_font_54 --output apps\D_Code\modules\main_page\assets\cipher_clock_font_54.c
  * Source: Orbitron from Google Fonts, SIL Open Font License 1.1.
  ******************************************************************************/
 

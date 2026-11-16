@@ -1,28 +1,19 @@
 /**
  * @file d_feature_resolve.h
- * @brief Resolve application features into JieLi SDK dependency macros.
- *
- * Application developers configure board_config.h and app_config.h. Hardware
- * ownership is kept separately in d_board_resolve.h.
+ * @brief 将应用功能解析为杰理 SDK 依赖宏。
+ * @note 开发者配置 board_config.h 与 app_config.h；硬件归属单独由 d_board_resolve.h 管理。
  */
 
 #ifndef D_FEATURE_RESOLVE_H
 #define D_FEATURE_RESOLVE_H
 
-/* WiFi -> network stack. */
+/* Wi-Fi 功能依赖网络协议栈。 */
 #if D_FEATURE_WIFI
 #define CONFIG_WIFI_ENABLE
 #define CONFIG_NET_ENABLE
 #endif
 
-/* Device platform -> network, TLS and HTTP client. Qwen resolves its own below. */
-#if D_DEVICE_CLOUD_ENABLE
-#define CONFIG_NET_ENABLE
-#define CONFIG_MBEDTLS_ENABLE
-#define CONFIG_HTTP_CLIENT_ENABLE
-#endif
-
-/* BLE provisioning -> BLE-only controller profile. */
+/* BLE 配网使用仅 BLE 的控制器配置。 */
 #if D_FEATURE_BLE_PROVISION
 #define CONFIG_BT_ENABLE
 #define TCFG_USER_BLE_ENABLE              1
@@ -43,7 +34,7 @@
 #define CONFIG_BLE_MESH_ENABLE            0
 #endif
 
-/* Optional text and camera applications. */
+/* 可选的文本及相机应用。 */
 #if D_FEATURE_AI_CHAT
 #define CONFIG_NET_ENABLE
 #define CONFIG_MBEDTLS_ENABLE
@@ -63,14 +54,14 @@
 #define D_CAMERA_PREVIEW_ENABLE 0
 #endif
 
-/* ISP0 uses iic0 on the original connector; Product preview gives touch its own bus. */
+/* ISP0 沿用原连接器上的 iic0；产品预览为触摸保留独立总线。 */
 #if D_CAMERA_PREVIEW_ENABLE
 #define D_HYN_IIC_DEVICE_NAME "iic1"
 #else
 #define D_HYN_IIC_DEVICE_NAME "iic0"
 #endif
 
-/* Product reminders remain audible without a cloud voice agent. */
+/* 没有云语音代理时，产品提醒仍须能播放声音。 */
 #if D_UI_TARGET == D_UI_PRODUCT
 #define D_LOCAL_PROMPT_ENABLE 1
 #define CONFIG_AUDIO_ENABLE
@@ -78,9 +69,9 @@
 #define D_LOCAL_PROMPT_ENABLE 0
 #endif
 
-/* Voice agents -> required SDK infrastructure. */
+/* 语音代理所需的 SDK 基础依赖。 */
 #if D_FEATURE_BRTC
-/* Two BRTC port files retain the vendor-facing legacy guard. */
+/* 两个 BRTC 适配文件继续使用供应商接口要求的旧条件宏。 */
 #define D_MODULE_BRTC_AGENT_ENABLE
 #define CONFIG_NET_ENABLE
 #define CONFIG_AUDIO_ENABLE
@@ -107,7 +98,12 @@
 #endif
 #endif
 
-/* Local music -> audio server and local-music mode. */
+/* 本地音乐依赖音频服务及本地音乐模式。 */
+#if D_FEATURE_LOCAL_MUSIC && (D_UI_TARGET == D_UI_PRODUCT)
+#define D_PRODUCT_MUSIC_ENABLE 1
+#else
+#define D_PRODUCT_MUSIC_ENABLE 0
+#endif
 #if D_FEATURE_LOCAL_MUSIC
 #define CONFIG_AUDIO_ENABLE
 #define CONFIG_LOCAL_MUSIC_MODE_ENABLE
@@ -119,13 +115,19 @@
 #define CONFIG_LOCAL_MUSIC_MODE_ENABLE
 #endif
 
-/* OTA -> network and HTTP client. */
+/* 即使关闭 Qwen，HTTPS OTA 仍自行依赖 TLS 及可信时间启动链路。 */
 #if D_FEATURE_OTA
 #define CONFIG_NET_ENABLE
+#define CONFIG_MBEDTLS_ENABLE
 #define CONFIG_HTTP_CLIENT_ENABLE
 #endif
 
-/* Standalone network tests may still be enabled through compiler flags. */
+/* 独立网络测试仍可通过编译参数显式启用。 */
+#if D_FEATURE_WEBSOCKET
+#define CONFIG_NET_ENABLE
+#define CONFIG_MBEDTLS_ENABLE
+#endif
+
 #if defined(D_TCP_CLIENT_TEST) || defined(D_TCP_SERVER_TEST) || \
     defined(D_UDP_TEST) || defined(D_HTTP_TEST) || defined(D_MQTT_TEST)
 #define CONFIG_NET_ENABLE

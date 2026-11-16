@@ -1,10 +1,10 @@
-/**
- * @file product_ui_row_model.c
- * @brief Deterministic validation for row interaction and trailing style.
- */
+/** @file product_ui_row_model.c @brief 不依赖 LVGL 的列表行交互与尾部样式语义校验。 */
 
 #include "modules/applications/product_ui/shared/widgets/product_ui_row_model.h"
 
+/**
+ * @brief 检查列表行交互、尾部外观和回调／状态文本是否一致。
+ */
 uint8_t product_ui_row_semantics_valid(
     product_ui_row_interaction_e interaction,
     product_ui_row_trailing_e trailing,

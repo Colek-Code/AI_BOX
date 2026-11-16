@@ -60,6 +60,14 @@ static const char AI_EMO_CLASSIFY_PROMPT[] =
 //                              JSON 构建/解析（保留原有逻辑）                      //
 //*********************************************************************************//
 
+/**
+ * @brief 在输出容量内转义引号、反斜杠及常见换行控制字节。
+ * @param[in] src 非空 NUL 结尾输入。
+ * @param[out] dst 调用方提供的非空输出缓冲。
+ * @param[in] dst_size 至少两字节的输出总容量。
+ * @return 实际输出字节数，不含 NUL；到容量边界时截断。
+ * @note 不验证 UTF-8 或完整 JSON 字符集；调用方使用既有有限请求文本。
+ */
 static int json_escape_string(const char *src, char *dst, int dst_size)
 {
     int i = 0, j = 0;
@@ -78,6 +86,15 @@ static int json_escape_string(const char *src, char *dst, int dst_size)
     return j;
 }
 
+/**
+ * @brief 以首个匹配键和冒号查找带引号文字，处理有限转义并拷贝。
+ * @param[in] json 非空 NUL 结尾响应文字。
+ * @param[in] key 非空待查字段名。
+ * @param[out] value 非空输出缓冲。
+ * @param[in] value_size 至少一字节输出容量。
+ * @return 找到后返回拷贝字节数；找不到键或值开头不是引号返回 -1。
+ * @note 这是简单字符串提取，不校验完整 JSON 或嵌套语义；容量不足会截断仍返回已拷贝长度。
+ */
 static int find_json_string(const char *json, const char *key, char *value, int value_size)
 {
     char search_key[64];
@@ -111,6 +128,13 @@ static int find_json_string(const char *json, const char *key, char *value, int 
     return i;
 }
 
+/**
+ * @brief 按所选旧 AI 平台组装系统提示及用户消息请求体。
+ * @param[in] user_msg 非空借用用户文字，先拷贝到有限转义缓冲。
+ * @param[out] json_buf 请求体输出缓冲。
+ * @param[in] buf_size 请求体总容量。
+ * @return 沿用 snprintf：返回完整目标长度，可能达到或超过 buf_size 表示截断。
+ */
 static int build_request_json(const char *user_msg, char *json_buf, int buf_size)
 {
     char escaped_msg[512];
@@ -132,6 +156,13 @@ static int build_request_json(const char *user_msg, char *json_buf, int buf_size
 #endif
 }
 
+/**
+ * @brief 按平台兼容顺序提取 text／content 字段。
+ * @param[in] json 非空响应文本。
+ * @param[out] reply 非空回复缓冲。
+ * @param[in] reply_size 回复总容量。
+ * @return 返回实际提取字节数或 -1 未找到；沿用简单提取器的截断语义。
+ */
 static int parse_ai_response(const char *json, char *reply, int reply_size)
 {
 #if (D_AI_PLATFORM == 1)
@@ -173,6 +204,11 @@ static const struct { const char *kw; d_emotion_t emo; } s_keyword_emotions[] = 
 };
 #define KEYWORD_EMO_COUNT  (sizeof(s_keyword_emotions) / sizeof(s_keyword_emotions[0]))
 
+/**
+ * @brief 按静态关键词顺序选择首个匹配情绪。
+ * @param[in] text 非空 NUL 结尾候选文字。
+ * @return 匹配情绪，无匹配为 NEUTRAL。
+ */
 static d_emotion_t ai_keyword_emotion(const char *text)
 {
     int i;
@@ -190,6 +226,16 @@ static httpcli_ctx s_http_ctx;
 static char s_full_url[256];
 static char s_custom_header[512];
 
+/**
+ * @brief 把 SDK 响应分块追加到当前静态接收上下文，错误或中止拒绝继续。
+ * @param[in] ctx SDK 回调上下文，当前未使用。
+ * @param[in] buf 本次回调借用的响应块。
+ * @param[in] size 分块字节数。
+ * @param[in] priv SDK 私有参数，当前未使用。
+ * @param[in] status SDK HTTP 接收阶段。
+ * @return HTTPIN_ERROR／ABORT 返回 -1，其余状态返回 0；超过固定容量的块不复制。
+ * @note 接收边界使用 RESPONSE_BUF_SIZE，不使用 https_post_request 的 response_size；仅当前串行请求使用。
+ */
 static int http_response_cb(void *ctx, void *buf, unsigned int size, void *priv, httpin_status status)
 {
     switch (status) {
@@ -209,6 +255,9 @@ static int http_response_cb(void *ctx, void *buf, unsigned int size, void *priv,
     return 0;
 }
 
+/**
+ * @brief 存在 SDK socket 句柄时关闭当前静态 HTTP 连接。
+ */
 static void https_keepalive_close(void)
 {
     if (s_http_ctx.sock_hdl) {
@@ -216,6 +265,10 @@ static void https_keepalive_close(void)
     }
 }
 
+/**
+ * @brief 已有 socket 时复用，否则按借用配置建立静态 HTTPS Keep-Alive 上下文。
+ * @return 已有连接或创建成功为 0，创建失败清空上下文并返回 -1。
+ */
 static int https_keepalive_ensure(void)
 {
     if (s_http_ctx.sock_hdl != NULL) return 0;
@@ -236,6 +289,14 @@ static int https_keepalive_ensure(void)
     return 0;
 }
 
+/**
+ * @brief 设置授权头与接收缓冲并同步发送，发送失败时关闭重连再试一次。
+ * @param[in] body 调用期间借用的 NUL 结尾 JSON 请求体。
+ * @param[out] response 非空接收缓冲，当前实现要求至少 RESPONSE_BUF_SIZE 字节。
+ * @param[in] response_size 用于清零的字节数；回调容量仍固定为 RESPONSE_BUF_SIZE。
+ * @return 成功返回回调累计的响应字节数，连接或两次发送失败返回 -1。
+ * @note 共用静态 HTTP／接收状态，未提供并发安全；max_retries 配置不控制此处固定的一次重连重试。
+ */
 static int https_post_request(const char *body, char *response, int response_size)
 {
     int body_len = strlen(body);
@@ -293,6 +354,13 @@ static int https_post_request(const char *body, char *response, int response_siz
 //                              核心 AI 对话                                        //
 //*********************************************************************************//
 
+/**
+ * @brief 网络就绪时同步请求旧 AI 平台并提取非空回复。
+ * @param[in] user_message 借用用户消息。
+ * @param[out] reply 调用方回复缓冲。
+ * @param[in] reply_size 回复总容量。
+ * @return 有有效回复为 0，未就绪、HTTP 或解析失败为 -1。
+ */
 static int ai_chat(const char *user_message, char *reply, int reply_size)
 {
     char json_body[1024];
@@ -323,6 +391,13 @@ static int ai_chat(const char *user_message, char *reply, int reply_size)
     return 0;
 }
 
+/**
+ * @brief 用有限第二次请求分类对话情绪，取回复中首个零至七数字。
+ * @param[in] user_msg 借用用户消息。
+ * @param[in] ai_reply 借用 AI 回复。
+ * @return 匹配情绪，构建、网络或解析失败为 NEUTRAL。
+ * @note 使用静态构建缓冲，由单一后台任务串行调用。
+ */
 static d_emotion_t ai_classify_emotion_via_llm(const char *user_msg, const char *ai_reply)
 {
     static char cls_input[384];
@@ -379,7 +454,12 @@ static d_emotion_t ai_classify_emotion_via_llm(const char *user_msg, const char 
 static volatile int s_request_pending = 0;
 static char s_request_msg[128];
 
-/* 订阅 EVT_AI_REQUEST */
+/**
+ * @brief 在不忙时有界复制请求文字并置待处理／忙标志，忙时发布 BUSY。
+ * @param[in] evt 事件总线借用的请求事件，调用链保证非空。
+ * @param[in] ctx 订阅上下文，当前未使用。
+ * @note 回调不执行 HTTP；当前标志为 volatile，未在此提供多生产者原子准入保证。
+ */
 static void on_ai_request(const d_event_t *evt, void *ctx)
 {
     if (evt->id != EVT_AI_REQUEST) return;
@@ -399,7 +479,11 @@ static void on_ai_request(const d_event_t *evt, void *ctx)
     s_busy = 1;
 }
 
-/* WiFi 事件订阅 */
+/**
+ * @brief 收到连接事件时设置网络就绪标志，重复就绪忽略。
+ * @param[in] evt 借用 WiFi 事件。
+ * @param[in] ctx 订阅上下文，当前未使用。
+ */
 static void on_wifi_connected(const d_event_t *evt, void *ctx)
 {
     if (evt->id != EVT_WIFI_CONNECTED) return;
@@ -408,6 +492,12 @@ static void on_wifi_connected(const d_event_t *evt, void *ctx)
     s_network_ready = 1;
 }
 
+/**
+ * @brief 收到断网事件时撤销就绪并关闭当前 Keep-Alive 连接。
+ * @param[in] evt 借用 WiFi 事件。
+ * @param[in] ctx 订阅上下文，当前未使用。
+ * @note 当前实现未与后台同步请求建立独立互斥或在途排空合同。
+ */
 static void on_wifi_disconnected(const d_event_t *evt, void *ctx)
 {
     if (evt->id != EVT_WIFI_DISCONNECTED) return;
@@ -420,6 +510,11 @@ static void on_wifi_disconnected(const d_event_t *evt, void *ctx)
 //                              AI 后台任务                                         //
 //*********************************************************************************//
 
+/**
+ * @brief 长期等待网络及单槽请求，同步生成回复和情绪后发布结果或错误。
+ * @param[in] priv 任务上下文，当前未使用。
+ * @note 任务无退出分支；事件发布后的消息载荷仍沿用事件总线复制合同，不直接操作 LVGL。
+ */
 static void ai_task(void *priv)
 {
     char reply[512];
@@ -475,6 +570,9 @@ static void ai_task(void *priv)
 //                              公共 API                                            //
 //*********************************************************************************//
 
+/**
+ * @brief 复制配置描述、订阅请求及 WiFi 事件并创建长期后台任务。
+ */
 d_err_t ai_service_init(const ai_service_config_t *config)
 {
     if (!config || !config->api_key) return D_ERR_INVALID_ARG;
@@ -503,6 +601,9 @@ d_err_t ai_service_init(const ai_service_config_t *config)
     return D_OK;
 }
 
+/**
+ * @brief 解除三类事件订阅并关闭当前 Keep-Alive 连接。
+ */
 void ai_service_deinit(void)
 {
     d_event_unsubscribe(EVT_AI_REQUEST,        on_ai_request);
@@ -511,89 +612,6 @@ void ai_service_deinit(void)
     https_keepalive_close();
 }
 
-//*********************************************************************************//
-//                    WS → AI 事件翻译桥（云平台 chat 协议）                       //
-//*********************************************************************************//
 
-#if D_DEVICE_CLOUD_ENABLE
-
-#include "modules/services/websocket/ws_service.h"
-
-/* chat.accepted → EVT_AI_STREAM_START */
-static void on_ws_chat_accepted(const d_event_t *evt, void *ctx)
-{
-    (void)ctx;
-    if (!evt || evt->id != EVT_WS_CHAT_ACCEPTED) return;
-    LOGI(TAG, "WS chat.accepted → AI stream start");
-    d_event_publish(EVT_AI_STREAM_START, NULL, 0);
-}
-
-/* chat.delta → EVT_AI_RESPONSE（增量文本） */
-static void on_ws_chat_delta(const d_event_t *evt, void *ctx)
-{
-    (void)ctx;
-    if (!evt || evt->id != EVT_WS_CHAT_DELTA) return;
-    const ws_chat_delta_t *delta = (const ws_chat_delta_t *)evt->data;
-    if (!delta || delta->text[0] == '\0') return;
-
-    /* 构造 ai_response_t 并发布 */
-    static ai_response_t s_ws_resp;
-    memset(&s_ws_resp, 0, sizeof(s_ws_resp));
-    strncpy(s_ws_resp.text, delta->text, sizeof(s_ws_resp.text) - 1);
-    s_ws_resp.emotion = EMOTION_NEUTRAL;
-
-    d_event_publish(EVT_AI_RESPONSE, &s_ws_resp, sizeof(s_ws_resp));
-}
-
-/* chat.done → EVT_AI_STREAM_DONE */
-static void on_ws_chat_done(const d_event_t *evt, void *ctx)
-{
-    (void)ctx;
-    if (!evt || evt->id != EVT_WS_CHAT_DONE) return;
-    LOGI(TAG, "WS chat.done → AI stream done");
-    d_event_publish(EVT_AI_STREAM_DONE, NULL, 0);
-}
-
-/* WS 错误 → AI 错误 */
-static void on_ws_error_to_ai(const d_event_t *evt, void *ctx)
-{
-    (void)ctx;
-    if (!evt || evt->id != EVT_WS_ERROR) return;
-    const d_error_info_t *ws_err = (const d_error_info_t *)evt->data;
-    LOGW(TAG, "WS 错误 → AI 错误");
-    static d_error_info_t s_ws_err;
-    static char s_ws_err_msg[128];
-    s_ws_err.code = -1;
-    if (ws_err) {
-        s_ws_err.code = ws_err->code;
-    }
-    if (ws_err && ws_err->msg && ws_err->msg[0]) {
-        strncpy(s_ws_err_msg, ws_err->msg, sizeof(s_ws_err_msg) - 1);
-        s_ws_err_msg[sizeof(s_ws_err_msg) - 1] = '\0';
-        s_ws_err.msg = s_ws_err_msg;
-    } else {
-        s_ws_err.msg = "WebSocket error";
-    }
-    d_event_publish(EVT_AI_ERROR, &s_ws_err, sizeof(s_ws_err));
-}
-
-d_err_t ai_service_ws_bridge_init(void)
-{
-    LOGI(TAG, "注册 WS→AI 事件翻译桥");
-    if ((d_event_subscribe(EVT_WS_CHAT_ACCEPTED, on_ws_chat_accepted, NULL) != 0) ||
-        (d_event_subscribe(EVT_WS_CHAT_DELTA, on_ws_chat_delta, NULL) != 0) ||
-        (d_event_subscribe(EVT_WS_CHAT_DONE, on_ws_chat_done, NULL) != 0) ||
-        (d_event_subscribe(EVT_WS_ERROR, on_ws_error_to_ai, NULL) != 0)) {
-        d_event_unsubscribe(EVT_WS_CHAT_ACCEPTED, on_ws_chat_accepted);
-        d_event_unsubscribe(EVT_WS_CHAT_DELTA, on_ws_chat_delta);
-        d_event_unsubscribe(EVT_WS_CHAT_DONE, on_ws_chat_done);
-        d_event_unsubscribe(EVT_WS_ERROR, on_ws_error_to_ai);
-        LOGE(TAG, "WS→AI 事件桥订阅失败");
-        return D_ERR_IO;
-    }
-    return D_OK;
-}
-
-#endif /* D_DEVICE_CLOUD_ENABLE */
 
 #endif /* D_FEATURE_AI_CHAT */

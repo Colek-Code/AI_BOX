@@ -1,6 +1,6 @@
 /**
  * @file d_config_report.c
- * @brief Prints the resolved board, UI and feature selection at startup.
+ * @brief 在启动阶段报告解析后的板型、界面及功能组合，属于配置诊断，不改变配置。
  */
 
 #include "app_config.h"
@@ -10,6 +10,10 @@
 
 #define TAG "CONFIG"
 
+/**
+ * @brief 取得编译期板型对应的诊断名称。
+ * @return 静态字符串，不转移所有权。
+ */
 static const char *d_config_board_name(void)
 {
 #if D_BOARD_TARGET == D_BOARD_COPY_GC9307_HYN
@@ -19,6 +23,10 @@ static const char *d_config_board_name(void)
 #endif
 }
 
+/**
+ * @brief 取得编译期根界面对应的诊断名称。
+ * @return 静态字符串，不转移所有权。
+ */
 static const char *d_config_ui_name(void)
 {
 #if D_UI_TARGET == D_UI_PRODUCT
@@ -36,16 +44,25 @@ static const char *d_config_ui_name(void)
 #endif
 }
 
+/**
+ * @brief 输出当前已解析配置；接口合同见 d_config_report.h。
+ */
 void d_config_report_print(void)
 {
     LOGI(TAG, "Board: %s", d_config_board_name());
     LOGI(TAG, "UI: %s", d_config_ui_name());
-    LOGI(TAG, "Features: key=%d power=%d wifi=%d ble=%d ws=%d ota=%d",
+    LOGI(TAG, "Screen default orientation=%d (saved user direction takes precedence)",
+         D_SCREEN_DEFAULT_ROTATION_DEGREES);
+    LOGI(TAG, "Generic WebSocket=%d (explicit start)", D_FEATURE_WEBSOCKET);
+    LOGI(TAG, "AI alarm=%d mutations=%d", D_FEATURE_AI_ALARM, D_AI_ALARM_MUTATIONS);
+#if D_FEATURE_QWEN
+    LOGI(TAG, "Qwen WSS diagnostic=%d", D_QWEN_WSS_DIAG_ENABLE);
+#endif
+    LOGI(TAG, "Features: key=%d power=%d wifi=%d ble=%d ota=%d",
          D_FEATURE_KEY_SERVICE,
          D_FEATURE_POWER_CONTROL,
          D_FEATURE_WIFI,
          D_FEATURE_BLE_PROVISION,
-         D_DEVICE_CLOUD_ENABLE,
          D_FEATURE_OTA);
     LOGI(TAG, "AI/audio: chat=%d qwen=%d xiaole=%d brtc=%d rtc=%d music=%d",
          D_FEATURE_AI_CHAT,
@@ -55,8 +72,7 @@ void d_config_report_print(void)
          D_FEATURE_RTC_AUDIO,
          D_FEATURE_LOCAL_MUSIC);
 #if D_FEATURE_QWEN
-    LOGI(TAG, "Qwen auth=%s device_cloud=%d",
-         D_QWEN_AUTH_MODE == D_QWEN_AUTH_MODE_FULL_MANAGED ? "full-managed" : "semi-managed",
-         D_DEVICE_CLOUD_ENABLE);
+    LOGI(TAG, "Qwen auth=%s",
+         D_QWEN_AUTH_MODE == D_QWEN_AUTH_MODE_FULL_MANAGED ? "full-managed" : "semi-managed");
 #endif
 }

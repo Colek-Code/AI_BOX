@@ -61,10 +61,9 @@ static int s_photo_index = -1;                /* 照片序号计数器，-1表�
 //*********************************************************************************//
 
 /**
- * @brief 扫描已有照片，找到下一个可用的照片索引
- * @return 下一个可用的照片索引
- * @note  扫描所有MAX_PHOTOS位置，找到最大的索引+1
- *        同时支持 .JPG 和 .jpg 扩展名
+ * @brief 扫描零至 MAX_PHOTOS 减一的大小写扩展名，优先取最大已有下标后一项。
+ * @return 候选下标；扫描范围满且无空位时仍返回 MAX_PHOTOS，不保证它尚未存在。
+ * @note 不扫描范围以上文件，连续满目录拍照可能重复同名；此函数并不提供无覆盖或原子文件名预留。
  */
 static int find_next_photo_index(void)
 {
@@ -124,8 +123,9 @@ static int find_next_photo_index(void)
 }
 
 /**
- * @brief 确保PHOTO目录存在
- * @return 0=成功, <0=失败
+ * @brief 尝试创建 PHOTO 目录并打印结果。
+ * @return 始终返回 0，只表示已经尝试，不能据此认定目录成功存在。
+ * @note 当前把目录已存在及其他创建错误统一记录，调用方仍依赖随后 fopen 的实际结果。
  */
 static int ensure_photo_dir_exists(void)
 {
@@ -145,13 +145,12 @@ static int ensure_photo_dir_exists(void)
 //*********************************************************************************//
 
 /**
- * @brief 拍照并保存到SD卡
- * @param yuv_buf YUV420数据缓冲区
- * @param width 图像宽度
- * @param height 图像高度
- * @return 0=成功, <0=失败
- *
- * @note 此函数在YUV回调中调用，会短暂阻塞显示（约100-300ms）
+ * @brief 在旧 YUV 回调路径同步编码 JPEG 并写入 SD，结束时关闭文件及释放局部编码缓冲。
+ * @param[in] yuv_buf 本次回调借用的完整平面 YUV420 图像，调用方保证容量匹配宽高。
+ * @param[in] width 正图像宽度。
+ * @param[in] height 正图像高度。
+ * @return 完整编码及写入为 0；参数 -1、SD 未就绪 -2、分配 -3、编码 -4、开文件 -5、短写 -6。
+ * @note 执行同步编码及文件 IO，会阻塞本次数据回调；代码不提供固定耗时保证，也不保证目录满后文件名不会重复。失败可能留下部分目标文件。
  */
 static int capture_save_photo(u8 *yuv_buf, int width, int height)
 {
@@ -226,7 +225,7 @@ static int capture_save_photo(u8 *yuv_buf, int width, int height)
     /* 步骤7：生成文件名并保存 */
     printf(LOG_TAG "Step 6: Saving to SD card...\n");
 
-    /* 每次拍照都重新扫描索引，确保不覆盖已有照片 */
+    /* 每次重新扫描有限索引范围；范围已满时，不能据此保证不覆盖范围外的同名文件。 */
     s_photo_index = find_next_photo_index();
 
     /* 确保PHOTO目录存在 */
@@ -283,6 +282,14 @@ exit_cleanup:
 //                              YUV 数据回调                                        //
 //*********************************************************************************//
 
+/**
+ * @brief 页面活跃时消费一次拍照意图，再把当前借用 YUV 交给叠加系统。
+ * @param[in] yuv_buf SDK 本次回调借用的 YUV 缓冲。
+ * @param[in] len SDK 传入的图像字节数。
+ * @param[in] width 图像宽度。
+ * @param[in] height 图像高度。
+ * @note 清除拍照标志后才处理，避免重复触发；当前仅检查非空及正长度，完整 YUV 尺寸容量仍依赖上游合同。
+ */
 static void camera_yuv_callback(u8 *yuv_buf, u32 len, int width, int height)
 {
     if (!s_is_active) return;
@@ -311,6 +318,10 @@ static void camera_yuv_callback(u8 *yuv_buf, u32 len, int width, int height)
 //                              按钮事件回调                                        //
 //*********************************************************************************//
 
+/**
+ * @brief 只设置单次拍照意图，编码与写入留给下一次活跃 YUV 回调。
+ * @param[in] e 按钮事件，当前未读取载荷。
+ */
 static void on_capture_btn_click(lv_event_t *e)
 {
     (void)e;
@@ -329,6 +340,11 @@ static void on_capture_btn_click(lv_event_t *e)
 //                              页面生命周期回调                                    //
 //*********************************************************************************//
 
+/**
+ * @brief 创建旧相机叠加页的底部拍照栏及按钮。
+ * @param[in,out] parent 页面管理器拥有的父容器。
+ * @return 父对象为空返回 -1，其余返回 0；当前未逐项报告子对象分配失败。
+ */
 static int camera_page_create(lv_obj_t *parent)
 {
     if (parent == NULL) {
@@ -386,6 +402,10 @@ static int camera_page_create(lv_obj_t *parent)
     return 0;
 }
 
+/**
+ * @brief 标记页面活跃，必要时启动 YUV 回调并固定等待，再配置 UI_CAMERA 叠加模式。
+ * @note 固定等待及本地 initialized 标志不是 SDK 异步完成或传感器成功证明。
+ */
 static void camera_page_enter(void)
 {
     s_is_active = 1;
@@ -420,6 +440,10 @@ static void camera_page_enter(void)
     /* 通知页面管理器进入叠加模式 */
 }
 
+/**
+ * @brief 先撤销页面活跃，调用外部 YUV uninit，再回到普通 UI 模式。
+ * @note 外部 void uninit 的真实资源完成合同不由本页提供；不把本地标志清零扩展为独立硬件验收。
+ */
 static void camera_page_exit(void)
 {
     s_is_active = 0;
@@ -442,6 +466,10 @@ static void camera_page_exit(void)
     printf(LOG_TAG "Camera page exit - done\n");
 }
 
+/**
+ * @brief 保留页面周期入口，相机数据由 YUV 回调推进。
+ * @param[in] elapsed_ms 本轮间隔，当前未使用。
+ */
 static void camera_page_update(uint32_t elapsed_ms)
 {
     (void)elapsed_ms;
@@ -473,7 +501,11 @@ static page_desc_t s_camera_page_desc = {
     .is_active  = 0,
 };
 
-/* 页面注册回调 */
+/**
+ * @brief 保存模块分配的页面类型并注册静态页面描述。
+ * @param[in] page_type 装配分配的页面类型。
+ * @return 原样返回页面管理器注册结果。
+ */
 static int camera_register_page(int page_type)
 {
     s_camera_page_type = page_type;
@@ -482,9 +514,8 @@ static int camera_register_page(int page_type)
 }
 
 /**
- * @brief 摄像头模块初始化（开机时调用，但不启动摄像头）
- * @note  摄像头在首次进入相机页面时才初始化，避免开机就显示摄像头画面
- *        但照片索引需要提前初始化，避免覆盖已有照片
+ * @brief 启动时仅扫描有限照片索引，不启动相机数据流。
+ * @return 完成扫描尝试后返回 D_OK，不代表 SD 或相机硬件已确认就绪。
  */
 static d_err_t camera_module_init(void)
 {
@@ -503,7 +534,7 @@ static d_err_t camera_module_init(void)
 D_UI_MODULE_DEFINE(camera, "Camera", LV_SYMBOL_VIDEO, camera_register_page, camera_module_init);
 
 /**
- * @brief 检查相机是否已初始化
+ * @brief 读取旧相机页本地初始化标志，具体证明边界见头文件。
  */
 int camera_page_is_initialized(void)
 {

@@ -1,6 +1,6 @@
 /**
  * @file camera_preview.c
- * @brief One persistent SDK owner, supervised independently by sys_timer.
+ * @brief 由持久工作任务独占 SDK，sys_timer 独立监督期限。
  * @author D_Code
  * @date 2026-09-11
  */
@@ -17,7 +17,8 @@
 #include <string.h>
 
 #define TAG "CAMERA"
-#define CAMERA_PREVIEW_WORKER_PRIORITY 26
+/* 预览尽力运行，不抢占 UI 绘制与显示完成工作任务。 */
+#define CAMERA_PREVIEW_WORKER_PRIORITY 1
 #define CAMERA_PREVIEW_WORKER_STACK_WORDS 2048
 #define CAMERA_PREVIEW_MONITOR_MS 100U
 #define CAMERA_PREVIEW_BAD_FRAME_LIMIT 3U
@@ -34,7 +35,7 @@ typedef struct {
     int worker_pid;
     uint16_t supervisor_id;
     uint8_t has_init_attempt;
-    /* The following fields belong exclusively to the worker, including in FAULT. */
+    /* 以下字段始终由工作任务独占，FAULT 阶段也不转移所有权。 */
     void *video;
     struct yuv_image frame;
     uint8_t has_sdk_frame;
@@ -48,7 +49,11 @@ static camera_frame_pool_t s_camera_frames;
 static uint8_t s_camera_capture_yuv[CAMERA_FRAME_INPUT_BYTES] __attribute__((aligned(32)));
 static uint8_t s_camera_overlay_yuv[CAMERA_FRAME_INPUT_BYTES] __attribute__((aligned(32)));
 
-/* Polling enforces deadlines and can revoke an expired request before returning. */
+/**
+ * @brief 在短临界区内检查期限并核对会话发布资格。
+ * @param[in] session 待核对的会话编号。
+ * @return 指定会话仍被请求且可发布时返回非零。
+ */
 static uint8_t camera_preview_poll_request(uint32_t session)
 {
     uint8_t is_requested;
@@ -59,6 +64,10 @@ static uint8_t camera_preview_poll_request(uint32_t session)
     return is_requested;
 }
 
+/**
+ * @brief 更新 SDK 在途标记并检查期限。
+ * @param[in] is_busy 非零表示即将进入 SDK 调用，0 表示调用已返回。
+ */
 static void camera_preview_mark_sdk_busy(uint8_t is_busy)
 {
     OS_ENTER_CRITICAL();
@@ -67,6 +76,13 @@ static void camera_preview_mark_sdk_busy(uint8_t is_busy)
     OS_EXIT_CRITICAL();
 }
 
+/**
+ * @brief 在 SDK 控制调用前后更新在途标记。
+ * @param[in] command SDK 控制命令。
+ * @param[in] argument SDK 命令所需的整数或指针参数。
+ * @return dev_ioctl 的原始返回值。
+ * @note 仅由相机工作任务调用；SDK 阻塞期间不持元数据临界区。
+ */
 static int camera_preview_ioctl(uint32_t command, uintptr_t argument)
 {
     int result;
@@ -76,6 +92,13 @@ static int camera_preview_ioctl(uint32_t command, uintptr_t argument)
     return result;
 }
 
+/**
+ * @brief 记录错误并撤销意图，必要时冻结为 FAULT。
+ * @param[in] error 业务错误分类。
+ * @param[in] result SDK 原始结果。
+ * @param[in] is_fault 非零表示不再自动正常收尾。
+ * @note 丢弃 READY 帧，保留在途读写占用与 SDK 所有权。
+ */
 static void camera_preview_fail(camera_preview_error_e error, int result, uint8_t is_fault)
 {
     OS_ENTER_CRITICAL();
@@ -88,24 +111,39 @@ static void camera_preview_fail(camera_preview_error_e error, int result, uint8_
     LOGW(TAG, "session failure: error=%u sdk=%d fault=%u", (unsigned)error, result, is_fault);
 }
 
+/**
+ * @brief 对持有的 SDK 帧最多提交一次 CLEAR。
+ * @return 无帧时返回 0；有帧时返回 CLEAR 的原始结果。
+ * @note CLEAR 失败的结果不确定，先撤销本地持帧标记，不能对同一占用重复提交。
+ */
 static int camera_preview_return_frame(void)
 {
     if (!s_camera.has_sdk_frame) {
         return 0;
     }
-    /* A failing CLEAR has an unknown outcome. Never submit it twice for this lease. */
+    /* CLEAR 失败时结果不确定，同一帧占用不能重复提交。 */
     s_camera.has_sdk_frame = 0U;
     return camera_preview_ioctl(VIDIOC_CLEAR_OVERLAY, (uintptr_t)&s_camera.frame);
 }
 
+/**
+ * @brief 核对 SDK 帧是否完全落在指定的单帧外部缓冲。
+ * @return 地址、尺寸与 VGA 格式全部匹配返回非零。
+ */
 static uint8_t camera_preview_frame_is_valid(void)
 {
     const struct yuv_image *frame = &s_camera.frame;
-    /* This single-frame external allocation leaves no room for an offset full VGA image. */
+    /* 外部分配仅容纳一张完整 VGA 帧，不允许地址偏移后仍按完整帧读取。 */
     return frame->addr == s_camera_overlay_yuv && frame->size == CAMERA_FRAME_INPUT_BYTES &&
            frame->width == CAMERA_FRAME_INPUT_WIDTH && frame->height == CAMERA_FRAME_INPUT_HEIGHT;
 }
 
+/**
+ * @brief 按节拍领取 RGB 写槽，在锁外转换并重新核对发布资格。
+ * @param[in] session 当前 SDK 事务所属会话。
+ * @return 返回跳过、已处理或处理失败的枚举值。
+ * @note 节拍或槽不足只丢帧，不计作格式转换成功。
+ */
 static camera_preview_frame_result_e camera_preview_process_frame(uint32_t session)
 {
     int slot = -1;
@@ -142,6 +180,10 @@ static camera_preview_frame_result_e camera_preview_process_frame(uint32_t sessi
     return result == D_OK ? CAMERA_PREVIEW_FRAME_PROCESSED : CAMERA_PREVIEW_FRAME_FAILED;
 }
 
+/**
+ * @brief 停止硬件、归还 SDK 帧并关闭设备，再等待 RGB 读写占用归还。
+ * @note SDK 清理失败进入 FAULT，保留尚未确认释放的资源；不提前撤销 UI 读占用。
+ */
 static void camera_preview_close_session(void)
 {
     int stop_result, frame_result, close_result;
@@ -164,7 +206,7 @@ static void camera_preview_close_session(void)
         return;
     }
     s_camera.video = NULL;
-    /* UI may still be copying. Keep its lease and all storage alive until it returns. */
+    /* UI 可能仍在复制，必须保留读占用及全部存储直到读者返回。 */
     do {
         OS_ENTER_CRITICAL();
         is_idle = camera_frame_is_idle(&s_camera_frames);
@@ -179,6 +221,11 @@ static void camera_preview_close_session(void)
     LOGI(TAG, "stopped: SDK steps complete, RGB leases returned");
 }
 
+/**
+ * @brief 顺序执行传感器配置、采帧处理及会话收尾。
+ * @param[in] session 已经领取事务执行权的会话编号。
+ * @note 领取后不能因取消而遗弃半开 SDK 事务；未建立正常关闭合同的配置错误进入 FAULT。
+ */
 static void camera_preview_run_session(uint32_t session)
 {
     struct camera_device_info sensor = {0};
@@ -186,9 +233,15 @@ static void camera_preview_run_session(uint32_t session)
     struct yuv_image overlay = {0};
     unsigned bad_frames = 0U;
     camera_preview_frame_result_e frame_result;
+    uint32_t stage_started_ms;
+    uint32_t elapsed_ms;
+    uint32_t get_max_ms = 0U;
+    uint32_t process_max_ms = 0U;
+    uint32_t process_total_ms = 0U;
+    uint32_t process_attempts = 0U;
     int result;
 
-    /* Once claimed, cancellation must not abandon the half-open vendor transaction. */
+    /* 已领取事务后，即使取消也不能遗弃半开的 SDK 事务。 */
     camera_preview_mark_sdk_busy(1U);
     s_camera.video = dev_open("video0.2", NULL);
     camera_preview_mark_sdk_busy(0U);
@@ -220,11 +273,16 @@ static void camera_preview_run_session(uint32_t session)
         camera_preview_fail(CAMERA_PREVIEW_ERROR_OVERLAY, result, 1U);
         return;
     }
-    /* Only this milestone establishes the normal close contract. No GET after cancellation. */
+    /* 到达此阶段才建立正常关闭合同；取消后不再发起 GET。 */
     s_camera_frames.next_process_ms = timer_get_ms();
     while (camera_preview_poll_request(session)) {
         memset(&s_camera.frame, 0, sizeof(s_camera.frame));
+        stage_started_ms = timer_get_ms();
         result = camera_preview_ioctl(VIDIOC_GET_OVERLAY, (uintptr_t)&s_camera.frame);
+        elapsed_ms = timer_get_ms() - stage_started_ms;
+        if (elapsed_ms > get_max_ms) {
+            get_max_ms = elapsed_ms;
+        }
         if (result != 0) {
             if (result == OS_TIMEOUT) {
                 os_time_dly(1);
@@ -237,13 +295,22 @@ static void camera_preview_run_session(uint32_t session)
         if (!camera_preview_poll_request(session)) {
             break;
         }
+        stage_started_ms = timer_get_ms();
         frame_result = camera_preview_process_frame(session);
+        if (frame_result != CAMERA_PREVIEW_FRAME_SKIPPED) {
+            elapsed_ms = timer_get_ms() - stage_started_ms;
+            process_total_ms += elapsed_ms;
+            process_attempts++;
+            if (elapsed_ms > process_max_ms) {
+                process_max_ms = elapsed_ms;
+            }
+        }
         if (frame_result == CAMERA_PREVIEW_FRAME_FAILED) {
             bad_frames++;
         } else if (frame_result == CAMERA_PREVIEW_FRAME_PROCESSED) {
             bad_frames = 0U;
         }
-        /* A cadence/slot skip neither succeeds nor breaks a processing failure streak. */
+        /* 节拍或槽不足导致的跳过既不算成功，也不中断连续处理失败计数。 */
         if (bad_frames >= CAMERA_PREVIEW_BAD_FRAME_LIMIT) {
             camera_preview_fail(CAMERA_PREVIEW_ERROR_FRAME, D_ERR_IO, 0U);
             break;
@@ -256,10 +323,20 @@ static void camera_preview_run_session(uint32_t session)
             camera_preview_fail(CAMERA_PREVIEW_ERROR_CLEANUP, result, 1U);
             return;
         }
+        /* SDK 帧就绪不代表已经让出调度；归还帧占用后主动延时。 */
+        os_time_dly(1);
     }
     camera_preview_close_session();
+    /* 墙钟耗时包含抢占；仅退出时汇总输出，避免逐帧日志。 */
+    LOGI(TAG, "session timing: attempts=%u process_avg_ms=%u process_max_ms=%u get_max_ms=%u",
+         process_attempts, process_attempts ? process_total_ms / process_attempts : 0U,
+         process_max_ms, get_max_ms);
 }
 
+/**
+ * @brief 独立定时检查会话期限，不操作 SDK。
+ * @param[in] context 定时回调兼容参数，本实现不使用。
+ */
 static void camera_preview_supervise(void *context)
 {
     (void)context;
@@ -268,13 +345,18 @@ static void camera_preview_supervise(void *context)
     OS_EXIT_CRITICAL();
 }
 
+/**
+ * @brief 持续领取预览请求，并独占运行 SDK 会话。
+ * @param[in] context 任务兼容参数，本实现不使用。
+ * @note 限时空闲轮询兜底唤醒失败；取消尚未领取的事务可直接完成状态收尾。
+ */
 static void camera_preview_worker(void *context)
 {
     uint32_t session;
     uint8_t is_claimed;
     (void)context;
     for (;;) {
-        /* The bounded idle poll also covers an unsuccessful work notification. */
+        /* 有界空闲轮询也覆盖工作通知失败。 */
         (void)os_sem_pend(&s_camera.work_sem, OS_TICKS_PER_SEC);
         OS_ENTER_CRITICAL();
         camera_preview_state_check_time(&s_camera.policy, timer_get_ms());
@@ -291,6 +373,9 @@ static void camera_preview_worker(void *context)
     }
 }
 
+/**
+ * @brief 一次性建立监督与工作对象；完整合同见 camera_preview.h。
+ */
 d_err_t camera_preview_init(void)
 {
     d_err_t result = D_OK;
@@ -315,7 +400,7 @@ d_err_t camera_preview_init(void)
             result = D_ERR_NO_MEMORY;
         }
     }
-    /* Failed initialization keeps any created objects alive; late callbacks remain safe. */
+    /* 初始化失败也保留已创建对象，避免迟到回调访问已释放存储。 */
     OS_ENTER_CRITICAL();
     camera_preview_state_init(&s_camera.policy, result);
     OS_EXIT_CRITICAL();
@@ -323,6 +408,9 @@ d_err_t camera_preview_init(void)
     return result;
 }
 
+/**
+ * @brief 更新请求意图并通知工作任务；完整合同见 camera_preview.h。
+ */
 d_err_t camera_preview_request_start(uint32_t *session)
 {
     d_err_t result;
@@ -336,6 +424,9 @@ d_err_t camera_preview_request_start(uint32_t *session)
     return result;
 }
 
+/**
+ * @brief 撤销会话并丢弃无人读取帧；完整合同见 camera_preview.h。
+ */
 void camera_preview_request_stop(uint32_t session, camera_preview_stop_e reason)
 {
     uint8_t is_initialized;
@@ -351,6 +442,9 @@ void camera_preview_request_stop(uint32_t session, camera_preview_stop_e reason)
     }
 }
 
+/**
+ * @brief 复制当前会话元数据；完整合同见 camera_preview.h。
+ */
 void camera_preview_get_snapshot(camera_preview_snapshot_t *snapshot)
 {
     if (snapshot == NULL) {
@@ -361,6 +455,9 @@ void camera_preview_get_snapshot(camera_preview_snapshot_t *snapshot)
     OS_EXIT_CRITICAL();
 }
 
+/**
+ * @brief 领取读占用并复制新帧；完整合同见 camera_preview.h。
+ */
 d_err_t camera_preview_copy_latest(uint32_t session, void *destination,
                                    uint32_t capacity, uint32_t *sequence)
 {
@@ -396,6 +493,9 @@ d_err_t camera_preview_copy_latest(uint32_t session, void *destination,
     return D_OK;
 }
 
+/**
+ * @brief 限时等待清理完成；完整合同见 camera_preview.h。
+ */
 d_err_t camera_preview_wait_stopped(uint32_t timeout_ms)
 {
     camera_preview_snapshot_t snapshot;
@@ -415,6 +515,9 @@ d_err_t camera_preview_wait_stopped(uint32_t timeout_ms)
     }
 }
 
+/**
+ * @brief 禁止启动并请求关机停止；完整合同见 camera_preview.h。
+ */
 void camera_preview_shutdown_begin(void)
 {
     uint8_t is_initialized;
@@ -433,6 +536,9 @@ void camera_preview_shutdown_begin(void)
     }
 }
 
+/**
+ * @brief 撤销关机启动禁止；完整合同见 camera_preview.h。
+ */
 void camera_preview_shutdown_abort(void)
 {
     OS_ENTER_CRITICAL();

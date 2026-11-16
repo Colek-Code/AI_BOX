@@ -1,11 +1,11 @@
-/**
- * @file product_ui_status_model.c
- * @brief Deterministic status validation without UI dependencies.
- */
+/** @file product_ui_status_model.c @brief 无 LVGL 依赖的状态规范化；能力与有效位分开，非法字段单独降级。 */
 
 #include "modules/applications/product_ui/runtime/status/product_ui_status_model.h"
 #include <stddef.h>
 
+/**
+ * @brief 按能力掩码及各字段上界生成可用的状态投影。
+ */
 product_ui_status_result_e product_ui_status_normalize(
     const product_ui_status_t *input, product_ui_status_t *output)
 {

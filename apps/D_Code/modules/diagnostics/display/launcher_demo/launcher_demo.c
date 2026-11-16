@@ -1,6 +1,6 @@
 /**
  * @file launcher_demo.c
- * @brief Fullscreen horizontal launcher main page demo.
+ * @brief 全屏横向启动器演示页实现。
  */
 
 #include "config/app_config.h"
@@ -38,6 +38,10 @@ static lv_obj_t *s_detail_title = NULL;
 static lv_obj_t *s_launcher_tiles[LAUNCHER_PAGE_COUNT];
 static int s_launcher_index = 0;
 
+/**
+ * @brief 清除边框、内边距及圆角，并禁用对象滚动。
+ * @param[in,out] obj 待调整的 LVGL 对象；为空时不处理。
+ */
 static void launcher_demo_clean_obj(lv_obj_t *obj)
 {
     if (obj == NULL) {
@@ -50,6 +54,11 @@ static void launcher_demo_clean_obj(lv_obj_t *obj)
     lv_obj_remove_flag(obj, LV_OBJ_FLAG_SCROLLABLE);
 }
 
+/**
+ * @brief 清理对象并铺满逻辑显示尺寸，设置不透明背景。
+ * @param[in,out] obj 待调整的 LVGL 对象；为空时不处理。
+ * @param[in] color 背景颜色。
+ */
 static void launcher_demo_set_fullscreen(lv_obj_t *obj, lv_color_t color)
 {
     if (obj == NULL) {
@@ -63,6 +72,10 @@ static void launcher_demo_set_fullscreen(lv_obj_t *obj, lv_color_t color)
     lv_obj_set_style_bg_opa(obj, LV_OPA_COVER, 0);
 }
 
+/**
+ * @brief 将磁贴设置为全屏、不透明无渐变的演示背景。
+ * @param[in,out] tile 磁贴对象；为空时不处理。
+ */
 static void launcher_demo_style_tile(lv_obj_t *tile)
 {
     if (tile == NULL) {
@@ -76,6 +89,11 @@ static void launcher_demo_style_tile(lv_obj_t *tile)
     lv_obj_set_style_bg_grad_dir(tile, LV_GRAD_DIR_NONE, 0);
 }
 
+/**
+ * @brief 依据页索引只允许存在相邻页的水平滑动。
+ * @param[in] index 启动器页索引。
+ * @return 第一页仅向右，末页仅向左，中间页允许双向。
+ */
 static lv_dir_t launcher_demo_tile_dir(int index)
 {
     if (index == 0) {
@@ -87,6 +105,10 @@ static lv_dir_t launcher_demo_tile_dir(int index)
     return LV_DIR_LEFT | LV_DIR_RIGHT;
 }
 
+/**
+ * @brief 按有效应用索引更新详情标题并将详情层置前。
+ * @param[in] index 0～LAUNCHER_PAGE_COUNT-1 的应用索引。
+ */
 static void launcher_demo_show_detail(int index)
 {
     if (s_detail_page == NULL || s_detail_title == NULL) {
@@ -101,12 +123,20 @@ static void launcher_demo_show_detail(int index)
     lv_obj_move_foreground(s_detail_page);
 }
 
+/**
+ * @brief 将事件用户数据中的应用索引传给详情层。
+ * @param[in] e 带应用索引的点击事件。
+ */
 static void on_launcher_icon_click(lv_event_t *e)
 {
     int index = (int)(intptr_t)lv_event_get_user_data(e);
     launcher_demo_show_detail(index);
 }
 
+/**
+ * @brief 隐藏已有详情层。
+ * @param[in] e 点击事件，本实现不使用其内容。
+ */
 static void on_detail_close_click(lv_event_t *e)
 {
     (void)e;
@@ -115,6 +145,10 @@ static void on_detail_close_click(lv_event_t *e)
     }
 }
 
+/**
+ * @brief 由当前激活磁贴更新缓存页索引。
+ * @param[in] e 页面值变化事件，本实现不使用其内容。
+ */
 static void on_launcher_tile_changed(lv_event_t *e)
 {
     lv_obj_t *active_tile;
@@ -133,6 +167,12 @@ static void on_launcher_tile_changed(lv_event_t *e)
     }
 }
 
+/**
+ * @brief 切换到不同且有效的启动器页。
+ * @param[in] index 目标页索引。
+ * @param[in] anim_en LVGL 动画开关。
+ * @return 完成切换请求返回 1；未创建、越界或已经当前页返回 0。
+ */
 static int launcher_demo_set_index(int index, lv_anim_enable_t anim_en)
 {
     if (s_tileview == NULL) {
@@ -151,6 +191,13 @@ static int launcher_demo_set_index(int index, lv_anim_enable_t anim_en)
     return 1;
 }
 
+/**
+ * @brief 创建一页应用图标及标题，并绑定详情点击。
+ * @param[in,out] tile 承载图标的磁贴。
+ * @param[in] index 应用索引。
+ * @return 创建成功返回 0；无效父对象、索引或分配失败返回 -1。
+ * @note 中途失败不自行删除已经创建的子对象，由页面容器生命周期收尾。
+ */
 static int launcher_demo_create_tile(lv_obj_t *tile, int index)
 {
     lv_obj_t *icon;
@@ -193,6 +240,11 @@ static int launcher_demo_create_tile(lv_obj_t *tile, int index)
     return 0;
 }
 
+/**
+ * @brief 创建横向 tileview 与四个应用磁贴。
+ * @param[in,out] parent 承载新建子对象的父容器。
+ * @return 成功返回 0，任一创建失败返回 -1。
+ */
 static int launcher_demo_create_launcher(lv_obj_t *parent)
 {
     s_tileview = lv_tileview_create(parent);
@@ -220,6 +272,11 @@ static int launcher_demo_create_launcher(lv_obj_t *parent)
     return 0;
 }
 
+/**
+ * @brief 创建初始隐藏的全屏详情层、关闭按钮与标题。
+ * @param[in,out] parent 承载新建子对象的父容器。
+ * @return 成功返回 0，任一创建失败返回 -1。
+ */
 static int launcher_demo_create_detail_page(lv_obj_t *parent)
 {
     lv_obj_t *close_btn;
@@ -267,6 +324,11 @@ static int launcher_demo_create_detail_page(lv_obj_t *parent)
     return 0;
 }
 
+/**
+ * @brief 重置静态引用，并依次创建启动器与详情层。
+ * @param[in,out] parent 承载新建子对象的父容器。
+ * @return 成功返回 0；父对象为空或子阶段失败返回 -1。
+ */
 static int launcher_demo_create(lv_obj_t *parent)
 {
     lv_obj_t *scr;
@@ -300,16 +362,27 @@ static int launcher_demo_create(lv_obj_t *parent)
     return 0;
 }
 
+/**
+ * @brief 记录启动器页面进入事件。
+ */
 static void launcher_demo_enter(void)
 {
     printf(LOG_TAG "Launcher demo enter\n");
 }
 
+/**
+ * @brief 记录启动器页面退出事件。
+ */
 static void launcher_demo_exit(void)
 {
     printf(LOG_TAG "Launcher demo exit\n");
 }
 
+/**
+ * @brief 在详情层隐藏时把左右手势映射到页索引。
+ * @param[in] gesture_type 页面管理器手势编号，3 下一页、4 上一页。
+ * @return 已切换返回 1；详情层可见、边界或无关手势返回 0。
+ */
 static int launcher_demo_gesture_handler(int gesture_type)
 {
     if (s_detail_page != NULL && !lv_obj_has_flag(s_detail_page, LV_OBJ_FLAG_HIDDEN)) {
@@ -346,6 +419,9 @@ static const page_desc_t s_launcher_demo_desc = {
     .is_active  = 0,
 };
 
+/**
+ * @brief 注册静态页面描述；完整合同见 launcher_demo.h。
+ */
 int launcher_demo_register(void)
 {
     return page_manager_register(&s_launcher_demo_desc);

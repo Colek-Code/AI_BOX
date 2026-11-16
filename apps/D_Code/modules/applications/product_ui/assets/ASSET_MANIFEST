@@ -4,7 +4,9 @@
     12,
     14,
     16,
-    18
+    18,
+    20,
+    24
   ],
   "policy": {
     "missing_resource": "error",
@@ -209,6 +211,7 @@
       "alarm.svg": "6145a573686be691e83fb077bc6f563d0c1695a09096b225503f0233c669b68c",
       "brightness.svg": "8a8e9cbbcea2795a20d2cdc2f3bf698dafc44489077d244b4c56e793f8492011",
       "focus.svg": "3fb4dff69e5d6e70afad284c4c828fdd945da12d6f3f382f4f6d5d2bb74b681f",
+      "list.svg": "52528adb47e5fb63d481f754f5037b17de447445422a5e208cc609e5c51f75f7",
       "media.svg": "eaef70e329d58a35298bf4a88e9f8377110dff4128c2ccc7ca73323d3d692c39",
       "next.svg": "d92dd6c5d6a49280f7a0d3d82ded6d43442e842806d1ff3a0d75822c9efbc092",
       "pause.svg": "48dbac635eeed96dcbc842be8d46de1aaabf731eb3539f82ff4755e5065e7445",

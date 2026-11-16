@@ -1,4 +1,4 @@
-/** Settings entry for explicit, generation-bound upgrade confirmation. */
+/** @file product_ui_settings_ota_page.c @brief 升级设置入口以请求编号取消，以按压捕获的代次确认升级。 */
 #include "config/app_config.h"
 #if D_FEATURE_OTA && defined(D_LVGL_ENABLE) && D_UI_TARGET == D_UI_PRODUCT
 #include "product_ui_settings_details_common.h"
@@ -21,6 +21,11 @@ static struct {
     uint8_t pending, pressed_action, armed;
 } s_page;
 
+/**
+ * @brief 完整按压时捕获升级代次及请求编号，再排入检查、取消或确认动作。
+ * @param[in] event 操作按钮或滚动事件。
+ * @note 滚动、重置、丢失及失焦撤销资格；事件回调本身不执行升级。
+ */
 static void product_ui_ota_input(lv_event_t *event)
 {
     lv_obj_t *object = lv_event_get_current_target(event);
@@ -45,6 +50,10 @@ static void product_ui_ota_input(lv_event_t *event)
     }
 }
 
+/**
+ * @brief 按服务代次更新版本、数据策略、阶段说明及可操作控件。
+ * @note 服务变化先撤销旧按压资格；只检查已配置地址，不将检查成功解释为有更高版本。
+ */
 static void product_ui_ota_page_refresh(void)
 {
     char text[384];
@@ -71,6 +80,11 @@ static void product_ui_ota_page_refresh(void)
     else lv_obj_add_flag(s_page.cancel, LV_OBJ_FLAG_HIDDEN);
 }
 
+/**
+ * @brief 创建系统升级详情、检查与取消控件并显示真实快照。
+ * @param[in,out] parent 页面管理器提供的父对象。
+ * @return 完整创建返回 0，失败返回 -1 并解除页面状态；对象由管理器删除。
+ */
 static int product_ui_settings_ota_create(lv_obj_t *parent)
 {
     lv_obj_t *content;
@@ -79,8 +93,10 @@ static int product_ui_settings_ota_create(lv_obj_t *parent)
     if (!content) goto fail;
     s_page.status = product_ui_time_label(content, "", PRODUCT_UI_STYLE_BODY);
     s_page.detail = product_ui_time_label(content, "", PRODUCT_UI_STYLE_CAPTION);
-    s_page.action = product_ui_time_button(content, "检查升级包", product_ui_ota_input, NULL);
-    s_page.cancel = product_ui_time_button(content, "取消检查", product_ui_ota_input, NULL);
+    s_page.action = product_ui_time_button_create(content, &(product_ui_time_button_spec_t){
+        .text = "检查升级包", .role = PRODUCT_UI_BUTTON_PRIMARY, .callback = product_ui_ota_input});
+    s_page.cancel = product_ui_time_button_create(content, &(product_ui_time_button_spec_t){
+        .text = "取消检查", .role = PRODUCT_UI_BUTTON_SECONDARY, .callback = product_ui_ota_input});
     if (!s_page.status || !s_page.detail || !s_page.action || !s_page.cancel) goto fail;
     lv_obj_set_width(s_page.status, 280); lv_label_set_long_mode(s_page.status, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(s_page.detail, 280); lv_label_set_long_mode(s_page.detail, LV_LABEL_LONG_WRAP);
@@ -89,12 +105,17 @@ static int product_ui_settings_ota_create(lv_obj_t *parent)
     product_ui_ota_page_refresh();
     return 0;
 fail:
-    /* Frame root is the manager-owned container, including failed prepares. */
+    /* 框架根是页面管理器拥有的容器，创建准备失败时也由它删除。 */
     product_ui_page_view_reset(&s_page.view);
     memset(&s_page, 0, sizeof(s_page));
     return -1;
 }
 
+/**
+ * @brief 在页面处理阶段消费检查、匹配请求取消或匹配代次确认动作。
+ * @param[in] elapsed 本轮页面毫秒数。
+ * @note 确认前先成功建立全局浮层，避免分配失败却开始不可见升级；受理失败撤销预建浮层。
+ */
 static void product_ui_settings_ota_update(uint32_t elapsed)
 {
     uint8_t action;
@@ -105,8 +126,8 @@ static void product_ui_settings_ota_update(uint32_t elapsed)
     if (action == OTA_UI_CHECK) result = ota_service_check(NULL);
     else if (action == OTA_UI_CANCEL) result = ota_service_cancel_check(s_page.pending_request);
     else if (action == OTA_UI_CONFIRM) {
-        /* Allocation failure cannot start an invisible upgrade. This occurs in
-         * the page processing phase, not inside an LVGL object callback. */
+        /* 分配失败不能开始不可见升级；此处位于页面处理阶段，
+         * 不在 LVGL 对象事件回调中执行。 */
         if (product_ui_ota_notice_prepare() != 0) result = D_ERR_NO_MEMORY;
         else {
             result = ota_service_confirm(s_page.pending_generation, NULL);
@@ -117,18 +138,30 @@ static void product_ui_settings_ota_update(uint32_t elapsed)
     else if (action == OTA_UI_CANCEL) product_ui_toast_show("正在取消检查，请稍后", 1500U);
     product_ui_ota_page_refresh();
 }
+/**
+ * @brief 撤销旧按压资格并清空详情页状态，不取消全局升级所有者。
+ */
 static void product_ui_settings_ota_destroy(void)
 {
     s_page.armed = 0U;
     product_ui_page_view_reset(&s_page.view);
     memset(&s_page, 0, sizeof(s_page));
 }
+/**
+ * @brief 尝试初始化 OTA 服务并绑定产品维护后端。
+ * @return 返回维护后端注册结果；初始服务结果由服务快照另行体现。
+ */
 static int product_ui_settings_ota_init(void)
 { (void)ota_service_init(); return product_ui_ota_register_backend(); }
 static const page_ops_t s_ota_ops = {.create = product_ui_settings_ota_create,
     .destroy = product_ui_settings_ota_destroy, .update = product_ui_settings_ota_update,
     .flags = PAGE_FLAG_NO_GESTURE};
 static page_desc_t s_ota_desc = {.name = "系统升级", .ops = &s_ota_ops};
+/**
+ * @brief 注册静态系统升级页面描述。
+ * @param[in] type 模块装配分配的页面类型。
+ * @return 原样返回页面管理器注册结果。
+ */
 static int product_ui_settings_ota_register(int type)
 { s_ota_desc.page_type = type; return page_manager_register(&s_ota_desc); }
 D_UI_MODULE_DEFINE(product_settings_ota, "系统升级", LV_SYMBOL_SETTINGS,

@@ -190,7 +190,7 @@ set AUDIO_RES=audlogo
 #endif
 #endif
 
-REM set KEY_FILE=-key AC690X.key
+set KEY_FILE=-key YT-BOX.key 
 REM set KEY_FILE=-key1 JL_791N-XXXX.key1 -mkey JL_791N-XXXX.mkey
 
 set CFG_FILE=cfg

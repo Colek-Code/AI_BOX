@@ -1,6 +1,6 @@
 /**
  * @file    d_pwm.c
- * @brief   D_Code PWM platform adapter.
+ * @brief   提供 D_Code PWM 平台适配，不在上层暴露 SDK 设备调用。
  */
 
 #include "config/app_config.h"
@@ -8,6 +8,11 @@
 #include "asm/pwm.h"
 #include "device/device.h"
 
+/**
+ * @brief 将占空比限制在不超过 100 的范围。
+ * @param[in] duty 无符号百分比输入。
+ * @return 输入不超过 100 时为原值，否则为 100。
+ */
 static uint8_t d_pwm_clamp_duty(uint8_t duty)
 {
     if (duty > 100) {
@@ -17,6 +22,9 @@ static uint8_t d_pwm_clamp_duty(uint8_t duty)
     return duty;
 }
 
+/**
+ * @brief 按 SDK 设备名同步打开 PWM 设备。 完整合同见 d_pwm.h。
+ */
 d_err_t d_pwm_open(const char *dev_name, struct pwm_platform_data *cfg, void **handle)
 {
 #ifdef D_PWM_ENABLE
@@ -42,6 +50,9 @@ d_err_t d_pwm_open(const char *dev_name, struct pwm_platform_data *cfg, void **h
 #endif
 }
 
+/**
+ * @brief 用给定配置同步发送 PWM_RUN。 完整合同见 d_pwm.h。
+ */
 d_err_t d_pwm_run(void *handle, struct pwm_platform_data *cfg)
 {
 #ifdef D_PWM_ENABLE
@@ -61,6 +72,9 @@ d_err_t d_pwm_run(void *handle, struct pwm_platform_data *cfg)
 #endif
 }
 
+/**
+ * @brief 限制百分比上限后更新配置并同步写入 PWM 设备。 完整合同见 d_pwm.h。
+ */
 d_err_t d_pwm_set_duty(void *handle, struct pwm_platform_data *cfg, uint8_t duty)
 {
 #ifdef D_PWM_ENABLE
@@ -82,6 +96,9 @@ d_err_t d_pwm_set_duty(void *handle, struct pwm_platform_data *cfg, uint8_t duty
 #endif
 }
 
+/**
+ * @brief 关闭非空 PWM 句柄；功能关闭时不执行设备操作。 完整合同见 d_pwm.h。
+ */
 void d_pwm_close(void *handle)
 {
 #ifdef D_PWM_ENABLE

@@ -1,3 +1,4 @@
+/** @file d_ble_net_cfg.c @brief AE80/AE81/AE82 配网 GATT、JSON 收发与蓝牙栈适配。 */
 //*********************************************************************************//
 //                              D_Code BLE 蓝牙配网模块                            //
 //                                                                                 //
@@ -135,6 +136,9 @@ static char rsp_buf[192];
 //*********************************************************************************//
 //                              加密扩展接口（弱函数，默认透传）                   //
 //*********************************************************************************//
+/**
+ * @brief 弱实现按明文复制接收内容，可由产品覆盖；完整合同见 d_ble_net_cfg.h。
+ */
 __attribute__((weak)) int d_ble_decrypt(const uint8_t *in, uint16_t in_len, uint8_t *out, uint16_t *out_len)
 {
     if (in == NULL || out == NULL || out_len == NULL || in_len > *out_len) return -1;
@@ -143,6 +147,9 @@ __attribute__((weak)) int d_ble_decrypt(const uint8_t *in, uint16_t in_len, uint
     return 0;
 }
 
+/**
+ * @brief 弱实现原样复制发送内容，可由产品覆盖；完整合同见 d_ble_net_cfg.h。
+ */
 __attribute__((weak)) int d_ble_encrypt(const uint8_t *in, uint16_t in_len, uint8_t *out, uint16_t *out_len)
 {
     memcpy(out, in, in_len);
@@ -153,11 +160,19 @@ __attribute__((weak)) int d_ble_encrypt(const uint8_t *in, uint16_t in_len, uint
 //*********************************************************************************//
 //                              产品信息接口（弱函数，可覆盖）                     //
 //*********************************************************************************//
+/**
+ * @brief 借用编译配置中的产品 UUID。
+ * @return D_BLE_PRODUCT_UUID 静态字符串。
+ */
 __attribute__((weak)) const char *d_ble_get_product_uuid(void)
 {
     return D_BLE_PRODUCT_UUID;
 }
 
+/**
+ * @brief 借用编译配置中的产品批次。
+ * @return D_BLE_BATCH_NUM 静态字符串。
+ */
 __attribute__((weak)) const char *d_ble_get_batch_num(void)
 {
     return D_BLE_BATCH_NUM;
@@ -166,6 +181,10 @@ __attribute__((weak)) const char *d_ble_get_batch_num(void)
 //*********************************************************************************//
 //                              连接参数更新                                       //
 //*********************************************************************************//
+/**
+ * @brief 向已连接手机请求表中一组连接参数。
+ * @param[in] table_index 有效连接参数表索引，调用者保证范围。
+ */
 static void send_request_connect_parameter(u8 table_index)
 {
     struct conn_update_param_t *param = (void *)&connection_param_table[table_index];
@@ -176,6 +195,9 @@ static void send_request_connect_parameter(u8 table_index)
     }
 }
 
+/**
+ * @brief 参数更新启用且表未遍历完时提交当前候选。
+ */
 static void check_connetion_updata_deal(void)
 {
     if (connection_update_enable) {
@@ -185,6 +207,10 @@ static void check_connetion_updata_deal(void)
     }
 }
 
+/**
+ * @brief 解析并记录连接间隔、延迟与监督超时。
+ * @param[in] packet SDK 格式的连接参数完成事件。
+ */
 static void connection_update_complete_success(u8 *packet)
 {
     int conn_interval, conn_latency, conn_timeout;
@@ -201,6 +227,10 @@ static void connection_update_complete_success(u8 *packet)
 //*********************************************************************************//
 //                              BLE 状态管理                                       //
 //*********************************************************************************//
+/**
+ * @brief 状态变化时同步调用已注册状态回调。
+ * @param[in] state 新 BLE 工作状态。
+ */
 static void set_ble_work_state(ble_state_e state)
 {
     if (state != ble_work_state) {
@@ -212,6 +242,10 @@ static void set_ble_work_state(ble_state_e state)
     }
 }
 
+/**
+ * @brief 读取当前 BLE 工作状态。
+ * @return 当前 ble_work_state。
+ */
 static ble_state_e get_ble_work_state(void)
 {
     return ble_work_state;
@@ -220,6 +254,13 @@ static ble_state_e get_ble_work_state(void)
 //*********************************************************************************//
 //                              SM 安全管理回调                                    //
 //*********************************************************************************//
+/**
+ * @brief 响应安全管理的 Just Works 确认与口令显示事件。
+ * @param[in] packet_type SDK 数据包类型。
+ * @param[in] channel 回调兼容通道，当前不使用。
+ * @param[in] packet SDK 事件内容。
+ * @param[in] size 事件字节数，供口令显示诊断。
+ */
 static void cbk_sm_packet_handler(uint8_t packet_type, uint16_t channel, uint8_t *packet, uint16_t size)
 {
     sm_just_event_t *event = (void *)packet;
@@ -242,6 +283,9 @@ static void cbk_sm_packet_handler(uint8_t packet_type, uint16_t channel, uint8_t
     }
 }
 
+/**
+ * @brief 通知已注册的发送恢复回调。
+ */
 static void can_send_now_wakeup(void)
 {
     putchar('E');
@@ -253,6 +297,11 @@ static void can_send_now_wakeup(void)
 //*********************************************************************************//
 //                              发送 JSON 响应工具函数                             //
 //*********************************************************************************//
+/**
+ * @brief 将零结尾 JSON 经加密扩展后尝试发送到 AE82。
+ * @param[in] json_str 非空 JSON；调用者须保证加密后能放入本地 192 字节缓冲。
+ * @note 不返回加密或 ATT 发送结果；本函数不代表对端已收到。
+ */
 void d_ble_send_json_response(const char *json_str)
 {
     u16 len = strlen(json_str);
@@ -270,12 +319,24 @@ static const char *const phy_result[] = {
     "None", "1M", "2M", "Coded",
 };
 
+/**
+ * @brief 为新连接绑定 ATT 缓冲并进入已连接状态。
+ * @param[in] con_handle SDK 新连接句柄。
+ */
 static void server_profile_start(u16 con_handle)
 {
     ble_user_cmd_prepare(BLE_CMD_ATT_SEND_INIT, 4, con_handle, att_ram_buffer, ATT_RAM_BUFSIZE, D_ATT_LOCAL_PAYLOAD_SIZE);
     set_ble_work_state(BLE_ST_CONNECT);
 }
 
+/**
+ * @brief 处理 HCI、ATT 与 L2CAP 事件，维护连接及广播意图。
+ * @param[in] packet_type SDK 包类型。
+ * @param[in] channel 兼容通道，当前不使用。
+ * @param[in] packet 有效 SDK 事件数据。
+ * @param[in] size 兼容事件长度，当前未用于边界校验。
+ * @note 断连后只在 s_prov_adv_wanted 有效时重开配网广播。
+ */
 static void cbk_packet_handler(uint8_t packet_type, uint16_t channel, uint8_t *packet, uint16_t size)
 {
     int mtu;
@@ -310,6 +371,12 @@ static void cbk_packet_handler(uint8_t packet_type, uint16_t channel, uint8_t *p
                 break;
 
             case HCI_SUBEVENT_LE_CONNECTION_COMPLETE:
+                status = hci_subevent_le_connection_complete_get_status(packet);
+                if (status) {
+                    log_info("LE_SLAVE CONNECTION FAIL!!! %0x\n", status);
+                    set_ble_work_state(BLE_ST_DISCONN);
+                    break;
+                }
                 con_handle = hci_subevent_le_connection_complete_get_connection_handle(packet);
                 log_info("HCI_SUBEVENT_LE_CONNECTION_COMPLETE: %0x\n", con_handle);
                 connection_update_complete_success(packet + 8);
@@ -340,9 +407,9 @@ static void cbk_packet_handler(uint8_t packet_type, uint16_t channel, uint8_t *p
             ble_user_cmd_prepare(BLE_CMD_ATT_SEND_INIT, 4, con_handle, 0, 0, 0);
             set_ble_work_state(BLE_ST_DISCONN);
             /*
-             * Only restart provisioning adv when wanted (WiFi down / reconfig).
-             * If WiFi is already online we force adv off — do not auto-open on
-             * phone BLE drop, or the device stays discoverable while connected.
+             * 仅在 WiFi 未就绪或显式重配要求广播时重开。
+             * WiFi 已在线时保持广播关闭，避免手机 BLE 断开
+             * 导致设备在已联网状态仍持续可被发现。
              */
 #if !CONFIG_POWER_ON_ENABLE_BLE
             if (is_in_config_network_state() && s_prov_adv_wanted) {
@@ -390,6 +457,16 @@ static void cbk_packet_handler(uint8_t packet_type, uint16_t channel, uint8_t *p
 //*********************************************************************************//
 //                              ATT 读回调                                        //
 //*********************************************************************************//
+/**
+ * @brief 读取 GAP 设备名或 AE82 通知配置。
+ * @param[in] connection_handle SDK 连接句柄，本实现不使用。
+ * @param[in] att_handle 属性句柄。
+ * @param[in] offset 设备名读取偏移。
+ * @param[out] buffer 可空输出；设备名分支允许查询长度。
+ * @param[in] buffer_size 本次输出容量。
+ * @return 本次报告的属性值长度，未知属性为 0。
+ * @note 遵守 SDK ATT 回调入参合同，当前 CCC 分支要求至少 2 字节输出。
+ */
 static uint16_t att_read_callback(hci_con_handle_t connection_handle, uint16_t att_handle, uint16_t offset, uint8_t *buffer, uint16_t buffer_size)
 {
     uint16_t att_value_len = 0;
@@ -431,7 +508,11 @@ static uint16_t att_read_callback(hci_con_handle_t connection_handle, uint16_t a
 //                              JSON 配网数据解析                                    //
 //*********************************************************************************//
 
-// A complete bounded JSON command is decoded before any Wi-Fi side effect.
+/**
+ * @brief 在 WiFi 副作用前解码完整命令，再按受理结果响应。
+ * @param[in] json_str 完整零结尾 JSON 对象。
+ * @param[in] json_len 不含末尾零的字节数。
+ */
 static void d_ble_process_json_cmd(const char *json_str, u16 json_len)
 {
     d_ble_json_command_t command;
@@ -468,6 +549,16 @@ static void d_ble_process_json_cmd(const char *json_str, u16 json_len)
 //*********************************************************************************//
 //                              ATT 写回调                                          //
 //*********************************************************************************//
+/**
+ * @brief 接收通知订阅或 AE81 分片，完成有界解密、分帧与命令派发。
+ * @param[in] connection_handle SDK 连接句柄，本实现不使用。
+ * @param[in] att_handle 写入属性句柄。
+ * @param[in] transaction_mode SDK 事务模式，本实现不使用。
+ * @param[in] offset SDK 写偏移，本实现不使用。
+ * @param[in] buffer SDK 写入内容，借用至回调返回。
+ * @param[in] buffer_size 输入字节数。
+ * @return 当前实现固定返回 0，命令失败通过 JSON 响应表达。
+ */
 static int att_write_callback(hci_con_handle_t connection_handle, uint16_t att_handle, uint16_t transaction_mode, uint16_t offset, uint8_t *buffer, uint16_t buffer_size)
 {
     u16 handle = att_handle;
@@ -479,10 +570,10 @@ static int att_write_callback(hci_con_handle_t connection_handle, uint16_t att_h
         break;
 
     case ATT_CHARACTERISTIC_ae82_01_CLIENT_CONFIGURATION_HANDLE:
-        set_ble_work_state(BLE_ST_NOTIFY_IDICATE);
+        att_set_ccc_config(handle, buffer[0]);
+        set_ble_work_state(buffer[0] ? BLE_ST_NOTIFY_IDICATE : BLE_ST_CONNECT);
         check_connetion_updata_deal();
         log_info("\n------write ccc:%04x,%02x\n", handle, buffer[0]);
-        att_set_ccc_config(handle, buffer[0]);
         // 重置 JSON 接收状态
         json_recv_offset = 0;
         memset(json_recv_buf, 0, sizeof(json_recv_buf));
@@ -541,6 +632,14 @@ static int att_write_callback(hci_con_handle_t connection_handle, uint16_t att_h
 //*********************************************************************************//
 //                              数据发送                                          //
 //*********************************************************************************//
+/**
+ * @brief 检查连接与 CCC，在互斥区向 ATT 提交通知数据。
+ * @param[in] handle 通知属性句柄。
+ * @param[in] data 本次提交的数据。
+ * @param[in] len 待发字节数。
+ * @param[in] handle_type SDK ATT 发送操作类型。
+ * @return 返回 APP_BLE_* 或 SDK 提交错误；成功仅表示底层命令受理。
+ */
 static int app_send_user_data(u16 handle, const u8 *data, u16 len, u8 handle_type)
 {
     u32 ret = APP_BLE_NO_ERROR;
@@ -573,6 +672,10 @@ static int app_send_user_data(u16 handle, const u8 *data, u16 len, u8 handle_typ
 //*********************************************************************************//
 //                              广播数据设置                                      //
 //*********************************************************************************//
+/**
+ * @brief 构建 Flags 与 AE80 服务广播数据并提交 SDK。
+ * @return 构建成功返回 0，超过广播容量返回 -1。
+ */
 static int make_set_adv_data(void)
 {
     u8 offset = 0;
@@ -591,6 +694,10 @@ static int make_set_adv_data(void)
     return 0;
 }
 
+/**
+ * @brief 以有界本地名构建扫描响应并提交 SDK。
+ * @return 构建成功返回 0，超过容量返回 -1。
+ */
 static int make_set_rsp_data(void)
 {
     u8 offset = 0;
@@ -614,6 +721,9 @@ static int make_set_rsp_data(void)
     return 0;
 }
 
+/**
+ * @brief 设置广播参数，并按顺序提交广播与扫描响应内容。
+ */
 static void advertisements_setup_init()
 {
     uint8_t adv_type = ADV_IND;
@@ -636,6 +746,10 @@ static void advertisements_setup_init()
 //*********************************************************************************//
 #define PASSKEY_ENTER_ENABLE      0
 
+/**
+ * @brief 生成六位十进制范围口令并写回 SDK。
+ * @param[out] key 非空新口令输出。
+ */
 static void reset_passkey_cb(u32 *key)
 {
     u32 newkey = rand32();
@@ -648,6 +762,13 @@ static void reset_passkey_cb(u32 *key)
 }
 
 extern void reset_PK_cb_register(void (*reset_pk)(u32 *));
+/**
+ * @brief 配置安全管理能力、认证、密钥长度与回调。
+ * @param[in] io_type SDK I/O 能力。
+ * @param[in] auth_req SDK 认证要求位。
+ * @param[in] min_key_size 允许的最小加密密钥长度。
+ * @param[in] security_en 是否主动请求安全过程。
+ */
 void ble_sm_setup_init(io_capability_t io_type, u8 auth_req, uint8_t min_key_size, u8 security_en)
 {
     sm_init();
@@ -663,6 +784,10 @@ void ble_sm_setup_init(io_capability_t io_type, u8 auth_req, uint8_t min_key_siz
 }
 
 extern void le_device_db_init(void);
+/**
+ * @brief 初始化设备数据库、安全管理、GATT 与协议事件回调。
+ * @note 作为 SDK 协议栈回调入口，GATT Profile 数据保持固定。
+ */
 void ble_profile_init(void)
 {
     printf("[D_BLE] profile init\n");
@@ -695,6 +820,12 @@ void ble_profile_init(void)
 //*********************************************************************************//
 //                              广播使能/断开/模块控制                            //
 //*********************************************************************************//
+/**
+ * @brief 仅在允许且无连接的可切换状态下提交广播开关。
+ * @param[in] priv 操作表兼容上下文，当前不使用。
+ * @param[in] en 非零开启广播，0 关闭。
+ * @return 允许或已处于目标状态返回 APP_BLE_NO_ERROR；条件不符返回 APP_BLE_OPERATION_ERROR。
+ */
 static int set_adv_enable(void *priv, u32 en)
 {
     ble_state_e next_state, cur_state;
@@ -738,6 +869,12 @@ static int set_adv_enable(void *priv, u32 en)
     return APP_BLE_NO_ERROR;
 }
 
+/**
+ * @brief 对当前连接最多提交一次断开命令。
+ * @param[in] priv 操作表兼容上下文，当前不使用。
+ * @return 有连接返回 APP_BLE_NO_ERROR；无连接返回 APP_BLE_OPERATION_ERROR。
+ * @note 返回成功不等于 HCI 断连事件已完成。
+ */
 static int ble_disconnect(void *priv)
 {
     if (con_handle) {
@@ -754,6 +891,11 @@ static int ble_disconnect(void *priv)
     }
 }
 
+/**
+ * @brief 向 ATT 查询发送缓冲可用字节数。
+ * @param[in] priv 操作表兼容上下文，当前不使用。
+ * @return SDK 写回的可用容量。
+ */
 static int get_buffer_vaild_len(void *priv)
 {
     u32 vaild_len = 0;
@@ -761,11 +903,23 @@ static int get_buffer_vaild_len(void *priv)
     return vaild_len;
 }
 
+/**
+ * @brief 通过 AE82 通知属性发送操作表数据。
+ * @param[in] priv 操作表兼容上下文，当前不使用。
+ * @param[in] data 待发字节。
+ * @param[in] len 待发长度。
+ * @return 底层 ATT 发送结果。
+ */
 static int app_send_user_data_do(void *priv, u8 *data, u16 len)
 {
     return app_send_user_data(ATT_CHARACTERISTIC_ae82_01_VALUE_HANDLE, data, len, ATT_OP_AUTO_READ_CCC);
 }
 
+/**
+ * @brief 检查 ATT 剩余发送容量是否可容纳本次负载。
+ * @param[in] len 需要的字节数。
+ * @return 容量足够返回 1，否则返回 0。
+ */
 static int app_send_user_data_check(u16 len)
 {
     u32 buf_space = get_buffer_vaild_len(0);
@@ -775,12 +929,24 @@ static int app_send_user_data_check(u16 len)
     return 0;
 }
 
+/**
+ * @brief 保存发送恢复回调。
+ * @param[in] priv 兼容上下文，当前不使用。
+ * @param[in] cbk SDK 操作表传入的回调指针；后续保持有效。
+ * @return 固定返回 APP_BLE_NO_ERROR。
+ */
 static int regiest_wakeup_send(void *priv, void *cbk)
 {
     ble_resume_send_wakeup = cbk;
     return APP_BLE_NO_ERROR;
 }
 
+/**
+ * @brief 保存接收回调及共享通道上下文。
+ * @param[in] priv 编码到 channel_priv 的上下文。
+ * @param[in] cbk 接收回调指针，当前接收路径未调用此存储项。
+ * @return 固定返回 APP_BLE_NO_ERROR。
+ */
 static int regiest_recieve_cbk(void *priv, void *cbk)
 {
     channel_priv = (u32)priv;
@@ -788,6 +954,12 @@ static int regiest_recieve_cbk(void *priv, void *cbk)
     return APP_BLE_NO_ERROR;
 }
 
+/**
+ * @brief 保存状态回调及共享通道上下文。
+ * @param[in] priv 状态回调使用的上下文。
+ * @param[in] cbk 后续状态变化时调用的回调，需持续有效。
+ * @return 固定返回 APP_BLE_NO_ERROR。
+ */
 static int regiest_state_cbk(void *priv, void *cbk)
 {
     channel_priv = (u32)priv;
@@ -795,18 +967,24 @@ static int regiest_state_cbk(void *priv, void *cbk)
     return APP_BLE_NO_ERROR;
 }
 
+/**
+ * @brief 调用私有广播开关，忽略立即返回结果。
+ * @param[in] enable 非零开启，0 关闭。
+ */
 void bt_ble_adv_enable(u8 enable)
 {
     set_adv_enable(0, enable);
 }
 
-/* 对外按需控制 BLE 配网广播：WiFi 已连上则关，断开/失败/忘记则重开 */
+/**
+ * @brief 保存配网广播意图，并在有连接时等待断连后重开；完整合同见 d_ble_net_cfg.h。
+ */
 void d_ble_net_cfg_set_adv(uint8_t enable)
 {
     s_prov_adv_wanted = enable ? 1 : 0;
     /*
-     * Enabling while a phone is still GATT-connected will fail (con_handle).
-     * Disconnect first; DISCONNECTION_COMPLETE will restart adv if wanted=1.
+     * 手机仍有 GATT 连接时无法立即开启广播。
+     * 先请求断连，wanted=1 时由 DISCONNECTION_COMPLETE 续开广播。
      */
     if (enable && con_handle) {
         log_info("adv deferred until BLE disconnect (wanted=1)\n");
@@ -816,6 +994,11 @@ void d_ble_net_cfg_set_adv(uint8_t enable)
     bt_ble_adv_enable((u8)enable);
 }
 
+/**
+ * @brief 在互斥区启停配网模块，并根据连接状态提交广播或断连。
+ * @param[in] en 非零启用，0 停用。
+ * @note 配网 complete 且仍连接时，停用路径保留当前连接；不能据此宣称已关闭。
+ */
 static void ble_module_enable(u8 en)
 {
     os_mutex_pend(&mutex, 0);
@@ -829,7 +1012,7 @@ static void ble_module_enable(u8 en)
         }
         complete = 0;
         adv_ctrl_en = 1;
-        bt_ble_adv_enable(1);
+        bt_ble_adv_enable(s_prov_adv_wanted);
     } else {
         if (con_handle) {
             if (complete) {
@@ -851,7 +1034,9 @@ static void ble_module_enable(u8 en)
 //                              对外 API 接口                                      //
 //*********************************************************************************//
 
-// BLE 配网初始化（改造：使用 wifi_get_mac 替换 qyai_get_local_mac）
+/**
+ * @brief 用 WiFi MAC 尾部生成设备名，建立互斥量并启用配网模块；完整合同见 d_ble_net_cfg.h。
+ */
 void bt_ble_init(void)
 {
     log_info("[D_BLE] ***** ble_init ******\n");
@@ -881,23 +1066,34 @@ void bt_ble_init(void)
     ble_module_enable(1);
 }
 
+/**
+ * @brief 请求停用配网模块。
+ */
 static void stack_exit(void)
 {
     ble_module_enable(0);
 }
 
+/**
+ * @brief 请求停用配网模块，活动连接可能需要异步断开；完整合同见 d_ble_net_cfg.h。
+ */
 void bt_ble_exit(void)
 {
     log_info("[D_BLE] ***** ble_exit ******\n");
     stack_exit();
 }
 
+/**
+ * @brief 请求断开当前 BLE 连接，忽略底层立即返回值；完整合同见 d_ble_net_cfg.h。
+ */
 void ble_app_disconnect(void)
 {
     ble_disconnect(NULL);
 }
 
-// 配网成功后上报设备信息：纯 JSON（改造：移除 JL 帧封装）
+/**
+ * @brief 格式化并尝试发送含 MAC、可选 UUID 与批次的成功响应；完整合同见 d_ble_net_cfg.h。
+ */
 int ble_connected_net_notify(void)
 {
     int len = 0;
@@ -927,7 +1123,9 @@ int ble_connected_net_notify(void)
     return 0;
 }
 
-// WiFi 连接结果通知给 BLE 客户端
+/**
+ * @brief 仅在配网命令已经受理时转发 WiFi 连接结果；完整合同见 d_ble_net_cfg.h。
+ */
 void ble_cfg_net_result_notify(int event)
 {
     if (!complete) {
@@ -961,6 +1159,10 @@ static const struct ble_server_operation_t d_ble_operation = {
     .regist_state_cbk   = regiest_state_cbk,
 };
 
+/**
+ * @brief 向 SDK 返回静态 BLE 服务操作表。
+ * @param[out] interface_pt 非空操作表指针输出。
+ */
 void ble_get_server_operation_table(struct ble_server_operation_t **interface_pt)
 {
     *interface_pt = (void *)&d_ble_operation;
@@ -977,6 +1179,9 @@ void ble_get_server_operation_table(struct ble_server_operation_t **interface_pt
 // BT 协议栈需要的全局变量
 void (*lmp_ch_update_resume_hdl)(void *priv) = NULL;
 
+/**
+ * @brief 关闭 sniff，设置 BLE 地址并启动蓝牙协议栈；完整合同见 d_ble_net_cfg.h。
+ */
 void bt_ble_module_init(void)
 {
     void lmp_set_sniff_disable(void);
@@ -997,6 +1202,11 @@ void bt_ble_module_init(void)
     btstack_init();
 }
 
+/**
+ * @brief 在 BT_STATUS_INIT_OK 后启动配网及可选常开 BLE。
+ * @param[in] bt 非空 SDK 蓝牙连接事件。
+ * @return 固定返回 0。
+ */
 static int bt_connction_status_event_handler(struct bt_event *bt)
 {
     switch (bt->event) {
@@ -1021,6 +1231,9 @@ static int bt_connction_status_event_handler(struct bt_event *bt)
     return 0;
 }
 
+/**
+ * @brief 分发来自蓝牙连接源的系统事件；完整合同见 d_ble_net_cfg.h。
+ */
 int ble_demo_bt_event_handler(struct sys_event *event)
 {
     if (event->from == BT_EVENT_FROM_CON) {

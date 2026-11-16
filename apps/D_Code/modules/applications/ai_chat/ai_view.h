@@ -10,57 +10,68 @@
 #include "lvgl.h"
 
 /**
- * @brief 创建 AI Chat 界面（表情 + 聊天 UI）
+ * @brief 在有效父容器创建表情与聊天区域并追加欢迎消息。
+ * @param[in,out] parent 非空且由页面管理器持有的父对象。
+ * @note 仅在 LVGL 线程调用，当前 void 接口不报告局部创建失败。
  */
 void ai_view_create(lv_obj_t *parent);
 
 /**
- * @brief 添加用户消息气泡
+ * @brief 向聊天区追加用户侧气泡。
+ * @param[in] text 调用期间借用的消息文字，由标签复制；空或空串被聊天组件忽略。
  */
 void ai_view_add_user_msg(const char *text);
 
 /**
- * @brief 添加 AI 消息气泡
+ * @brief 向聊天区追加 AI 侧气泡。
+ * @param[in] text 调用期间借用的消息文字，由标签复制；空或空串忽略。
  */
 void ai_view_add_ai_msg(const char *text);
 
 /**
- * @brief 显示/隐藏 "正在输入" 动画
+ * @brief 显示或移除本地正在输入指示气泡。
+ * @param[in] show 非零显示，零隐藏；须先完成聊天区域创建。
  */
 void ai_view_show_typing(int show);
 
 /**
- * @brief 设置表情
+ * @brief 把业务情绪编号交给表情引擎投影。
+ * @param[in] emotion 与 face_emotion_t 兼容的合法情绪编号。
  */
 void ai_view_set_emotion(int emotion);
 
 /**
- * @brief 开始说话动画
+ * @brief 触发表情引擎的有限说话动画，不驱动真实音频播放。
  */
 void ai_view_start_speaking(void);
 
 /**
- * @brief 设置嘴巴状态（思考中）
+ * @brief 设置中性情绪及思考嘴巴动画。
  */
 void ai_view_set_thinking(void);
 
 /**
- * @brief 设置嘴巴空闲
+ * @brief 仅把嘴巴动画恢复空闲，不改网络或服务状态。
  */
 void ai_view_set_idle(void);
 
 /**
- * @brief 更新表情动画（每帧调用）
+ * @brief 在 LVGL 页面周期推进表情动画。
+ * @param[in] elapsed_ms 本轮经过的毫秒数。
  */
 void ai_view_update(uint32_t elapsed_ms);
 
 /**
- * @brief 绑定麦克风按钮回调
+ * @brief 在已有麦克风按钮追加点击回调。
+ * @param[in] cb 调用方持有的有效事件回调。
+ * @param[in] user_data 回调借用上下文，须覆盖按钮寿命。
+ * @note 按钮不存在时不操作；此函数追加监听，不替换或排空先前回调。
  */
 void ai_view_set_mic_callback(lv_event_cb_t cb, void *user_data);
 
 /**
- * @brief 获取麦克风按钮对象
+ * @brief 借用聊天组件当前麦克风按钮。
+ * @return 按钮对象指针；尚未创建时为 NULL，不由调用方释放。
  */
 lv_obj_t *ai_view_get_mic_btn(void);
 

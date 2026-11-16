@@ -1,0 +1,8 @@
+[
+  {
+    "key": "qwenActivationCode",
+    "label": "本台设备激活码",
+    "value": "",
+    "type": "text"
+  }
+]

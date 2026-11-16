@@ -27,11 +27,17 @@ static int s_page_count = 0;
 static int g_current_page = PAGE_TYPE_MAIN;
 
 static unsigned int s_transition_id = 0;
+static uint8_t s_is_switching;
 
 //*********************************************************************************//
 //                              内部函数                                            //
 //*********************************************************************************//
 
+/**
+ * @brief 在静态注册表查找页面描述符。
+ * @param[in] page_type 要查找的页面编号。
+ * @return 指向表内元素的借用指针；未登记时为 NULL。
+ */
 static page_desc_t *find_page(int page_type)
 {
     for (int i = 0; i < s_page_count; i++) {
@@ -42,6 +48,10 @@ static page_desc_t *find_page(int page_type)
     return NULL;
 }
 
+/**
+ * @brief 显示已有容器、标记激活，再调用进入回调。
+ * @param[in,out] page 页面描述符；NULL 或没有容器时直接返回。
+ */
 static void show_page(page_desc_t *page)
 {
     if (!page || !page->container) return;
@@ -55,6 +65,10 @@ static void show_page(page_desc_t *page)
     }
 }
 
+/**
+ * @brief 先调用退出回调，再隐藏容器并清除激活标志。
+ * @param[in,out] page 页面描述符；NULL 或没有容器时不处理。
+ */
 static void hide_page(page_desc_t *page)
 {
     if (!page || !page->container) return;
@@ -67,6 +81,11 @@ static void hide_page(page_desc_t *page)
     page->is_active = 0;
 }
 
+/**
+ * @brief 通知页面释放自有对象，再销毁容器并清除创建状态。
+ * @param[in,out] page 页面描述符；未创建时不重复销毁。
+ * @note 页面 destroy 回调负责自身业务清理，容器由本函数删除；不负责停止独立后台服务。
+ */
 static void destroy_page(page_desc_t *page)
 {
     if (!page || !page->is_created) return;
@@ -85,6 +104,10 @@ static void destroy_page(page_desc_t *page)
            page->name, page->page_type);
 }
 
+/**
+ * @brief 退出并隐藏页面；未声明常驻时继续销毁。
+ * @param[in,out] page 待停用的注册表元素，可为 NULL。
+ */
 static void deactivate_page(page_desc_t *page)
 {
     hide_page(page);
@@ -94,6 +117,13 @@ static void deactivate_page(page_desc_t *page)
     }
 }
 
+/**
+ * @brief 创建隐藏的页面容器，并调用页面创建回调。
+ * @param[in,out] page 保存创建结果的页面描述符。
+ * @param[in] parent UI 线程中的有效父容器。
+ * @return 0 表示已存在或创建成功；-1 表示参数、分配或创建回调失败。
+ * @note 创建回调失败时调用可选 destroy，并删除容器、清除页面状态。
+ */
 static int create_page(page_desc_t *page, lv_obj_t *parent)
 {
     int ret;
@@ -140,16 +170,23 @@ static int create_page(page_desc_t *page, lv_obj_t *parent)
 //                              公共接口                                            //
 //*********************************************************************************//
 
+/**
+ * @brief 初始化静态页面注册表及导航状态。 完整合同见 d_page_manager.h。
+ */
 void page_manager_init(void)
 {
     memset(s_pages, 0, sizeof(s_pages));
     s_page_count = 0;
     g_current_page = PAGE_TYPE_MAIN;
     s_transition_id = 0;
+    s_is_switching = 0U;
 
     printf(LOG_TAG "Page manager initialized\n");
 }
 
+/**
+ * @brief 复制页面描述符并登记一个尚未创建的页面。 完整合同见 d_page_manager.h。
+ */
 int page_manager_register(const page_desc_t *desc)
 {
     if (!desc || !desc->name || !desc->ops ||
@@ -177,6 +214,11 @@ int page_manager_register(const page_desc_t *desc)
     return 0;
 }
 
+/**
+ * @brief 查找并按需创建目标页，确认容器可用于切换。
+ * @param[in] page_type 目标页面编号。
+ * @return 0 表示容器可用；-1 表示页面不存在或创建失败。
+ */
 static int page_manager_prepare(int page_type)
 {
     int create_ret;
@@ -202,7 +244,14 @@ static int page_manager_prepare(int page_type)
     return 0;
 }
 
-int page_manager_switch_to(int page_type, page_transition_policy_e policy)
+/**
+ * @brief 在重入保护已取得后准备目标页，再退出旧页并进入新页。
+ * @param[in] page_type 目标页面编号。
+ * @param[in] policy 本次页面过渡策略。
+ * @return 0 表示切换成功或目标已激活；-1 表示目标准备失败。
+ * @note 创建目标失败时不先销毁当前页；TE 过渡只向平台登记请求，不在此等待 DMA。
+ */
+static int page_manager_switch_to_impl(int page_type, page_transition_policy_e policy)
 {
     page_desc_t *from = find_page(g_current_page);
     page_desc_t *to = find_page(page_type);
@@ -246,22 +295,50 @@ int page_manager_switch_to(int page_type, page_transition_policy_e policy)
     return 0;
 }
 
+/**
+ * @brief 在 UI 线程同步完成目标页面的生命周期切换。 完整合同见 d_page_manager.h。
+ */
+int page_manager_switch_to(int page_type, page_transition_policy_e policy)
+{
+    int result;
+
+    if (s_is_switching) {
+        return -1;
+    }
+    s_is_switching = 1U;
+    result = page_manager_switch_to_impl(page_type, policy);
+    s_is_switching = 0U;
+    return result;
+}
+
+/**
+ * @brief 请求立即返回主页面。 完整合同见 d_page_manager.h。
+ */
 void page_manager_back_to_main(void)
 {
     page_manager_switch_to(PAGE_TYPE_MAIN, PAGE_TRANSITION_IMMEDIATE);
 }
 
+/**
+ * @brief 读取当前逻辑页面编号。 完整合同见 d_page_manager.h。
+ */
 int page_manager_get_current(void)
 {
     return g_current_page;
 }
 
+/**
+ * @brief 借用当前页面容器。 完整合同见 d_page_manager.h。
+ */
 lv_obj_t *page_manager_get_current_container(void)
 {
     page_desc_t *page = find_page(g_current_page);
     return page != NULL ? page->container : NULL;
 }
 
+/**
+ * @brief 调用当前页面的可选周期回调。 完整合同见 d_page_manager.h。
+ */
 void page_manager_update(uint32_t elapsed_ms)
 {
     page_desc_t *current = find_page(g_current_page);
@@ -270,6 +347,9 @@ void page_manager_update(uint32_t elapsed_ms)
     }
 }
 
+/**
+ * @brief 按页面标志处理通用返回手势或转交页面手势回调。 完整合同见 d_page_manager.h。
+ */
 void page_manager_handle_gesture(int gesture_type)
 {
     page_desc_t *current = find_page(g_current_page);

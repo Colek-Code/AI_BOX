@@ -1,3 +1,8 @@
+/**
+ * @file d_touch_hyn.c
+ * @brief 在专属任务读取 HYN 触摸，发布原生坐标及取消代次，不直接操作 LVGL。
+ */
+
 #include "config/app_config.h"
 
 #if defined(D_LCD_ENABLE) && defined(D_TOUCH_HYN_DRIVER_ENABLE)
@@ -16,6 +21,7 @@
 #define HYN_CST8XXT_VALIDATE_LEN        8
 #define HYN_TOUCH_POLL_TICKS            2
 #define HYN_IDLE_LOG_DIV                50
+/* 保留宏旧名；达到此连续失败阈值执行取消，绝不合成正常松手。 */
 #define HYN_FRAME_FAIL_RELEASE_LIMIT    3
 #define HYN_SCREEN_WIDTH                240
 #define HYN_SCREEN_HEIGHT               320
@@ -44,10 +50,19 @@ static volatile u16 s_hyn_x = 0;
 static volatile u16 s_hyn_y = 0;
 static u32 s_hyn_poll_count = 0;
 static u8 s_hyn_frame_fail_streak = 0;
+static volatile u8 s_hyn_needs_release;
+static volatile u32 s_hyn_cancel_epoch;
 
 static int hyn_write_reg(u32 reg, u8 reg_len);
 static int hyn_read_reg(u32 reg, u8 reg_len, u8 *buf, u16 len);
 
+/**
+ * @brief 在短临界区内更新最近坐标、点数及有效接触电平。
+ * @param[in] x 原生横坐标。
+ * @param[in] y 原生纵坐标。
+ * @param[in] points 本次报告的接触点数。
+ * @param[in] down 有效按下电平。
+ */
 static void hyn_state_store(u16 x, u16 y, u8 points, u8 down)
 {
     OS_ENTER_CRITICAL();
@@ -58,6 +73,13 @@ static void hyn_state_store(u16 x, u16 y, u8 points, u8 down)
     OS_EXIT_CRITICAL();
 }
 
+/**
+ * @brief 在短临界区内复制基本触摸状态，NULL 输出单项跳过。
+ * @param[out] x 可选横坐标输出。
+ * @param[out] y 可选纵坐标输出。
+ * @param[out] points 可选点数输出。
+ * @param[out] down 可选电平输出。
+ */
 static void hyn_state_snapshot(u16 *x, u16 *y, u8 *points, u8 *down)
 {
     OS_ENTER_CRITICAL();
@@ -76,6 +98,9 @@ static void hyn_state_snapshot(u16 *x, u16 *y, u8 *points, u8 *down)
     OS_EXIT_CRITICAL();
 }
 
+/**
+ * @brief 在信号量已准备时通知读取任务，不在中断中读取 IIC。
+ */
 static void hyn_irq_cb(void)
 {
     if (s_hyn_sem_ready) {
@@ -83,6 +108,10 @@ static void hyn_irq_cb(void)
     }
 }
 
+/**
+ * @brief 按既有 HYN 硬件要求设置中断脚输入、上拉及数字输入。
+ * @param[in] pin 板级提供的有效 GPIO 编号。
+ */
 static void hyn_prepare_int_pin(u32 pin)
 {
     gpio_set_direction(pin, 1);
@@ -91,6 +120,11 @@ static void hyn_prepare_int_pin(u32 pin)
     gpio_set_die(pin, 1);
 }
 
+/**
+ * @brief 执行既有触摸复位电平和延时，再恢复中断输入。
+ * @param[in] pdata 已校验触摸引脚的板级描述符。
+ * @note 仅初始化阶段调用；包含任务延时，不能从中断调用。
+ */
 static void hyn_reset_panel(const struct lcd_platform_data *pdata)
 {
     gpio_set_pull_up(pdata->touch_reset_pin, 0);
@@ -103,6 +137,12 @@ static void hyn_reset_panel(const struct lcd_platform_data *pdata)
     hyn_prepare_int_pin(pdata->touch_int_pin);
 }
 
+/**
+ * @brief 发送候选写命令值并检查 IIC 应答，结束时发送 STOP。
+ * @param[in] wrcmd 候选表中的写命令字节，沿用既有地址表示。
+ * @return 收到当前 SDK 接受的应答为 1，否则为 0。
+ * @note 内部调用方须先打开本驱动 IIC 句柄。
+ */
 static int hyn_probe_addr(u8 wrcmd)
 {
     int ack = 0;
@@ -116,6 +156,13 @@ static int hyn_probe_addr(u8 wrcmd)
     return ack;
 }
 
+/**
+ * @brief 按既有探测规则排除全零及全 FF 数据块。
+ * @param[in] buf 至少 len 字节的有效缓冲区。
+ * @param[in] len 待检查长度。
+ * @return 既非全零也非全 FF 为非零；空长度结果为零。
+ * @note 这是可读数据的启发式检查，不单独证明芯片型号或每个字段合法。
+ */
 static int hyn_buf_has_signal(const u8 *buf, u16 len)
 {
     u16 i;
@@ -134,6 +181,12 @@ static int hyn_buf_has_signal(const u8 *buf, u16 len)
     return (!all_zero && !all_ff);
 }
 
+/**
+ * @brief 将命令值低位按所需长度排成高字节在前的字节序列。
+ * @param[in] reg 命令或寄存器值。
+ * @param[in] reg_len 输出字节数，由内部调用方保证容量。
+ * @param[out] buf 至少 reg_len 字节的缓冲区。
+ */
 static void hyn_make_reg_buf(u32 reg, u8 reg_len, u8 *buf)
 {
     u8 i = reg_len;
@@ -145,6 +198,14 @@ static void hyn_make_reg_buf(u32 reg, u8 reg_len, u8 *buf)
     }
 }
 
+/**
+ * @brief 在当前 IIC 事务中提交最多三字节的命令序列。
+ * @param[in] reg 待编码的命令值。
+ * @param[in] reg_len 编码长度，不得超过局部三字节缓冲。
+ * @param[in] stop 非零时最后一字节带 STOP。
+ * @return 全部提交成功为 0；长度超限或任一 SDK 发送失败为 -1。
+ * @note 调用方组织 START 及失败后的 STOP，不在此打开或关闭 IIC 设备。
+ */
 static int hyn_send_reg_bytes(u32 reg, u8 reg_len, u8 stop)
 {
     u8 reg_buf[3] = {0};
@@ -166,6 +227,12 @@ static int hyn_send_reg_bytes(u32 reg, u8 reg_len, u8 stop)
     return 0;
 }
 
+/**
+ * @brief 以已选写命令启动一次写事务，提交命令序列并结束总线事务。
+ * @param[in] reg 待提交的命令值。
+ * @param[in] reg_len 命令编码字节数。
+ * @return 成功为 0；地址或命令发送失败为 -1。
+ */
 static int hyn_write_reg(u32 reg, u8 reg_len)
 {
     int ret = 0;
@@ -182,6 +249,15 @@ exit:
     return ret;
 }
 
+/**
+ * @brief 先写寄存器/命令位置，再以已选读命令读取字节。
+ * @param[in] reg 起始寄存器或命令值。
+ * @param[in] reg_len 地址编码字节数。
+ * @param[out] buf 至少 len 字节的输出，失败时可能已写部分。
+ * @param[in] len 非零读取字节数。
+ * @return 完整读取为 0；输出无效、零长度或任一总线操作失败为 -1。
+ * @note 失败路径也发送 STOP；内部任务串行使用同一 IIC 句柄。
+ */
 static int hyn_read_reg(u32 reg, u8 reg_len, u8 *buf, u16 len)
 {
     u16 i;
@@ -217,6 +293,11 @@ exit:
     return ret;
 }
 
+/**
+ * @brief 尝试读取已有信息及帧位置，按信号启发式核对候选设备。
+ * @param[in] name 候选诊断名称，当前未使用。
+ * @return 任一读取成功且不是全零/FF 时为 0，否则为 -1。
+ */
 static int hyn_validate_cst8xxt(const char *name)
 {
     u8 info[4] = {0};
@@ -230,6 +311,10 @@ static int hyn_validate_cst8xxt(const char *name)
     return (info_ok || frame_ok) ? 0 : -1;
 }
 
+/**
+ * @brief 依次试探既有候选命令组，保存首个可读设备的读写命令。
+ * @return 命中候选为 0；均未应答或未验证可读时为 -1。
+ */
 static int hyn_select_cst8xxt_addr(void)
 {
     static const struct {
@@ -256,11 +341,21 @@ static int hyn_select_cst8xxt_addr(void)
     return -1;
 }
 
+/**
+ * @brief 提交已有的 0x00 单字节命令进入正常采集流程。
+ * @return 底层命令写入结果，0 成功、-1 失败。
+ */
 static int hyn_set_normal_mode(void)
 {
     return hyn_write_reg(0x00, 1);
 }
 
+/**
+ * @brief 读取固定长度触摸帧并把报告点数限制到本驱动上限。
+ * @param[out] buf 至少 HYN_CST8XXT_FRAME_LEN 字节的缓冲区。
+ * @param[out] rep_num 有效点数上限，成功时写入，失败不保证内容。
+ * @return 读取成功为 0；空输出或总线失败为 -1。
+ */
 static int hyn_read_cst8xxt_frame(u8 *buf, u8 *rep_num)
 {
     u8 raw_rep_num;
@@ -280,11 +375,23 @@ static int hyn_read_cst8xxt_frame(u8 *buf, u8 *rep_num)
     return 0;
 }
 
+/**
+ * @brief 计算原生坐标差并转为现有有符号 16 位表示。
+ * @param[in] end 当前坐标。
+ * @param[in] start 上一坐标。
+ * @return end-start 的 s16 转换值。
+ */
 static s16 hyn_delta_u16(u16 end, u16 start)
 {
     return (s16)((s32)end - (s32)start);
 }
 
+/**
+ * @brief 将坐标限制为给定尺寸内的最后一个像素。
+ * @param[in] value 输入坐标。
+ * @param[in] limit 该方向的像素数。
+ * @return limit 为零时为 0；否则为 min(value,limit-1)。
+ */
 static u16 hyn_clamp_coord(u16 value, u16 limit)
 {
     if (limit == 0) {
@@ -293,6 +400,14 @@ static u16 hyn_clamp_coord(u16 value, u16 limit)
     return (value >= limit) ? (u16)(limit - 1) : value;
 }
 
+/**
+ * @brief 按安装配置交换/反向并裁剪原生点，不应用产品运行方向。
+ * @param[in] raw_x 控制器原始横坐标。
+ * @param[in] raw_y 控制器原始纵坐标。
+ * @param[out] out_x 有效的安装后横坐标输出指针。
+ * @param[out] out_y 有效的安装后纵坐标输出指针。
+ * @note 显示尺寸未登记时使用既有 240×320 默认域；方向翻转由 LVGL 和逻辑手势适配处理，不能在此重复旋转。
+ */
 static void hyn_transform_point(u16 raw_x, u16 raw_y, u16 *out_x, u16 *out_y)
 {
     u16 x = raw_x;
@@ -320,6 +435,13 @@ static void hyn_transform_point(u16 raw_x, u16 raw_y, u16 *out_x, u16 *out_y)
     *out_y = y;
 }
 
+/**
+ * @brief 从本次报告中选择首个驱动认可的有效接触，解析安装后主点。
+ * @param[in] buf 完整帧缓冲区。
+ * @param[in] rep_num 已限制到两点以内的报告数量。
+ * @param[out] point 成功时写入主点，失败时不可据其内容更新输入。
+ * @return 成功写入主点为 0；参数无效或无认可接触为 -1。
+ */
 static int hyn_parse_primary_point(const u8 *buf, u8 rep_num, d_touch_hyn_point_t *point)
 {
     u8 i;
@@ -350,6 +472,11 @@ static int hyn_parse_primary_point(const u8 *buf, u8 rep_num, d_touch_hyn_point_
     return -1;
 }
 
+/**
+ * @brief 在有效中性帧到来时，按上一坐标报告正常松手。
+ * @param[in] now_ms 本帧读取时的毫秒计数。
+ * @note 只有此前按下时才生成 UP；读取失败不调用本函数，不能把未知接触丢失转换成点击或返回手势。
+ */
 static void hyn_report_release(u32 now_ms)
 {
     d_touch_hyn_point_t point;
@@ -377,6 +504,13 @@ static void hyn_report_release(u32 now_ms)
     hyn_state_store(state_x, state_y, 0, 0);
 }
 
+/**
+ * @brief 把有效主点转成新的按下或有变化的移动样本。
+ * @param[in] point 解析成功的原生点。
+ * @param[in] rep_num 本帧报告点数。
+ * @param[in] now_ms 本帧毫秒计数。
+ * @note 先登记基本状态，再通知手势层；未改变的坐标和点数不反复生成移动。
+ */
 static void hyn_report_point(const d_touch_hyn_point_t *point, u8 rep_num, u32 now_ms)
 {
     d_touch_gesture_sample_t sample;
@@ -408,12 +542,36 @@ static void hyn_report_point(const d_touch_hyn_point_t *point, u8 rep_num, u32 n
     }
 }
 
+/**
+ * @brief 连续读取失败进入取消期时复位手势并推进一次取消代次。
+ * @note 同一取消期只推进一次；清有效电平但保留坐标，必须等合法中性帧解除 needs_release，不产生正常 UP。
+ */
+static void hyn_cancel_input(void)
+{
+    if (s_hyn_needs_release) {
+        return;
+    }
+    /* 无法确认的接触丢失属于取消，绝不合成为用户正常松手手势。 */
+    d_touch_gesture_reset();
+    OS_ENTER_CRITICAL();
+    s_hyn_needs_release = 1U;
+    s_hyn_cancel_epoch++;
+    s_hyn_down = 0U;
+    s_hyn_points = 0U;
+    OS_EXIT_CRITICAL();
+}
+
+/**
+ * @brief 读取一帧并区分正常接触、正常松手和连续读取失败取消。
+ * @note 失败计数达到现有阈值才取消；恢复后仍按住时持续抑制，合法中性帧只解除恢复门禁，本帧不补发旧输入。
+ */
 static void hyn_read_and_report_frame(void)
 {
     u8 buf[HYN_CST8XXT_FRAME_LEN] = {0};
     u8 rep_num = 0;
     d_touch_hyn_point_t point;
     u32 now_ms = timer_get_ms();
+    int has_point;
 
     s_hyn_poll_count++;
     if (hyn_read_cst8xxt_frame(buf, &rep_num) != 0) {
@@ -426,13 +584,22 @@ static void hyn_read_and_report_frame(void)
                    (unsigned int)s_hyn_frame_fail_streak);
         }
         if (s_hyn_frame_fail_streak >= HYN_FRAME_FAIL_RELEASE_LIMIT) {
-            hyn_report_release(now_ms);
+            hyn_cancel_input();
         }
         return;
     }
     s_hyn_frame_fail_streak = 0;
 
-    if ((rep_num == 0) || (hyn_parse_primary_point(buf, rep_num, &point) != 0)) {
+    has_point = rep_num != 0U && hyn_parse_primary_point(buf, rep_num, &point) == 0;
+    if (s_hyn_needs_release) {
+        if (!has_point) {
+            OS_ENTER_CRITICAL();
+            s_hyn_needs_release = 0U;
+            OS_EXIT_CRITICAL();
+        }
+        return;
+    }
+    if (!has_point) {
         hyn_report_release(now_ms);
         return;
     }
@@ -440,6 +607,11 @@ static void hyn_read_and_report_frame(void)
     hyn_report_point(&point, rep_num, now_ms);
 }
 
+/**
+ * @brief 由专属任务在中断通知或既有轮询周期到来时读取触摸。
+ * @param[in] priv SDK 任务参数，当前未使用。
+ * @note 常驻任务，不在中断执行总线读取或 LVGL 调用。
+ */
 static void hyn_touch_task(void *priv)
 {
     (void)priv;
@@ -450,6 +622,12 @@ static void hyn_touch_task(void *priv)
     }
 }
 
+/**
+ * @brief 在初始化失败、工作任务尚未建立时清理已取得的中断、信号量及 IIC。
+ * @param[in] err 需要传播的初始化错误。
+ * @return 原样返回传入错误。
+ * @note 这是初始化补偿入口，不提供运行期任务停止或 IRQ 在途排空合同；不从另一线程销毁已运行任务的资源。
+ */
 static d_err_t hyn_cleanup(d_err_t err)
 {
     if (s_hyn_wakeup_hdl != NULL) {
@@ -472,6 +650,9 @@ static d_err_t hyn_cleanup(d_err_t err)
     return err;
 }
 
+/**
+ * @brief 启动 HYN 读取能力；完整合同见 d_touch_hyn.h。
+ */
 d_err_t d_touch_hyn_init(const struct lcd_platform_data *pdata)
 {
     int ret;
@@ -542,21 +723,38 @@ d_err_t d_touch_hyn_init(const struct lcd_platform_data *pdata)
     return D_OK;
 }
 
+/**
+ * @brief 复制完整质量快照；完整合同见 d_touch_hyn.h。
+ */
+void d_touch_hyn_get_snapshot(d_touch_hyn_snapshot_t *snapshot)
+{
+    if (snapshot == NULL) {
+        return;
+    }
+    OS_ENTER_CRITICAL();
+    snapshot->x = s_hyn_x;
+    snapshot->y = s_hyn_y;
+    snapshot->pressed = s_hyn_down;
+    snapshot->needs_release = s_hyn_needs_release;
+    snapshot->cancel_epoch = s_hyn_cancel_epoch;
+    OS_EXIT_CRITICAL();
+}
+
+/**
+ * @brief 提供兼容原生状态视图；完整合同见 d_touch_hyn.h。
+ */
 void d_touch_hyn_get_state(s16 *x, s16 *y, unsigned char *status)
 {
-    u16 state_x;
-    u16 state_y;
-    u8 state_down;
-
-    hyn_state_snapshot(&state_x, &state_y, NULL, &state_down);
+    d_touch_hyn_snapshot_t snapshot;
+    d_touch_hyn_get_snapshot(&snapshot);
     if (x != NULL) {
-        *x = (s16)state_x;
+        *x = (s16)snapshot.x;
     }
     if (y != NULL) {
-        *y = (s16)state_y;
+        *y = (s16)snapshot.y;
     }
     if (status != NULL) {
-        *status = state_down ? 1 : 0;
+        *status = snapshot.pressed ? 1 : 0;
     }
 }
 

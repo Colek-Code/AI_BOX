@@ -1,18 +1,8 @@
 /**
  * @file d_chat_ui.c
- * @brief WeChat风格聊天UI界面 - 实现
- * @note  屏幕 320x480, LVGL v9, 英文字体
- *
- * 布局:
- * ┌──────────────────────┐
- * │    AI Assistant       │  标题栏 40px
- * ├──────────────────────┤
- * │ [AI bubble]          │
- * │          [User bubble]│  消息滚动区 390px
- * │ [AI bubble]          │
- * ├──────────────────────┤
- * │  [Hold to Talk]      │  底部栏 50px
- * └──────────────────────┘
+ * @brief 微信式聊天气泡布局的 LVGL 实现。
+ * @note 以 320×480 竖屏为基准，上部 200 像素留给表情，聊天区高 280 像素；
+ * 标题 30、底栏 46，消息区为剩余 204 像素。对象由父页面树持有。
  */
 
 #include "config/app_config.h"
@@ -81,6 +71,10 @@ static lv_obj_t *s_bottom_bar   = NULL;
 //                              标题栏                                             //
 //*********************************************************************************//
 
+/**
+ * @brief 创建聊天区标题栏及固定标题。
+ * @param[in,out] parent 有效聊天区父对象；创建对象由其拥有。
+ */
 static void create_title_bar(lv_obj_t *parent)
 {
     lv_obj_t *bar = lv_obj_create(parent);
@@ -104,6 +98,10 @@ static void create_title_bar(lv_obj_t *parent)
 //                              消息滚动区                                         //
 //*********************************************************************************//
 
+/**
+ * @brief 创建纵向消息滚动区并设置气泡间距。
+ * @param[in,out] parent 有效聊天区父对象。
+ */
 static void create_msg_area(lv_obj_t *parent)
 {
     s_msg_area = lv_obj_create(parent);
@@ -132,6 +130,10 @@ static void create_msg_area(lv_obj_t *parent)
 //                              底部操作栏                                         //
 //*********************************************************************************//
 
+/**
+ * @brief 创建底部麦克风按钮及静态操作文字。
+ * @param[in,out] parent 有效聊天区父对象。
+ */
 static void create_bottom_bar(lv_obj_t *parent)
 {
     lv_obj_t *bar = lv_obj_create(parent);
@@ -176,6 +178,10 @@ static void create_bottom_bar(lv_obj_t *parent)
 //                              内存管理：限制消息数量                             //
 //*********************************************************************************//
 
+/**
+ * @brief 超过二十条消息时删除最旧普通行，遇到输入指示行则停止清理。
+ * @note 不把输入指示计入普通消息数；仅作用于当前静态消息区。
+ */
 static void limit_messages(void)
 {
     while (s_msg_count > MAX_MESSAGES && s_msg_area) {
@@ -196,6 +202,9 @@ static void limit_messages(void)
 
 static lv_obj_t *s_chat_container = NULL;
 
+/**
+ * @brief 在父对象或当前屏幕下创建标题、有限消息区及麦克风操作栏。
+ */
 void chat_ui_create(lv_obj_t *parent)
 {
     /* 使用传入的父容器，如果为空则使用当前活跃屏幕 */
@@ -219,6 +228,9 @@ void chat_ui_create(lv_obj_t *parent)
     printf(CHAT_TAG "Chat UI created (%dx%d, offset Y=%d)\n", SCR_W, CHAT_H, FACE_AREA_H);
 }
 
+/**
+ * @brief 复制消息文字到新气泡，限制历史数量并滚动到最新消息。
+ */
 void chat_ui_add_msg(int is_user, const char *text)
 {
     if (!s_msg_area || !text || !text[0]) {
@@ -273,6 +285,9 @@ void chat_ui_add_msg(int is_user, const char *text)
     lv_obj_scroll_to_view(row, LV_ANIM_ON);
 }
 
+/**
+ * @brief 创建或删除当前单个输入指示气泡。
+ */
 void chat_ui_show_typing(int show)
 {
     if (show && !s_typing_row) {
@@ -310,6 +325,9 @@ void chat_ui_show_typing(int show)
     }
 }
 
+/**
+ * @brief 借用当前静态聊天实例的麦克风按钮。
+ */
 lv_obj_t *chat_ui_get_mic_btn(void)
 {
     return s_mic_btn;

@@ -61,6 +61,7 @@
 //获取spi配置是否阻塞发送
 #define IOCTL_SPI_GET_NON_BLOCK             _IOR('S', 22, u32)
 #define IOCTL_SPI_SET_THRESHOLD_SEM_WAIT    _IOW('S', 23, u32)
+#define IOCTL_SPI_READ_PACKAGE_DUAL_MODE    _IOR('S', 24, u32)
 
 struct spi_io {
     u8 cs_pin;

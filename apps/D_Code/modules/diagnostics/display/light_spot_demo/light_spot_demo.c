@@ -1,6 +1,6 @@
 /**
  * @file light_spot_demo.c
- * @brief Two light spots main page demo.
+ * @brief 双光斑动态演示页实现。
  */
 
 #include "config/app_config.h"
@@ -34,6 +34,10 @@ static int16_t s_light_spot_angle_ay = 47;
 static int16_t s_light_spot_angle_bx = 200;
 static int16_t s_light_spot_angle_by = 130;
 
+/**
+ * @brief 清除对象边框、内边距、圆角并禁用滚动。
+ * @param[in,out] obj 待调整的 LVGL 对象；为空时不处理。
+ */
 static void light_spot_demo_clean_obj(lv_obj_t *obj)
 {
     if (obj == NULL) {
@@ -46,6 +50,11 @@ static void light_spot_demo_clean_obj(lv_obj_t *obj)
     lv_obj_remove_flag(obj, LV_OBJ_FLAG_SCROLLABLE);
 }
 
+/**
+ * @brief 将对象铺满逻辑屏幕并设置背景。
+ * @param[in,out] obj 待调整的 LVGL 对象；为空时不处理。
+ * @param[in] color 背景颜色。
+ */
 static void light_spot_demo_set_fullscreen(lv_obj_t *obj, lv_color_t color)
 {
     if (obj == NULL) {
@@ -59,6 +68,12 @@ static void light_spot_demo_set_fullscreen(lv_obj_t *obj, lv_color_t color)
     lv_obj_set_style_bg_opa(obj, LV_OPA_COVER, 0);
 }
 
+/**
+ * @brief 设置无阴影的半透明圆形光斑样式。
+ * @param[in,out] obj 待调整的 LVGL 对象；为空时不处理。
+ * @param[in] size 圆形直径像素。
+ * @param[in] color RGB 颜色值。
+ */
 static void light_spot_demo_style_spot(lv_obj_t *obj, int size, uint32_t color)
 {
     if (obj == NULL) {
@@ -74,6 +89,13 @@ static void light_spot_demo_style_spot(lv_obj_t *obj, int size, uint32_t color)
     lv_obj_set_style_shadow_opa(obj, LV_OPA_TRANSP, 0);
 }
 
+/**
+ * @brief 由圆心与半径计算光斑左上角。
+ * @param[in,out] obj 待调整的 LVGL 对象；为空时不处理。
+ * @param[in] center_x 圆心横坐标。
+ * @param[in] center_y 圆心纵坐标。
+ * @param[in] radius 圆半径像素。
+ */
 static void light_spot_demo_set_pos(lv_obj_t *obj, int center_x, int center_y, int radius)
 {
     if (obj == NULL) {
@@ -82,6 +104,11 @@ static void light_spot_demo_set_pos(lv_obj_t *obj, int center_x, int center_y, i
     lv_obj_set_pos(obj, center_x - radius, center_y - radius);
 }
 
+/**
+ * @brief 创建两个光斑并恢复各自的初始相位。
+ * @param[in,out] parent 承载新建子对象的父容器。
+ * @return 成功返回 0；父对象为空或分配失败返回 -1。
+ */
 static int light_spot_demo_create(lv_obj_t *parent)
 {
     lv_obj_t *scr;
@@ -126,6 +153,10 @@ static int light_spot_demo_create(lv_obj_t *parent)
     return 0;
 }
 
+/**
+ * @brief 按经过时间选择相位步长，用正弦轨迹更新两个光斑。
+ * @param[in] elapsed_ms 本次页面更新经过的毫秒数；超过 33 时取双步长。
+ */
 static void light_spot_demo_update(uint32_t elapsed_ms)
 {
     int32_t ax;
@@ -158,11 +189,17 @@ static void light_spot_demo_update(uint32_t elapsed_ms)
     light_spot_demo_set_pos(s_light_spot_b, (int)bx, (int)by, LIGHT_SPOT_DEMO_B_RADIUS);
 }
 
+/**
+ * @brief 记录光斑页面进入事件。
+ */
 static void light_spot_demo_enter(void)
 {
     printf(LOG_TAG "Light spot demo enter\n");
 }
 
+/**
+ * @brief 记录光斑页面退出事件。
+ */
 static void light_spot_demo_exit(void)
 {
     printf(LOG_TAG "Light spot demo exit\n");
@@ -186,6 +223,9 @@ static const page_desc_t s_light_spot_demo_desc = {
     .is_active  = 0,
 };
 
+/**
+ * @brief 注册静态页面描述；完整合同见 light_spot_demo.h。
+ */
 int light_spot_demo_register(void)
 {
     return page_manager_register(&s_light_spot_demo_desc);

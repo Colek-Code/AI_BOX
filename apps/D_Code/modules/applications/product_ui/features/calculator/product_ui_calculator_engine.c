@@ -1,17 +1,26 @@
-/**
- * @file product_ui_calculator_engine.c
- * @brief Overflow-checked fixed-point calculator operations.
- */
+/** @file product_ui_calculator_engine.c @brief 有范围检查的千分制定点运算、文本解析和显示格式化。 */
 
 #include "modules/applications/product_ui/features/calculator/product_ui_calculator_engine.h"
 #include <stddef.h>
 
+/**
+ * @brief 取得已受限千分制定点值的绝对值。
+ * @param[in] value 调用链保证不为 INT64_MIN 的定点值。
+ * @return 输入的非负绝对值。
+ */
 static product_ui_calculator_value_t product_ui_calculator_abs(
     product_ui_calculator_value_t value)
 {
     return (value < 0) ? -value : value;
 }
 
+/**
+ * @brief 先检查上界及下界再写入定点加法结果。
+ * @param[in] lhs 已受限左操作数。
+ * @param[in] rhs 已受限右操作数。
+ * @param[out] result 调用方保证非空的成功结果。
+ * @return 未超界返回 OK；越界返回 OVERFLOW 并保留原输出。
+ */
 static product_ui_calculator_status_e product_ui_calculator_add(
     product_ui_calculator_value_t lhs,
     product_ui_calculator_value_t rhs,
@@ -27,6 +36,13 @@ static product_ui_calculator_status_e product_ui_calculator_add(
     return PRODUCT_UI_CALCULATOR_OK;
 }
 
+/**
+ * @brief 按整数与余数分解计算缩放乘积，避免直接相乘溢出。
+ * @param[in] lhs 已受限左操作数。
+ * @param[in] rhs 已受限右操作数。
+ * @param[out] result 非空结果缓冲；分数乘积向零截断。
+ * @return 结果可表示返回 OK；超界返回 OVERFLOW 且不写结果。
+ */
 static product_ui_calculator_status_e product_ui_calculator_multiply(
     product_ui_calculator_value_t lhs,
     product_ui_calculator_value_t rhs,
@@ -63,6 +79,13 @@ static product_ui_calculator_status_e product_ui_calculator_multiply(
     return PRODUCT_UI_CALCULATOR_OK;
 }
 
+/**
+ * @brief 在拒绝零除后计算按千分制缩放的商。
+ * @param[in] lhs 已受限被除数，缩放后仍可由 int64_t 表示。
+ * @param[in] rhs 已受限除数。
+ * @param[out] result 非空结果指针，仅成功时写入。
+ * @return 成功返回 OK；除数为零返回 DIVIDE_BY_ZERO；商超界返回 OVERFLOW。
+ */
 static product_ui_calculator_status_e product_ui_calculator_divide(
     product_ui_calculator_value_t lhs,
     product_ui_calculator_value_t rhs,
@@ -82,6 +105,9 @@ static product_ui_calculator_status_e product_ui_calculator_divide(
     return PRODUCT_UI_CALCULATOR_OK;
 }
 
+/**
+ * @brief 对两个受限的千分制定点数执行四则运算。
+ */
 product_ui_calculator_status_e product_ui_calculator_engine_apply(
     product_ui_calculator_value_t lhs,
     product_ui_calculator_operator_e operation,
@@ -120,6 +146,12 @@ typedef struct {
     uint8_t has_decimal;
 } product_ui_calculator_parse_t;
 
+/**
+ * @brief 向解析状态追加一位十进制数字并检查整数与小数位数边界。
+ * @param[in,out] parse 已初始化的解析累积状态。
+ * @param[in] digit 调用方保证在 ASCII 0 至 9 范围内。
+ * @return 可继续解析返回 OK；小数超过三位返回 FORMAT，整数增长超界返回 OVERFLOW。
+ */
 static product_ui_calculator_status_e product_ui_calculator_parse_digit(
     product_ui_calculator_parse_t *parse, char digit)
 {
@@ -141,6 +173,9 @@ static product_ui_calculator_status_e product_ui_calculator_parse_digit(
     return PRODUCT_UI_CALCULATOR_OK;
 }
 
+/**
+ * @brief 解析可选负号及最多三位小数的十进制文本。
+ */
 product_ui_calculator_status_e product_ui_calculator_engine_parse(
     const char *text, product_ui_calculator_value_t *value)
 {
@@ -188,6 +223,9 @@ product_ui_calculator_status_e product_ui_calculator_engine_parse(
     return PRODUCT_UI_CALCULATOR_OK;
 }
 
+/**
+ * @brief 把受限千分制定点数格式化为去掉小数尾零的十进制文字。
+ */
 product_ui_calculator_status_e product_ui_calculator_engine_format(
     product_ui_calculator_value_t value, char *output, uint16_t output_size)
 {

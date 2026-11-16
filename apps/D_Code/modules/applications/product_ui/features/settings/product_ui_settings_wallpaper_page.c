@@ -1,4 +1,4 @@
-/** @file product_ui_settings_wallpaper_page.c @brief Wallpaper selection and confirmed apply. */
+/** @file product_ui_settings_wallpaper_page.c @brief 壁纸草稿选择与持久化确认的页面投影。 */
 #include "config/app_config.h"
 #if defined(D_LVGL_ENABLE) && (D_UI_TARGET == D_UI_PRODUCT)
 #include "product_ui_settings_details.h"
@@ -21,6 +21,10 @@ typedef struct {
 } product_ui_wallpaper_page_t;
 static product_ui_wallpaper_page_t s_wallpaper_page;
 
+/**
+ * @brief 更新选择标记、当前记录及保存状态，所有文字成功后才提交已呈现代次。
+ * @note 文本失败保留 render_pending 以重试；只有已确认记录、结果成功且选中值相同才显示已应用。
+ */
 static void product_ui_settings_wallpaper_render(void)
 {
     product_ui_settings_snapshot_t snapshot;
@@ -32,6 +36,8 @@ static void product_ui_settings_wallpaper_render(void)
     uint8_t is_applied;
     uint8_t can_save;
     uint8_t index;
+    int text_result;
+    char current_caption[80];
     if (s_wallpaper_page.current == NULL ||
         product_ui_settings_service_snapshot(&snapshot) != 0) return;
     if (!s_wallpaper_page.render_pending && snapshot.revision == s_wallpaper_page.revision) return;
@@ -42,18 +48,23 @@ static void product_ui_settings_wallpaper_render(void)
     can_save = product_ui_settings_appearance_can_save(&snapshot);
     for (index = 0U; index < PRODUCT_UI_WALLPAPER_COUNT; index++) {
         uint8_t is_selected = index == s_wallpaper_page.selected_id;
-        lv_obj_set_style_border_color(s_wallpaper_page.cards[index],
-            product_ui_color(is_selected ? PRODUCT_UI_COLOR_ACTION : PRODUCT_UI_COLOR_BORDER), 0);
+        if (lv_obj_has_state(s_wallpaper_page.cards[index], LV_STATE_CHECKED) != (is_selected != 0U)) {
+            if (is_selected) lv_obj_add_state(s_wallpaper_page.cards[index], LV_STATE_CHECKED);
+            else lv_obj_remove_state(s_wallpaper_page.cards[index], LV_STATE_CHECKED);
+            lv_obj_set_style_border_color(s_wallpaper_page.cards[index],
+                product_ui_color(is_selected ? PRODUCT_UI_COLOR_ACTION : PRODUCT_UI_COLOR_BORDER), 0);
+        }
         if (is_selected) lv_obj_remove_flag(s_wallpaper_page.marks[index], LV_OBJ_FLAG_HIDDEN);
         else lv_obj_add_flag(s_wallpaper_page.marks[index], LV_OBJ_FLAG_HIDDEN);
     }
-    lv_label_set_text_fmt(s_wallpaper_page.current, "当前：%s", current->name);
+    lv_snprintf(current_caption, sizeof(current_caption), "当前：%s", current->name);
+    text_result = product_ui_label_sync(s_wallpaper_page.current, current_caption, NULL);
     status_text = product_ui_settings_appearance_status(&snapshot);
     if (can_save && !snapshot.appearance.is_timed_out && snapshot.appearance.result == D_OK &&
         s_wallpaper_page.selected_id != snapshot.wallpaper_id) {
         status_text = "待应用";
     }
-    lv_label_set_text_static(s_wallpaper_page.status, status_text);
+    if (product_ui_label_sync(s_wallpaper_page.status, status_text, NULL) < 0) text_result = -1;
     action_text = can_save ? (is_applied ? "已应用" : "应用") :
         (snapshot.appearance.is_quiescing ? "关机中" :
          snapshot.appearance.is_service_ready ? "保存中" : "不可用");
@@ -61,11 +72,16 @@ static void product_ui_settings_wallpaper_render(void)
         can_save && !is_applied, can_save && is_applied);
     current_text = lv_label_get_text(s_wallpaper_page.current);
     displayed_action = lv_label_get_text(s_wallpaper_page.view.nav_action_label);
-    s_wallpaper_page.render_pending = current_text == NULL || strstr(current_text, current->name) == NULL ||
+    s_wallpaper_page.render_pending = text_result < 0 || current_text == NULL || strstr(current_text, current->name) == NULL ||
         displayed_action == NULL || strcmp(displayed_action, action_text) != 0;
     if (!s_wallpaper_page.render_pending) s_wallpaper_page.revision = snapshot.revision;
 }
 
+/**
+ * @brief 把点击卡片编号保存为页面草稿并触发重绘。
+ * @param[in] event 卡片事件，用户数据编码壁纸编号。
+ * @note 选择不直接保存，越界编号忽略。
+ */
 static void product_ui_settings_wallpaper_select(lv_event_t *event)
 {
     uint8_t id = (uint8_t)(uintptr_t)lv_event_get_user_data(event);
@@ -75,6 +91,11 @@ static void product_ui_settings_wallpaper_select(lv_event_t *event)
     product_ui_settings_wallpaper_render();
 }
 
+/**
+ * @brief 提交选中壁纸的保存请求并重新读取真实状态。
+ * @param[in] event 应用操作事件，当前未读取载荷。
+ * @note 请求失败提示不可保存；成功只表示受理，页面继续等外观完成快照。
+ */
 static void product_ui_settings_wallpaper_apply(lv_event_t *event)
 {
     (void)event;
@@ -86,6 +107,12 @@ static void product_ui_settings_wallpaper_apply(lv_event_t *event)
     product_ui_settings_wallpaper_render();
 }
 
+/**
+ * @brief 创建静态缩略图、名称及选中标记的壁纸卡片。
+ * @param[in,out] parent 卡片父容器。
+ * @param[in] id 有效壁纸目录编号，须落在本页固定卡片数组内。
+ * @return 完整创建返回 0；资源或对象失败返回 -1，已创建对象交页面树清理。
+ */
 static int product_ui_settings_wallpaper_card(lv_obj_t *parent, uint8_t id)
 {
     const product_ui_wallpaper_t *wallpaper = product_ui_wallpaper_get(id);
@@ -135,6 +162,9 @@ static int product_ui_settings_wallpaper_card(lv_obj_t *parent, uint8_t id)
     return 0;
 }
 
+/**
+ * @brief 核对壁纸数量后创建选择卡片及状态，恢复当前或在途的目标选择。
+ */
 int product_ui_settings_wallpaper_page_create(lv_obj_t *parent)
 {
     product_ui_page_spec_t spec = {
@@ -179,6 +209,10 @@ int product_ui_settings_wallpaper_page_create(lv_obj_t *parent)
     return 0;
 }
 
+/**
+ * @brief 推进公共详情周期，并按待重试状态及有限节奏刷新壁纸投影。
+ * @param[in] elapsed_ms 本轮毫秒数，刷新累计每次最多采用 100。
+ */
 static void product_ui_settings_wallpaper_update(uint32_t elapsed_ms)
 {
     product_ui_settings_detail_page_update(elapsed_ms);
@@ -188,6 +222,9 @@ static void product_ui_settings_wallpaper_update(uint32_t elapsed_ms)
     product_ui_settings_wallpaper_render();
 }
 
+/**
+ * @brief 解除框架状态并清空选择与呈现缓存，不取消已受理保存。
+ */
 static void product_ui_settings_wallpaper_destroy(void)
 {
     product_ui_page_view_reset(&s_wallpaper_page.view);
@@ -201,6 +238,11 @@ static const page_ops_t s_wallpaper_ops = {
     .flags = PAGE_FLAG_NO_GESTURE,
 };
 static page_desc_t s_wallpaper_desc = {.name = "壁纸详情", .ops = &s_wallpaper_ops};
+/**
+ * @brief 注册静态壁纸详情页面描述。
+ * @param[in] page_type 装配分配的页面类型。
+ * @return 原样返回页面管理器注册结果。
+ */
 static int product_ui_settings_wallpaper_register(int page_type)
 {
     s_wallpaper_desc.page_type = page_type;

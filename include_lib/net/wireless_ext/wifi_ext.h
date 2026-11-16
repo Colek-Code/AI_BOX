@@ -17,7 +17,7 @@ int ext_wifi_module_enter_sta_mode(char *ssid, char *pwd);
 void ext_wifi_module_exit_sta_mode(void);
 int ext_wifi_module_enter_smp_mode(void);
 void ext_wifi_module_exit_smp_mode(void);
-int ext_wifi_module_enter_p2p_mode(unsigned char role, const unsigned char *device_name);
+int ext_wifi_module_enter_p2p_mode(unsigned char role);
 void ext_wifi_module_exit_p2p_mode(void);
 int ext_wifi_module_enter_mp_test_mode(void);
 void ext_wifi_module_exit_mp_test_mode(void);

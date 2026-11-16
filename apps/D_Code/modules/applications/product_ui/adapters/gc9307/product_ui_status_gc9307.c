@@ -1,7 +1,4 @@
-/**
- * @file product_ui_status_gc9307.c
- * @brief GC9307 Product UI status aggregation outside the UI layer.
- */
+/** @file product_ui_status_gc9307.c @brief 汇聚可信时钟、内存 WiFi 缓存及有效电池采样，不在 UI 周期执行网络采样。 */
 
 #include "config/app_config.h"
 
@@ -39,6 +36,12 @@ static uint8_t s_battery_last_charging;
 static uint32_t s_seen_wifi_status_version = 0xFFFFFFFFU;
 #endif
 
+/**
+ * @brief 逐字段比较时间域摘要和新的有效墙钟值。
+ * @param[in] summary 借用的时间域摘要，可为 NULL。
+ * @param[in] value 借用的候选日期时间，可为 NULL。
+ * @return 摘要墙钟有效且日期时分秒相同返回非零，否则为零。
+ */
 static uint8_t product_ui_status_gc9307_same_time(
     const product_ui_time_domain_summary_t *summary,
     const product_ui_datetime_t *value)
@@ -56,6 +59,13 @@ static uint8_t product_ui_status_gc9307_same_time(
         (summary->wall_time.time.second == value->time.second));
 }
 
+/**
+ * @brief 仅在能力或不可用原因变化时向时间域执行能力命令。
+ * @param[in] summary 当前时间域摘要。
+ * @param[in] capability 待发布的时间能力。
+ * @param[in] reason 相应不可用原因。
+ * @return 未变化或命令成功返回 0，失败返回 -1。
+ */
 static int product_ui_status_gc9307_set_time_capability(
     const product_ui_time_domain_summary_t *summary,
     product_ui_time_capability_e capability,
@@ -75,6 +85,11 @@ static int product_ui_status_gc9307_set_time_capability(
            PRODUCT_UI_TIME_OK ? 0 : -1;
 }
 
+/**
+ * @brief 把候选墙钟复制到时间域命令并执行。
+ * @param[in] value 调用链保证非空的候选日期时间。
+ * @return 时间域接受返回 0，否则返回 -1。
+ */
 static int product_ui_status_gc9307_set_wall_time(
     const product_ui_datetime_t *value)
 {
@@ -87,6 +102,12 @@ static int product_ui_status_gc9307_set_wall_time(
            PRODUCT_UI_TIME_OK ? 0 : -1;
 }
 
+/**
+ * @brief 同步时间域能力与墙钟，再发布 TIME 服务就绪或不可用。
+ * @param[in] value 候选时间；reason 有效时才使用。
+ * @param[in] reason 来源可用性原因，NONE 表示可用。
+ * @return 全部成功返回 0，读取、命令或注册表发布失败返回 -1。
+ */
 static int product_ui_status_gc9307_sync_time(
     const product_ui_datetime_t *value,
     product_ui_time_unavailable_reason_e reason)
@@ -124,11 +145,10 @@ static int product_ui_status_gc9307_sync_time(
 }
 
 #if D_FEATURE_WIFI
-/*
- * Map wifi_service state → status-bar link enum.
- * Status bar opa: CONNECTED/ON = full, OFF/UNKNOWN = dim.
- * DISCONNECTED/ERROR must be OFF — previously they fell through to ON, so
- * the icon stayed "lit" while the service said disconnected.
+/**
+ * @brief 映射状态栏链路状态，断开及错误必须呈现关闭。
+ * @param[in] state WiFi 服务连接状态。
+ * @return 连接为 CONNECTED，连接中／关联为 ON，其余为 OFF。
  */
 static product_ui_link_state_e product_ui_status_gc9307_wifi_state(
     wifi_service_conn_state_t state)
@@ -147,7 +167,12 @@ static product_ui_link_state_e product_ui_status_gc9307_wifi_state(
     }
 }
 
-/* wifi_service signal_strength is 0..100; status model wifi_level is 0..4. */
+/**
+ * @brief 将已连接网络的百分比信号映射成零至四格。
+ * @param[in] signal_percent 服务发布的信号百分比。
+ * @param[in] state 连接状态，仅 CONNECTED 展示信号。
+ * @return 未连接或零信号返回零，其余按 25、50、75 阈值返回一至四格。
+ */
 static uint8_t product_ui_status_gc9307_wifi_level(uint8_t signal_percent,
                                                    wifi_service_conn_state_t state)
 {
@@ -169,12 +194,16 @@ static uint8_t product_ui_status_gc9307_wifi_level(uint8_t signal_percent,
     return 4U;
 }
 
+/**
+ * @brief 借用内存缓存，给状态副本补充 WiFi 能力、有效位及图标状态。
+ * @param[in,out] status 待发布的状态副本，其他字段保留。
+ */
 static void product_ui_status_gc9307_add_wifi(product_ui_status_t *status)
 {
     wifi_service_status_t wifi;
 
     memset(&wifi, 0, sizeof(wifi));
-    wifi_service_get_status(&wifi);
+    wifi_service_get_cached_status(&wifi);
     status->capability_mask |= PRODUCT_UI_STATUS_CAP_WIFI;
     status->valid_mask |= PRODUCT_UI_STATUS_VALID_WIFI;
     status->wifi_state = product_ui_status_gc9307_wifi_state(wifi.state);
@@ -183,6 +212,13 @@ static void product_ui_status_gc9307_add_wifi(product_ui_status_t *status)
 }
 #endif
 
+/**
+ * @brief 将有效 ADC 电压映射电量，并缓存最近有效采样。
+ * @param[out] percent 成功时写入零至一百的电量。
+ * @param[out] is_charging 成功时写入充电状态。
+ * @return 得到新采样或复用有效旧采样返回 1；空输出或尚无有效采样返回 0。
+ * @note ADC 启动阶段为零时保留旧有效采样；从未有效时不伪造零电量。
+ */
 static uint8_t product_ui_status_gc9307_read_battery(
     uint8_t *percent, uint8_t *is_charging)
 {
@@ -194,11 +230,8 @@ static uint8_t product_ui_status_gc9307_read_battery(
         return 0U;
     }
     adc_value = adc_get_voltage(AD_CH_VBAT);
-    /*
-     * Boot race: AD_CH_VBAT can return 0 until ADC settles. Do not publish a
-     * fake 0% shell — keep last good sample so the bar is not empty until
-     * the first real reading (user saw empty-on-boot, OK after settings).
-     */
+    /* 启动时 ADC 未稳定可能返回零；不伪造零电量，
+     * 优先保留最近有效采样，没有有效采样前不发布电量有效位。 */
     if (adc_value == 0U) {
         if (s_battery_have_sample) {
             *percent = s_battery_last_percent;
@@ -225,6 +258,10 @@ static uint8_t product_ui_status_gc9307_read_battery(
     return 1U;
 }
 
+/**
+ * @brief 汇聚时间、电量及 WiFi 投影并交统一状态规范化发布。
+ * @return 成功返回 0；时间同步或状态发布失败返回 -1。
+ */
 static int product_ui_status_gc9307_refresh(void)
 {
     product_ui_datetime_t wall_time = {0};
@@ -253,6 +290,9 @@ static int product_ui_status_gc9307_refresh(void)
     return product_ui_status_update(&status) < 0 ? -1 : 0;
 }
 
+/**
+ * @brief 建立状态采样节奏并尝试首次采样；后续周期补充尚未就绪的 ADC。
+ */
 int product_ui_status_gc9307_init(void)
 {
     if (s_status_initialized) {
@@ -260,12 +300,15 @@ int product_ui_status_gc9307_init(void)
     }
     s_status_elapsed_ms = 0U;
     s_status_fast_polls_left = PRODUCT_UI_STATUS_GC9307_FAST_POLL_COUNT;
-    /* Best-effort first sample; ADC may still be cold — process() retries. */
+    /* 尝试首个采样；ADC 可能尚未稳定，周期处理继续重试。 */
     (void)product_ui_status_gc9307_refresh();
     s_status_initialized = 1U;
     return 0;
 }
 
+/**
+ * @brief 按快速启动轮询、普通轮询或 WiFi 版本变化刷新状态。
+ */
 void product_ui_status_gc9307_process(uint32_t elapsed_ms)
 {
     uint8_t due = 0U;
@@ -278,7 +321,7 @@ void product_ui_status_gc9307_process(uint32_t elapsed_ms)
     {
         uint32_t wifi_ver = wifi_service_get_status_version();
 
-        /* Refresh as soon as wifi_service state changes (not only 1s poll). */
+        /* WiFi 状态版本变化时立即刷新，不只等待一秒轮询。 */
         if (wifi_ver != s_seen_wifi_status_version) {
             s_seen_wifi_status_version = wifi_ver;
             due = 1U;
@@ -303,4 +346,4 @@ void product_ui_status_gc9307_process(uint32_t elapsed_ms)
     }
 }
 
-#endif /* Product UI GC9307 profile */
+#endif /* Product UI 的 GC9307 配置。 */

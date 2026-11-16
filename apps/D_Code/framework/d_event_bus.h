@@ -75,21 +75,7 @@ typedef enum {
     /* ─── NTP 事件 (0x0600 - 0x06FF) ─── */
     EVT_NTP_SYNCED              = 0x0600,   /* NTP 校时完成 */
 
-    /* ─── WebSocket 事件 (0x0700 - 0x07FF) ─── */
-    EVT_WS_CONNECTED            = 0x0700,   /* data: ws_connected_info_t* */
-    EVT_WS_DISCONNECTED         = 0x0701,
-    EVT_WS_MESSAGE_RECV         = 0x0702,   /* data: ws_raw_msg_t*（通用） */
-    EVT_WS_ERROR                = 0x0703,   /* data: d_error_info_t* */
-    EVT_WS_HANDSHAKE_FAILED     = 0x0704,   /* 连续握手失败超限，可能需重新首配 */
-    EVT_WS_CHAT_ACCEPTED        = 0x0710,   /* chat.accepted */
-    EVT_WS_CHAT_DELTA           = 0x0711,   /* chat.delta（增量文本） */
-    EVT_WS_CHAT_DONE            = 0x0712,   /* chat.done */
-    EVT_WS_COMMAND_MSG          = 0x0720,   /* 云端下发命令 */
-    EVT_WS_WORKFLOW_MSG         = 0x0730,   /* 工作流消息 */
-
-    /* ─── 首配事件 (0x0800 - 0x08FF) ─── */
-    EVT_PROVISION_OK            = 0x0800,   /* 首配成功 */
-    EVT_PROVISION_FAIL          = 0x0801,   /* 首配失败 */
+    /* 0x0700—0x08FF 为已退役的设备平台事件保留，不重新分配。 */
 
     /* ─── RTC 音频事件 (0x0900 - 0x09FF) ─── */
     EVT_RTC_AUDIO_STARTED       = 0x0900,   /* 音频采集/播放已启动 */
@@ -109,7 +95,7 @@ typedef enum {
     EVT_BRTC_ASR_USER           = 0x0A20,   /* 用户 ASR 字幕 data: brtc_asr_data_t* */
     EVT_BRTC_ASR_AGENT          = 0x0A21,   /* AI 回复字幕 data: brtc_asr_data_t* */
     EVT_BRTC_AI_SPEAKING        = 0x0A30,   /* AI 开始/结束说话 data: bool* (true=开始) */
-    EVT_BRTC_FUNCTION_CALL      = 0x0A40,   /* FunctionCall data: brtc_func_call_t* */
+    EVT_BRTC_FUNCTION_CALL      = 0x0A40,   /* 函数调用载荷：brtc_func_call_t 指针。 */
     EVT_BRTC_PLAYER_OP          = 0x0A50,   /* 音频播放控制 data: brtc_player_op_t* */
     EVT_BRTC_LICENSE_OK         = 0x0A60,   /* License 验证通过 */
     EVT_BRTC_LICENSE_FAIL       = 0x0A61,   /* License 验证失败 */
@@ -132,7 +118,7 @@ typedef enum {
     /* ─── XiaoLe 唤醒事件 (0x0D00 - 0x0DFF) ─── */
     EVT_XIAOLE_WAKEUP_STARTED   = 0x0D00,
     EVT_XIAOLE_WAKEUP_STOPPED   = 0x0D01,
-    EVT_XIAOLE_WAKEUP_DETECTED  = 0x0D02, /* data: uint32_t caller session generation */
+    EVT_XIAOLE_WAKEUP_DETECTED  = 0x0D02, /* 载荷：uint32_t，表示调用方会话代次。 */
     EVT_XIAOLE_WAKEUP_ERROR     = 0x0DF0,
 
     /* ─── OTA 升级事件 (0x0E00 - 0x0EFF) ─── */
@@ -172,52 +158,49 @@ typedef void (*d_event_handler_t)(const d_event_t *event, void *user_data);
 //*********************************************************************************//
 
 /**
- * @brief 初始化事件总线（创建异步分发任务）
- * @note  必须在所有 subscribe 之前调用
- * @return D_OK=就绪，其他错误=基础设施未创建，调用方不得继续订阅
+ * @brief 初始化订阅锁、异步队列信号量和事件分发任务。
+ * @return D_OK 表示已就绪；D_ERR_IO 表示基础设施创建失败。
+ * @note 启动装配阶段须先于所有订阅和发布调用；已初始化时直接成功，不是运行期重置入口。创建失败按已取得资源逆向释放。
  */
 d_err_t d_event_bus_init(void);
 
 /**
- * @brief 订阅事件
- * @param id        要订阅的事件 ID
- * @param handler   回调函数
- * @param user_data 传给回调的用户数据指针（可为 NULL，总线不复制指向的对象）
- * @note 同一事件按 handler 判断重复订阅；重复调用不更新原 user_data。
- *       user_data 指向的对象必须在所有在途回调结束前保持有效。
- * @return 0=成功, <0=失败
+ * @brief 借用一个事件回调及其上下文并登记订阅。
+ * @param[in] id 事件编号。
+ * @param[in] handler 同步或异步分发时调用的处理函数。
+ * @param[in] user_data 借用的上下文，可为 NULL；总线不复制指向的对象。
+ * @return 0 表示新订阅成功或相同回调已订阅；-1 表示未初始化、回调无效或容量不足。
+ * @note 同一事件按 handler 判重，重复订阅不更新原 user_data。上下文须保持到所有在途回调结束。
+ * @note 订阅表由互斥锁保护；此接口可能等待锁，不供中断调用。
  */
 int d_event_subscribe(d_event_id_t id, d_event_handler_t handler, void *user_data);
 
 /**
- * @brief 取消订阅
- * @return 0=成功, <0=未找到
- * @note 只移除订阅表项，不等待已经取得订阅者快照的回调结束；
- *       调用方需要自行确认在途回调结束后才能释放 user_data。
+ * @brief 从订阅表移除指定事件回调。
+ * @param[in] id 事件编号。
+ * @param[in] handler 要移除的已注册处理函数。
+ * @return 0 表示找到并移除；-1 表示未初始化、参数无效或未找到。
+ * @note 可能等待订阅互斥锁；只移除注册项，不等待已经取得快照的回调。调用方确认在途回调结束前不得释放上下文。
  */
 int d_event_unsubscribe(d_event_id_t id, d_event_handler_t handler);
 
 /**
- * @brief 同步发布事件（在调用者线程上下文执行所有回调）
- * @param id       事件 ID
- * @param data     事件数据（可为 NULL）
- * @param data_len 数据长度
- * @note 不复制 data；数据及其引用对象必须在本次发布结束前保持有效。
- *       未初始化或没有订阅者时直接返回。void 返回值不表示业务已处理成功。
+ * @brief 在调用线程内同步通知本次取得的订阅者快照。
+ * @param[in] id 事件编号。
+ * @param[in] data 借用的事件载荷，可为 NULL。
+ * @param[in] data_len 载荷字节数，由接收方按事件合同解释。
+ * @note 不复制 data；数据及其引用对象须保持到本次发布返回。订阅表锁只用于取得快照，调用回调时已解锁。
+ * @note 未初始化或没有订阅者时直接返回；void 返回不代表业务成功。总线不串行化回调或多个发布者。
  */
 void d_event_publish(d_event_id_t id, const void *data, uint16_t data_len);
 
 /**
- * @brief 异步投递事件（投入队列，由事件分发任务处理）
- * @note  仅复制 data_len 字节，不深拷贝结构体内的指针及其指向对象。
- *        返回后可释放原始字节缓冲；嵌套指针引用的对象需保持到消费结束，
- *        其生命周期由应用自己的所有权或确认机制管理。
- *        data 为 NULL 或 data_len 为 0 时投递无附带数据的事件。
- *        未初始化、数据超长或队列已满时不投递；无订阅者时也不会回调。
- *        void 返回值不能证明入队、送达或业务处理完成。
- * @param id       事件 ID
- * @param data     事件数据（会被拷贝，可为 NULL）
- * @param data_len 数据长度（不超过 D_EVENT_DATA_MAX）
+ * @brief 尝试浅拷贝载荷到异步队列，并通知分发任务。
+ * @param[in] id 事件编号。
+ * @param[in] data 待拷贝载荷；为 NULL 时按无载荷事件投递。
+ * @param[in] data_len 载荷字节数，不得超过 D_EVENT_DATA_MAX。
+ * @note 仅复制载荷字节；其中指针指向的对象不深拷贝，须由业务自己的所有权或完成确认保持到消费结束。
+ * @note 未初始化、超长或队列已满时丢弃；无订阅者不回调。void 返回不证明入队、送达或业务完成。
  */
 void d_event_post(d_event_id_t id, const void *data, uint16_t data_len);
 

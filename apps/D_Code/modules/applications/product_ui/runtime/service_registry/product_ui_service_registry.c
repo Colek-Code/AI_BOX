@@ -1,6 +1,6 @@
 /**
  * @file product_ui_service_registry.c
- * @brief Static Product UI service ownership and command routing.
+ * @brief 静态服务快照与回调槽的所有权及互斥路由。
  */
 
 #include "config/app_config.h"
@@ -21,12 +21,21 @@ static OS_MUTEX s_service_mutex;
 static uint8_t s_service_mutex_ready;
 static product_ui_service_entry_t s_services[PRODUCT_UI_SERVICE_COUNT];
 
+/**
+ * @brief 检查服务编号是否落在静态注册表范围内。
+ * @param[in] service 待检查的服务编号。
+ * @return 有效返回非零，否则为零。
+ */
 static uint8_t product_ui_service_valid(product_ui_service_id_e service)
 {
     return service >= PRODUCT_UI_SERVICE_SYSTEM &&
            service < PRODUCT_UI_SERVICE_COUNT;
 }
 
+/**
+ * @brief 推进服务快照的非零变化代次。
+ * @param[in,out] snapshot 调用方在互斥量保护下更新的快照。
+ */
 static void product_ui_service_revision_advance(
     product_ui_service_snapshot_t *snapshot)
 {
@@ -36,6 +45,9 @@ static void product_ui_service_revision_advance(
     }
 }
 
+/**
+ * @brief 在串行启动阶段重置全部服务快照和命令绑定。
+ */
 int product_ui_service_registry_init(void)
 {
     uint8_t index;
@@ -55,6 +67,9 @@ int product_ui_service_registry_init(void)
     return 0;
 }
 
+/**
+ * @brief 发布服务可用性、能力位和错误，内容变化时推进代次。
+ */
 int product_ui_service_publish(product_ui_service_id_e service,
                                product_ui_service_state_e state,
                                uint32_t valid_mask, int32_t error_code)
@@ -82,6 +97,9 @@ int product_ui_service_publish(product_ui_service_id_e service,
     return 0;
 }
 
+/**
+ * @brief 为服务内部数据变化单独推进快照代次。
+ */
 int product_ui_service_data_changed(product_ui_service_id_e service)
 {
     if (!s_service_mutex_ready || !product_ui_service_valid(service)) {
@@ -93,6 +111,9 @@ int product_ui_service_data_changed(product_ui_service_id_e service)
     return 0;
 }
 
+/**
+ * @brief 在互斥量内读取服务快照的值副本。
+ */
 int product_ui_service_snapshot(product_ui_service_id_e service,
                                 product_ui_service_snapshot_t *snapshot)
 {
@@ -106,6 +127,9 @@ int product_ui_service_snapshot(product_ui_service_id_e service,
     return 0;
 }
 
+/**
+ * @brief 查询服务是否明确发布 READY。
+ */
 uint8_t product_ui_service_is_ready(product_ui_service_id_e service)
 {
     product_ui_service_snapshot_t snapshot;
@@ -116,6 +140,9 @@ uint8_t product_ui_service_is_ready(product_ui_service_id_e service)
     return snapshot.state == PRODUCT_UI_SERVICE_READY;
 }
 
+/**
+ * @brief 查询服务是否同时处于 READY 且绑定命令回调。
+ */
 uint8_t product_ui_service_command_available(product_ui_service_id_e service)
 {
     uint8_t is_available;
@@ -123,11 +150,8 @@ uint8_t product_ui_service_command_available(product_ui_service_id_e service)
     if (!s_service_mutex_ready || !product_ui_service_valid(service)) {
         return 0U;
     }
-    /*
-     * Generic availability is READY + registered callback only.
-     * Capability / state bits live in valid_mask and are interpreted by
-     * each command domain (for example media CAP_TRANSPORT).
-     */
+    /* 通用可用性只检查 READY 和回调绑定；valid_mask 中的能力及状态位
+     * 由具体命令域解释，例如媒体 CAP_TRANSPORT。 */
     os_mutex_pend(&s_service_mutex, 0);
     is_available = (s_services[service].snapshot.state ==
                     PRODUCT_UI_SERVICE_READY) &&
@@ -136,6 +160,9 @@ uint8_t product_ui_service_command_available(product_ui_service_id_e service)
     return is_available;
 }
 
+/**
+ * @brief 原子替换命令回调及其借用上下文，完全相同的绑定不推进代次。
+ */
 int product_ui_service_register_command(product_ui_service_id_e service,
                                         product_ui_service_command_cb_t callback,
                                         void *user_data)
@@ -156,6 +183,9 @@ int product_ui_service_register_command(product_ui_service_id_e service,
     return 0;
 }
 
+/**
+ * @brief 锁内借用 READY 状态及回调绑定，然后锁外同步调用。
+ */
 int product_ui_service_command(product_ui_service_id_e service,
                                uint16_t command, const void *payload,
                                uint16_t payload_size)

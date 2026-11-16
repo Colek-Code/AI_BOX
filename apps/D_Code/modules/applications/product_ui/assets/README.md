@@ -1,68 +1,31 @@
-# Product UI Assets
+# Product UI 资源
 
-`ASSET_MANIFEST` is the source-of-truth for source revisions, integrity
-digests, licenses, tool versions, output formats, and the missing-resource
-policy. A missing or mismatched resource is an error. No asset lookup aliases
-an unknown resource to the settings icon; firmware code may instead handle a
-`NULL` icon descriptor explicitly.
+普通固件直接编译已生成的 C / `.inc` 资源，不在设备上解码 PNG。
+[ASSET_MANIFEST](ASSET_MANIFEST) 记录源文件摘要、工具版本、格式及资源编号。
 
-## Deterministic Check
+## 文件布局
 
-```powershell
-python -X utf8 apps\D_Code\modules\applications\product_ui\assets\pipeline\check_product_ui_assets.py --check
-```
+| 资源 | 源文件 | 编译输入 |
+| --- | --- | --- |
+| 桌面彩色图标 | `source/ui_pack/home/` | `product_ui_color_icons.c/h`，ARGB8888 |
+| 控制中心和应用图标 | `source/control_center/`、`source/interface/` | `product_ui_icons.c`，A4 |
+| 壁纸与缩略图 | `source/wallpapers/` | `product_ui_wallpapers.c/h`、`generated/*.inc`，RGB565 |
+| 字体 | `fonts/source/`、`fonts/strings.inventory` | `generated/product_ui_font_*.c` |
+| 配色 | 清单内的 palette | `generated/product_ui_palette.h` |
 
-Each pipeline validates pinned hashes/tool versions, regenerates into temp
-dirs where applicable, and fails if checked-in outputs are stale.
+`reference/icons/` 用于离线预览，不是固件输入。源 SVG、字体及相应许可证随资源维护。
+Noto 字体许可见 [SIL Open Font License](fonts/source/LICENSE)。
 
-## Live sources (git-tracked) vs rebuild-only helpers
+## 修改与校验
 
-| Live source (must be in Git) | Encoder / consumer |
-| --- | --- |
-| `source/ui_pack/home/*.svg` + derived `*.png` | `build_product_ui_color_icons.py --refresh-derived` → `product_ui_color_icons.c/h` (ARGB home tiles) |
-| `source/control_center/*.svg` | `build_product_ui_icons.py` → A4 `product_ui_icons.c` (CC monochrome glyphs) |
-| `source/interface/*.svg` | same A4 pipeline (application glyphs; shared functions reuse control-center masters) |
-| `source/wallpapers/*.svg` | three original opaque masters, stable IDs and hashes in the manifest |
-| `generated/product_ui_wallpaper_*.inc` + `product_ui_wallpapers.c/h` | RGB565 320×240 wallpapers and 80×60 thumbnails |
-| `generated/product_ui_palette.h` | wallpaper-independent palette tokens from the manifest |
+资源生成需要 Python、Node.js，以及清单指定版本的 Pillow、resvg_py、lv_font_conv。
+修改源文件后运行 `pipeline/` 中对应生成器，使用 `--check` 检查结果；新增界面文字同步更新字形清单。
 
-**Not live sources (do not commit rebuild products):**
-
-- `reference/icons/*.png` — local A4 previews from icon pipeline
-
-## RGB565 Wallpaper
-
-Firmware consumes generated RGB565 `.inc` files only (no on-device PNG decode).
-Generation reads all three declared SVG masters, applies fixed offline dithering,
-and checks white-label contrast after RGB565 quantization. `--check` compares
-reproduced outputs and never substitutes a procedural placeholder. Previews are
-opt-in with `--preview`; all temporary outputs use the project build directory.
+在工程根目录执行全量资源校验：
 
 ```powershell
-python -X utf8 apps\D_Code\modules\applications\product_ui\assets\pipeline\build_product_ui_assets.py
-python -X utf8 apps\D_Code\modules\applications\product_ui\assets\pipeline\build_product_ui_assets.py --check
+python -B -X utf8 apps/D_Code/modules/applications/product_ui/assets/pipeline/check_product_ui_assets.py --check --work-dir apps/D_Code/build/out/assets-check
 ```
 
-## Color icons (home only)
-
-Home app tiles from `source/ui_pack/home/` use ARGB8888. Control-center icons
-use the monochrome A4 sources listed above.
-
-```powershell
-python -X utf8 apps\D_Code\modules\applications\product_ui\assets\pipeline\build_product_ui_color_icons.py --check
-```
-
-## Monochrome A4 icons
-
-Original interface + control-center SVG masters → LVGL A4. Control-center design
-board previews load the **same SVG masters** (not `reference/icons`).
-
-```powershell
-python -X utf8 apps\D_Code\modules\applications\product_ui\assets\pipeline\build_product_ui_icons.py --check
-```
-
-## Noto Sans SC A4
-
-`fonts/strings.inventory` is the single UTF-8 string inventory. Fonts use
-`lv_font_conv` 1.5.3. The exact pinned Noto Sans SC OTF is tracked so a clean
-clone can rebuild the subsets without network access.
+若 lv_font_conv 未加入 PATH，追加 `--converter <lv_font_conv.js的路径>`。
+普通固件编译不需要安装资源生成工具。

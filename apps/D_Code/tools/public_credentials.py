@@ -1,4 +1,4 @@
-"""Build and verify public credential-free blobs without editing local configuration."""
+"""验证公开文件及其授权例外，不修改本地接入配置。"""
 from __future__ import annotations
 import fnmatch
 import hashlib
@@ -37,6 +37,8 @@ def load_policy(path: Path) -> dict:
     return policy
 
 def excluded(path: str, policy: dict) -> bool:
+    if path in policy.get('public_files', {}):
+        return False
     return any(fnmatch.fnmatchcase(path.casefold(), pattern.casefold()) for pattern in policy['exclude'])
 
 def placeholder(value: bytes) -> bool:
@@ -90,6 +92,15 @@ def sanitize(path: str, data: bytes, policy: dict) -> tuple[bytes, list[dict], s
     return data, report, removed
 
 def scan(path: str, data: bytes, policy: dict) -> list[dict]:
+    # 公开授权仅匹配指定路径及原始字节，换名或换内容不能沿用授权。
+    approved = policy.get('public_files', {}).get(path)
+    if approved is not None:
+        if len(data) != approved['bytes'] or hashlib.sha256(data).hexdigest() != approved['sha256']:
+            return [{'path': path, 'kind': 'approved_public_file_changed'}]
+        return []
+    for approved in policy.get('public_files', {}).values():
+        if len(data) == approved['bytes'] and hashlib.sha256(data).hexdigest() == approved['sha256']:
+            return [{'path': path, 'kind': 'approved_public_file_wrong_path'}]
     findings = []
     # 手工命名的记录也必须拦截，不能只靠文件后缀或制造输入路径。
     if b'Q1|' in data:

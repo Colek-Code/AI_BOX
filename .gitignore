@@ -22,6 +22,8 @@
 
 # Local manufacturing inputs and private material
 *.key
+*.key.*
+!/cpu/wl82/tools/YT-BOX.key
 *.key1
 *.mkey
 *.pfx

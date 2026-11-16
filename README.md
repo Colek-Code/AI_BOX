@@ -53,7 +53,7 @@ Windows 下安装匹配 SDK 的杰理 pi32v2/r3 工具链，默认目录为 `C:/
 .\.vscode\winmk.bat ac791n_D_Code_elf
 ```
 
-烧录需使用与芯片匹配的本地 Key。配置、出厂身份和 OTA 见 [D_Code 开发指南](apps/D_Code/README.md)。
+工程附带 `YT-BOX.key`，烧录时须与目标芯片匹配。配置、出厂身份和 OTA 见 [D_Code 开发指南](apps/D_Code/README.md)。
 芯片样品及下载支持入口：[样品渠道](https://item.taobao.com/item.htm?ft=t&id=1008161308862)。
 
 ## 代码入口

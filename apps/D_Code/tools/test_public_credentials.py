@@ -4,7 +4,7 @@ import unittest
 from public_credentials import PublicationError, excluded, sanitize, scan, redact_repeated_literals
 
 def policy(rules):
-    return {'version':1,'exclude':['project_doc/*','cpu/wl82/tools/app.bin','*.key'],
+    return {'version':1,'exclude':['project_doc/*','cpu/wl82/tools/app.bin','*.key','*.key.*'],
             'slots':{'fixture.c':rules},'noncredential_literals':{}}
 
 class CredentialTests(unittest.TestCase):
@@ -90,6 +90,33 @@ class CredentialTests(unittest.TestCase):
 
     def test_key_extension_exclusion_is_case_insensitive(self):
         self.assertTrue(excluded('cpu/wl82/tools/private.KEY',policy([])))
+
+    def test_public_key_permission_is_bound_to_exact_path_and_bytes(self):
+        data=b'authorized-fixture-key'
+        path='cpu/wl82/tools/YT-BOX.key'
+        cfg=policy([])
+        cfg['public_files']={path:{'sha256':hashlib.sha256(data).hexdigest(),'bytes':len(data)}}
+        self.assertFalse(excluded(path,cfg))
+        self.assertEqual(scan(path,data,cfg),[])
+        for other in ('cpu/wl82/tools/other.key','other/YT-BOX.key','cpu/wl82/tools/yt-box.KEY',path+'.backup'):
+            self.assertTrue(excluded(other,cfg))
+        self.assertTrue(scan(path,b'X'+data[1:],cfg))
+        self.assertTrue(scan(path,data+b'X',cfg))
+
+    def test_public_key_bytes_cannot_be_published_under_another_name(self):
+        data=b'authorized-fixture-key'
+        cfg=policy([])
+        cfg['public_files']={'cpu/wl82/tools/YT-BOX.key':{
+            'sha256':hashlib.sha256(data).hexdigest(),'bytes':len(data)}}
+        for other in ('cpu/wl82/tools/YT-BOX.key.backup','notes.txt','renamed.bin'):
+            self.assertEqual([f['kind'] for f in scan(other,data,cfg)],['approved_public_file_wrong_path'])
+
+    def test_public_key_permission_does_not_relax_other_secrets(self):
+        cfg=policy([])
+        cfg['public_files']={'cpu/wl82/tools/YT-BOX.key':{'sha256':'0'*64,'bytes':72}}
+        self.assertTrue(excluded('cpu/wl82/tools/other.key',cfg))
+        self.assertTrue(scan('fixture.c',b'const char *device_secret = "fixture-value-123";',cfg))
+        self.assertTrue(scan('record.txt',b'Q1|'+b'A'*16+b'|fixture_board',cfg))
 
     def test_private_pem_removed_public_certificate_preserved(self):
         cert=b'-----BEGIN CERTIFICATE-----\npublic-fixture\n-----END CERTIFICATE-----\n'

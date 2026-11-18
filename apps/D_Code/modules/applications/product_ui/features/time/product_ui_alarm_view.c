@@ -652,6 +652,7 @@ static int product_ui_alarm_settings_build(product_ui_alarm_render_t *view)
     if (!label || !view->volume_text || !view->volume) return -1;
     lv_obj_set_pos(label, 0, 0); lv_obj_align(view->volume_text, LV_ALIGN_TOP_RIGHT, 0, 0);
     lv_obj_set_size(view->volume, 176, 10); lv_obj_set_pos(view->volume, 60, 48);
+    if (product_ui_slider_style(view->volume, PRODUCT_UI_SLIDER_REGULAR) != 0) return -1;
     lv_slider_set_range(view->volume, 1, 100);
     lv_obj_set_ext_click_area(view->volume, PRODUCT_UI_SLIDER_TOUCH_EXTEND);
     lv_obj_remove_flag(view->volume, LV_OBJ_FLAG_GESTURE_BUBBLE | LV_OBJ_FLAG_EVENT_BUBBLE);

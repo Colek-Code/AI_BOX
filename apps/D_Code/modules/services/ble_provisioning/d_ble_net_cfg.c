@@ -152,6 +152,7 @@ __attribute__((weak)) int d_ble_decrypt(const uint8_t *in, uint16_t in_len, uint
  */
 __attribute__((weak)) int d_ble_encrypt(const uint8_t *in, uint16_t in_len, uint8_t *out, uint16_t *out_len)
 {
+    if (in == NULL || out == NULL || out_len == NULL || in_len > *out_len) return -1;
     memcpy(out, in, in_len);
     *out_len = in_len;
     return 0;
@@ -299,16 +300,20 @@ static void can_send_now_wakeup(void)
 //*********************************************************************************//
 /**
  * @brief 将零结尾 JSON 经加密扩展后尝试发送到 AE82。
- * @param[in] json_str 非空 JSON；调用者须保证加密后能放入本地 192 字节缓冲。
+ * @param[in] json_str 调用期间稳定的零结尾JSON；空指针或超出192字节的输入拒绝发送。
  * @note 不返回加密或 ATT 发送结果；本函数不代表对端已收到。
  */
 void d_ble_send_json_response(const char *json_str)
 {
-    u16 len = strlen(json_str);
+    u16 len = 0;
     u8 enc_buf[192];
-    u16 enc_len = 0;
+    u16 enc_len = sizeof(enc_buf);
 
-    d_ble_encrypt((const u8 *)json_str, len, enc_buf, &enc_len);
+    if (json_str == NULL) return;
+    while (len < sizeof(enc_buf) && json_str[len] != '\0') len++;
+    if (json_str[len] != '\0') return;
+    if (d_ble_encrypt((const u8 *)json_str, len, enc_buf, &enc_len) != 0 ||
+        enc_len > sizeof(enc_buf)) return;
     app_send_user_data(ATT_CHARACTERISTIC_ae82_01_VALUE_HANDLE, enc_buf, enc_len, ATT_OP_AUTO_READ_CCC);
 }
 
@@ -1097,6 +1102,7 @@ void ble_app_disconnect(void)
 int ble_connected_net_notify(void)
 {
     int len = 0;
+    int added;
     u8 mac[6];
 
     extern void wifi_get_mac(u8 *mac);
@@ -1109,14 +1115,20 @@ int ble_connected_net_notify(void)
     len = snprintf(rsp_buf, sizeof(rsp_buf),
                    "{\"status\":0,\"mac\":\"%02X%02X%02X%02X%02X%02X\"",
                    mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+    if (len < 0 || (size_t)len >= sizeof(rsp_buf)) return -1;
 
     if (uuid && uuid[0]) {
-        len += snprintf(rsp_buf + len, sizeof(rsp_buf) - len, ",\"uuid\":\"%s\"", uuid);
+        added = snprintf(rsp_buf + len, sizeof(rsp_buf) - len, ",\"uuid\":\"%s\"", uuid);
+        if (added < 0 || (size_t)added >= sizeof(rsp_buf) - (size_t)len) return -1;
+        len += added;
     }
     if (batch_num && batch_num[0]) {
-        len += snprintf(rsp_buf + len, sizeof(rsp_buf) - len, ",\"batch_num\":\"%s\"", batch_num);
+        added = snprintf(rsp_buf + len, sizeof(rsp_buf) - len, ",\"batch_num\":\"%s\"", batch_num);
+        if (added < 0 || (size_t)added >= sizeof(rsp_buf) - (size_t)len) return -1;
+        len += added;
     }
-    len += snprintf(rsp_buf + len, sizeof(rsp_buf) - len, ",\"msg\":\"connected\"}");
+    added = snprintf(rsp_buf + len, sizeof(rsp_buf) - len, ",\"msg\":\"connected\"}");
+    if (added < 0 || (size_t)added >= sizeof(rsp_buf) - (size_t)len) return -1;
 
     log_info("[D_BLE] net_notify: %s\n", rsp_buf);
     d_ble_send_json_response(rsp_buf);

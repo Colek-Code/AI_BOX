@@ -8,6 +8,7 @@
 #ifdef D_LVGL_ENABLE
 
 #include "d_ui_startup.h"
+#include "config/d_config_report.h"
 #include "framework/d_ui_module.h"
 #include "framework/d_page_manager.h"
 #include "framework/compat/d_stdio_compat.h"
@@ -63,19 +64,7 @@ static const d_ui_module_descriptor_fn_t s_ui_modules[] = {
  */
 const char *d_ui_startup_name(void)
 {
-#if D_UI_TARGET == D_UI_PRODUCT
-    return "Product UI";
-#elif D_UI_TARGET == D_UI_TABLET_SHELL
-    return "TabletShell";
-#elif D_UI_TARGET == D_UI_SCREEN_TEST
-    return "ScreenTest";
-#elif D_UI_TARGET == D_UI_CIPHER_PANEL
-    return "CipherPanel";
-#elif D_UI_TARGET == D_UI_LAUNCHER_DEMO
-    return "LauncherDemo";
-#else
-    return "LightSpotDemo";
-#endif
+    return d_config_ui_name();
 }
 
 /**

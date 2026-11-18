@@ -41,18 +41,14 @@
 #define PRODUCT_UI_STATUS_BAT_INSET      2
 #define PRODUCT_UI_STATUS_BAT_FILL_MAX   22
 #define PRODUCT_UI_STATUS_BAT_FILL_H     10
-/* 保留旧别名，兼容尚存的间距引用。 */
-#define PRODUCT_UI_STATUS_BAT_PAD        PRODUCT_UI_STATUS_BAT_INSET
 #define PRODUCT_UI_STATUS_BAT_TRACK_OPA  LV_OPA_TRANSP
-#if (D_UI_TARGET == D_UI_PRODUCT)
 #define PRODUCT_UI_ROW_H                 36
-#else
-/* 既有 16 像素中文回退字体的双行内容仍需旧行高。 */
-#define PRODUCT_UI_ROW_H                 48
-#endif
 #define PRODUCT_UI_TOUCH_MIN             36
 /* 十像素水平轨道通过扩展保留 38 像素触摸区。 */
 #define PRODUCT_UI_SLIDER_TOUCH_EXTEND   14
+#define PRODUCT_UI_SLIDER_KNOB_COMPACT_PAD 3
+#define PRODUCT_UI_SLIDER_KNOB_REGULAR_PAD 6
+#define PRODUCT_UI_SLIDER_KNOB_BORDER_W    2
 #define PRODUCT_UI_ROW_SINGLE_H          36
 #define PRODUCT_UI_ROW_DOUBLE_H          44
 #define PRODUCT_UI_TOUCH_TARGET          48

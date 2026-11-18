@@ -254,27 +254,20 @@ static int product_ui_pomodoro_timer_build(product_ui_pomodoro_render_t *view)
  */
 static lv_obj_t *product_ui_pomodoro_duration_slider(lv_obj_t *parent, uint8_t field, int32_t y)
 {
-    static const uint8_t maxima[] = {120, 30, 60};
+    static const uint8_t maxima[] = {
+        PRODUCT_UI_POMODORO_FOCUS_MAX_MINUTES,
+        PRODUCT_UI_POMODORO_SHORT_MAX_MINUTES,
+        PRODUCT_UI_POMODORO_LONG_MAX_MINUTES,
+    };
     lv_obj_t *slider = lv_slider_create(parent);
     if (slider == NULL) return NULL;
     product_ui_pomodoro_clean(slider);
     lv_obj_add_flag(slider, LV_OBJ_FLAG_PRESS_LOCK);
     lv_obj_set_size(slider, 184, 8);
     lv_obj_set_pos(slider, 56, y + 40);
-    lv_obj_set_style_bg_color(slider, product_ui_color(PRODUCT_UI_COLOR_SURFACE_ALT), LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(slider, LV_OPA_COVER, LV_PART_MAIN);
-    lv_obj_set_style_radius(slider, LV_RADIUS_CIRCLE, LV_PART_MAIN);
-    lv_obj_set_style_bg_color(slider, product_ui_color(PRODUCT_UI_COLOR_ACCENT), LV_PART_INDICATOR);
-    lv_obj_set_style_bg_opa(slider, LV_OPA_COVER, LV_PART_INDICATOR);
-    lv_obj_set_style_radius(slider, LV_RADIUS_CIRCLE, LV_PART_INDICATOR);
-    lv_obj_set_style_bg_color(slider, product_ui_color(PRODUCT_UI_COLOR_ACCENT), LV_PART_KNOB);
-    lv_obj_set_style_bg_opa(slider, LV_OPA_COVER, LV_PART_KNOB);
-    lv_obj_set_style_border_color(slider, product_ui_color(PRODUCT_UI_COLOR_SURFACE), LV_PART_KNOB);
-    lv_obj_set_style_border_width(slider, 2, LV_PART_KNOB);
-    lv_obj_set_style_radius(slider, LV_RADIUS_CIRCLE, LV_PART_KNOB);
-    lv_obj_set_style_pad_all(slider, 6, LV_PART_KNOB);
+    if (product_ui_slider_style(slider, PRODUCT_UI_SLIDER_REGULAR) != 0) return NULL;
     lv_obj_set_ext_click_area(slider, PRODUCT_UI_SLIDER_TOUCH_EXTEND);
-    lv_slider_set_range(slider, 1, maxima[field]);
+    lv_slider_set_range(slider, PRODUCT_UI_POMODORO_MIN_MINUTES, maxima[field]);
     lv_obj_add_event_cb(slider, product_ui_pomodoro_slider_input, LV_EVENT_ALL, (void *)(uintptr_t)field);
     return slider;
 }

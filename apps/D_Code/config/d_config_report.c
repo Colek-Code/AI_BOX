@@ -27,7 +27,7 @@ static const char *d_config_board_name(void)
  * @brief 取得编译期根界面对应的诊断名称。
  * @return 静态字符串，不转移所有权。
  */
-static const char *d_config_ui_name(void)
+const char *d_config_ui_name(void)
 {
 #if D_UI_TARGET == D_UI_PRODUCT
     return "Product UI";

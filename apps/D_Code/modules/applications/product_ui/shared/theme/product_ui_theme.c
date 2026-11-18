@@ -72,7 +72,6 @@ static lv_style_t s_styles[PRODUCT_UI_STYLE_COUNT];
 static uint8_t s_is_initialized;
 
 /* 仅在全部生成的 Noto Sans SC 对象参与构建时启用。 */
-#if (D_UI_TARGET == D_UI_PRODUCT)
 LV_FONT_DECLARE(product_ui_font_noto_sans_sc_10);
 LV_FONT_DECLARE(product_ui_font_noto_sans_sc_12);
 LV_FONT_DECLARE(product_ui_font_noto_sans_sc_14);
@@ -108,43 +107,24 @@ static void product_ui_font_bind_cjk_fallback(void)
     s_font_noto_18.fallback = d_ui_font_get_default();
     s_font_fallback_ready = 1U;
 }
-#endif
 
 /**
  * @brief 借用具名字体，Product 配置下按需建立中文与表情回退。
  */
 const lv_font_t *product_ui_font(product_ui_font_e token)
 {
-#if (D_UI_TARGET == D_UI_PRODUCT)
     product_ui_font_bind_cjk_fallback();
-#endif
     switch (token) {
     case PRODUCT_UI_FONT_STATUS:
-#if (D_UI_TARGET == D_UI_PRODUCT)
         return &s_font_noto_12;
-#else
-        return &lv_font_montserrat_12;
-#endif
     case PRODUCT_UI_FONT_DISPLAY_NUMBER:
         return &lv_font_montserrat_32;
     case PRODUCT_UI_FONT_TITLE:
-#if (D_UI_TARGET == D_UI_PRODUCT)
         return &s_font_noto_18;
-#else
-        return d_ui_font_get_default();
-#endif
     case PRODUCT_UI_FONT_BODY:
-#if (D_UI_TARGET == D_UI_PRODUCT)
         return &s_font_noto_14;
-#else
-        return d_ui_font_get_default();
-#endif
     case PRODUCT_UI_FONT_CAPTION:
-#if (D_UI_TARGET == D_UI_PRODUCT)
         return &s_font_noto_12;
-#else
-        return d_ui_font_get_default();
-#endif
     default:
         return NULL;
     }
@@ -301,9 +281,7 @@ int product_ui_theme_init(void)
         return 0;
     }
 
-#if (D_UI_TARGET == D_UI_PRODUCT)
     product_ui_font_bind_cjk_fallback();
-#endif
 
     for (index = 0; index < PRODUCT_UI_STYLE_COUNT; index++) {
         lv_style_init(&s_styles[index]);

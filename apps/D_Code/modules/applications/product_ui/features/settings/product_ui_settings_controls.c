@@ -263,30 +263,7 @@ lv_obj_t *product_ui_slider_row_create(lv_obj_t *parent, const char *title,
     }
     lv_obj_set_size(slider, PRODUCT_UI_SETTING_SLIDER_W,
                     PRODUCT_UI_SETTING_SLIDER_H);
-    lv_obj_set_style_bg_color(slider,
-                              product_ui_color(PRODUCT_UI_COLOR_SURFACE_ALT),
-                              LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(slider, LV_OPA_COVER, LV_PART_MAIN);
-    lv_obj_set_style_border_width(slider, 0, LV_PART_MAIN);
-    lv_obj_set_style_radius(slider, LV_RADIUS_CIRCLE, LV_PART_MAIN);
-    lv_obj_set_style_shadow_width(slider, 0, LV_PART_MAIN);
-    lv_obj_set_style_bg_color(slider,
-                              product_ui_color(PRODUCT_UI_COLOR_ACCENT),
-                              LV_PART_INDICATOR);
-    lv_obj_set_style_bg_opa(slider, LV_OPA_COVER, LV_PART_INDICATOR);
-    lv_obj_set_style_radius(slider, LV_RADIUS_CIRCLE, LV_PART_INDICATOR);
-    lv_obj_set_style_shadow_width(slider, 0, LV_PART_INDICATOR);
-    lv_obj_set_style_bg_color(slider,
-                              product_ui_color(PRODUCT_UI_COLOR_ACCENT),
-                              LV_PART_KNOB);
-    lv_obj_set_style_bg_opa(slider, LV_OPA_COVER, LV_PART_KNOB);
-    lv_obj_set_style_border_color(slider,
-                                  product_ui_color(PRODUCT_UI_COLOR_SURFACE),
-                                  LV_PART_KNOB);
-    lv_obj_set_style_border_width(slider, 2, LV_PART_KNOB);
-    lv_obj_set_style_radius(slider, LV_RADIUS_CIRCLE, LV_PART_KNOB);
-    lv_obj_set_style_shadow_width(slider, 0, LV_PART_KNOB);
-    lv_obj_set_style_pad_all(slider, 3, LV_PART_KNOB);
+    if (product_ui_slider_style(slider, PRODUCT_UI_SLIDER_COMPACT) != 0) return NULL;
     lv_obj_set_ext_click_area(slider, PRODUCT_UI_SETTING_SLIDER_HIT_PAD);
     lv_slider_set_range(slider, 0, 100);
     lv_slider_set_value(slider, clamped_value, LV_ANIM_OFF);

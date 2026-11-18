@@ -1058,23 +1058,6 @@ static int wifi_cred_load(char *ssid, int ssid_sz, char *pwd, int pwd_sz)
 }
 
 /**
- * @brief 在事务锁内保存两槽并发布存在性。
- * @param[in] ssid 非空目标 SSID。
- * @param[in] pwd 可空密码。
- * @return 成功返回 0，失败返回 -1。
- */
-static int wifi_cred_save(const char *ssid, const char *pwd)
-{
-    int ret;
-
-    wifi_svc_cred_txn_lock();
-    ret = wifi_cred_save_raw(ssid, pwd);
-    wifi_cred_publish_result_locked(ret, 1U);
-    wifi_svc_cred_txn_unlock();
-    return ret;
-}
-
-/**
  * @brief 在事务锁内清空两槽并发布真实存在性。
  * @return 成功返回 0，失败返回 -1。
  */

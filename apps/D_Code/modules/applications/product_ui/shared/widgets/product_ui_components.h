@@ -439,6 +439,29 @@ lv_obj_t *product_ui_slider_row_create(lv_obj_t *parent, const char *title,
  */
 void product_ui_control_wait_release(lv_event_t *event);
 
+typedef enum {
+    PRODUCT_UI_SLIDER_COMPACT,
+    PRODUCT_UI_SLIDER_REGULAR,
+} product_ui_slider_role_e;
+
+/**
+ * @brief 应用表单滑条的统一轨道、指示器和滑块皮肤。
+ * @param[in,out] slider 借用的滑条对象。
+ * @param[in] role 紧凑或标准滑块角色，使用主题中的具名度量。
+ * @return 成功为 0；对象为空或角色非法为 -1，失败不修改对象。
+ * @note 仅 UI 线程；不改布局、取值范围、数值、事件、输入标志或业务状态。
+ */
+int product_ui_slider_style(lv_obj_t *slider, product_ui_slider_role_e role);
+
+/**
+ * @brief 复位全部已登记输入，并对复位前仍按下的设备等待真实松手。
+ * @note 仅 UI 线程；丢弃旧动作，不合成点击或松手，不保存设备指针。
+ *       调用方先清除自己的按压资格；本接口不持有页面或业务状态。
+ */
+void product_ui_control_reset_inputs(void);
+
+
+
 /**
  * @brief 在 UI 启动阶段创建全局控制中心、状态栏及内容并绑定吸附动画。
  * @return 已创建或完整创建返回 0，任一步失败删除局部全局树并返回 -1。

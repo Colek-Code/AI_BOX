@@ -1,0 +1,32 @@
+{
+  "origin": "pre-work-schedule V2 production codec",
+  "sources": {
+    "apps/D_Code/modules/applications/product_ui/features/time/product_ui_alarm_codec.c": "1ba3e80cb9bc862edecd8c47dfcbab18c4601da1f1dcc2dd86f1c3ab1abc559e",
+    "apps/D_Code/modules/applications/product_ui/features/time/product_ui_alarm_model.c": "e7ac5d0855492035736c94f30ea8f9f372233addde760700f0c75ffe96963b79",
+    "apps/D_Code/modules/applications/product_ui/features/time/product_ui_alarm_model.h": "ade968892b42cd689e308e291cc426fe63aaa5cb334b81c54c380000e217e401",
+    "apps/D_Code/modules/applications/product_ui/features/time/product_ui_alarm_notice.c": "384186e431ba08d1e9b384aafc39a9f4401b1ccf038a893c1c759c3bba590026",
+    "apps/D_Code/modules/applications/product_ui/features/time/product_ui_alarm_notice.h": "3744cf3954f5116a67f3145a5ea9f1cb7b547b310c29fb32c4184719999d2bdf",
+    "apps/D_Code/modules/applications/product_ui/features/time/product_ui_alarm_page.c": "e42a4e42cc1b051ba1d3aef1b68b2d92e79edc4870df310cc4165aa91b4a2e35",
+    "apps/D_Code/modules/applications/product_ui/features/time/product_ui_alarm_page.h": "efe877d0f0e67825715602af6619bcf61fd3d7af917f0dd2028f60881f7e4500",
+    "apps/D_Code/modules/applications/product_ui/features/time/product_ui_alarm_port.h": "7741ce4780f26fbfeff5cadc82c4a6434daa9f3a46a222ebb707848b1f0e0bf6",
+    "apps/D_Code/modules/applications/product_ui/features/time/product_ui_alarm_rules.c": "bdff0780240f03085045d35cfe965590e8282189b435a640108eb437a81f546a",
+    "apps/D_Code/modules/applications/product_ui/features/time/product_ui_alarm_service.c": "046734d0b50459ba6b1937b57747ef720b6214d1f02c9f0f255605ebe214f09c",
+    "apps/D_Code/modules/applications/product_ui/features/time/product_ui_alarm_service.h": "e86b14aae77b6a6513b8e4b25bf5f48ddfb2e43d1f342f8796ca1f56a9d18cfc",
+    "apps/D_Code/modules/applications/product_ui/features/time/product_ui_alarm_view.c": "8f45943439efa39914b66e406f33c206b5d28cc961d952c54e36a719793eeb5a",
+    "apps/D_Code/modules/applications/product_ui/features/time/product_ui_alarm_view.h": "c3d3493633139dc3500d4bcdea0d09ec0152b7ff726694b639905eeec5b5f8a8",
+    "apps/D_Code/modules/applications/product_ui/features/time/product_ui_time_domain.h": "318bb211c2b5a22622d5bd575cb83014ab02bc37f300bc3e20490afc01e4af71",
+    "apps/D_Code/modules/applications/product_ui/features/time/product_ui_time_domain_calendar.c": "972f848c6172f0044c2b812aa3262c56b33071145edc4a6be5fb6b140841ef1f"
+  },
+  "fixtures": {
+    "v2_empty.bin": "eb0ef4c470d0441c0b70bee720ac6be1f0d003c195f31400a8b38c39749fbb91",
+    "v2_weekly_stale_date.bin": "e17636ddf1a035e9d78a269f26332b7a1b9c840d06c0e59c8923d937ebb8071c",
+    "v1_snoozed.bin": "6261951ba18f799ce7366b8499ba528b14abc50090e1941274f01c02564c65c6",
+    "v2_snoozed.bin": "16861c3a008c5654e85056a793bc06e9f80c7738c724c9a6f22282f798287d1a"
+  },
+  "sequences": [
+    11,
+    12,
+    13,
+    14
+  ]
+}

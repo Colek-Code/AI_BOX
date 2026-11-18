@@ -37,6 +37,50 @@ void product_ui_control_wait_release(lv_event_t *event)
 }
 
 /**
+ * @brief 复位输入并按复位前的真实按压状态设置松手门禁。
+ */
+void product_ui_control_reset_inputs(void)
+{
+    lv_indev_t *input = NULL;
+    while ((input = lv_indev_get_next(input)) != NULL) {
+        uint8_t pressed = lv_indev_get_state(input) == LV_INDEV_STATE_PRESSED;
+        lv_indev_reset(input, NULL);
+        if (pressed) lv_indev_wait_release(input);
+    }
+}
+
+/**
+ * @brief 应用统一表单滑条皮肤；完整合同见公开组件头文件。
+ */
+int product_ui_slider_style(lv_obj_t *slider, product_ui_slider_role_e role)
+{
+    int32_t knob_pad;
+    if (slider == NULL ||
+        (role != PRODUCT_UI_SLIDER_COMPACT && role != PRODUCT_UI_SLIDER_REGULAR)) {
+        return -1;
+    }
+    knob_pad = role == PRODUCT_UI_SLIDER_COMPACT ?
+        PRODUCT_UI_SLIDER_KNOB_COMPACT_PAD : PRODUCT_UI_SLIDER_KNOB_REGULAR_PAD;
+    lv_obj_set_style_bg_color(slider, product_ui_color(PRODUCT_UI_COLOR_SURFACE_ALT), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(slider, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_border_width(slider, 0, LV_PART_MAIN);
+    lv_obj_set_style_radius(slider, LV_RADIUS_CIRCLE, LV_PART_MAIN);
+    lv_obj_set_style_shadow_width(slider, 0, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(slider, product_ui_color(PRODUCT_UI_COLOR_ACCENT), LV_PART_INDICATOR);
+    lv_obj_set_style_bg_opa(slider, LV_OPA_COVER, LV_PART_INDICATOR);
+    lv_obj_set_style_radius(slider, LV_RADIUS_CIRCLE, LV_PART_INDICATOR);
+    lv_obj_set_style_shadow_width(slider, 0, LV_PART_INDICATOR);
+    lv_obj_set_style_bg_color(slider, product_ui_color(PRODUCT_UI_COLOR_ACCENT), LV_PART_KNOB);
+    lv_obj_set_style_bg_opa(slider, LV_OPA_COVER, LV_PART_KNOB);
+    lv_obj_set_style_border_color(slider, product_ui_color(PRODUCT_UI_COLOR_SURFACE), LV_PART_KNOB);
+    lv_obj_set_style_border_width(slider, PRODUCT_UI_SLIDER_KNOB_BORDER_W, LV_PART_KNOB);
+    lv_obj_set_style_radius(slider, LV_RADIUS_CIRCLE, LV_PART_KNOB);
+    lv_obj_set_style_shadow_width(slider, 0, LV_PART_KNOB);
+    lv_obj_set_style_pad_all(slider, knob_pad, LV_PART_KNOB);
+    return 0;
+}
+
+/**
  * @brief 使用公开文本及自尺寸检查判断当前 DOT 格式化是否已可用。
  * @param[in] label 有效标签对象。
  * @param[in] text 期望呈现的完整文字。

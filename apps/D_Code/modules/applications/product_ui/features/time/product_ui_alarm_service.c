@@ -95,7 +95,9 @@ static void product_ui_alarm_next_request(void)
 
 /**
  * @brief 由唯一存储 worker 读取两槽、选择记录并建立模型及加载分类。
- * @note 只有两槽均明确 NOT_FOUND 才种入默认规则；未知版本独立保护。现有实现仅把端口 NOT_READY 归为未加载，普通 IO 错误另记 load_error，不宣称全部读错误均阻止后续普通变更。
+ * @note 两槽均明确NOT_FOUND才种入默认规则，已知版本不兼容独立保护。
+ *       其他未取得完整记录的读取保持未加载，显式重载成功前不允许变更；
+ *       完整读出但CRC/内容无效仍按原A/B降级规则处理，不自动修复写入。
  */
 static void product_ui_alarm_load(void)
 {
@@ -111,9 +113,9 @@ static void product_ui_alarm_load(void)
         d_err_t result;
         if (length == PRODUCT_UI_ALARM_ERR_VERSION) result = PRODUCT_UI_ALARM_ERR_VERSION;
         else if (length == D_ERR_NOT_FOUND) { absent_slots++; continue; }
-        else if (length == D_ERR_NOT_READY) { unreadable = 1U; load_error = D_ERR_IO; continue; }
-        else result = length == PRODUCT_UI_ALARM_RECORD_SIZE ?
-            product_ui_alarm_decode(s_alarm_encoded, &s_alarm_save_snapshot, &sequence) : D_ERR_IO;
+        /* 未取得完整记录不能当作已确认损坏；另一有效槽不授权覆盖它。 */
+        else if (length != PRODUCT_UI_ALARM_RECORD_SIZE) { unreadable = 1U; load_error = D_ERR_IO; continue; }
+        else result = product_ui_alarm_decode(s_alarm_encoded, &s_alarm_save_snapshot, &sequence);
         if (result == PRODUCT_UI_ALARM_ERR_VERSION) { protected_record = 1U; continue; }
         if (result != D_OK) { load_error = result; continue; }
         if (!has_record || product_ui_alarm_sequence_after(sequence, s_alarm.sequence)) {
@@ -134,7 +136,7 @@ static void product_ui_alarm_load(void)
     if (absent_slots == 2U && product_ui_alarm_model_seed_defaults(&s_alarm.model) == D_OK)
         product_ui_alarm_next_request();
     s_alarm.status.storage_protected = protected_record;
-    s_alarm.status.load_error = protected_record ? PRODUCT_UI_ALARM_ERR_VERSION : has_record ? D_OK : load_error;
+    s_alarm.status.load_error = protected_record ? PRODUCT_UI_ALARM_ERR_VERSION : unreadable ? D_ERR_IO : has_record ? D_OK : load_error;
     s_alarm.status.loaded = !unreadable;
     s_alarm.status.storage_error = protected_record ? PRODUCT_UI_ALARM_ERR_VERSION : unreadable ? D_ERR_IO : D_OK;
     s_alarm.retry_load = 0U;

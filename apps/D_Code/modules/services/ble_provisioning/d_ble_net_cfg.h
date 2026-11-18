@@ -52,7 +52,7 @@ void ble_app_disconnect(void);
 void ble_cfg_net_result_notify(int event);
 /**
  * @brief 格式化并尝试发送含 MAC、可选 UUID 与批次的成功响应。
- * @return 当前实现固定返回 0，不代表通知已写出或手机已收到。
+ * @return 格式化成功返回0，不代表手机已收到；格式化失败或截断返回-1且不发送部分JSON。
  */
 int ble_connected_net_notify(void);
 /**
@@ -69,12 +69,18 @@ int d_ble_decrypt(const uint8_t *in, uint16_t in_len,
  * @brief 弱实现原样复制发送内容，可由产品覆盖。
  * @param[in] in 至少 in_len 字节的有效输入。
  * @param[in] in_len 待复制字节数。
- * @param[out] out 至少 in_len 字节的有效输出缓冲。
- * @param[out] out_len 非空写入长度输出，默认实现不读取其初始容量。
- * @return 当前默认实现固定返回 0。
- * @note 默认实现不检查指针或容量，调用者必须保证缓冲有效且足够。
+ * @param[out] out 至少入参out_len所指容量的有效输出缓冲。
+ * @param[in,out] out_len 输入为容量，成功后为写入长度。
+ * @return 默认实现复制成功为0，空指针或容量不足为-1且不写输出。
+ * @note 覆盖实现也必须遵守容量合同，失败不能作为可发送的数据发布。
  */
 int d_ble_encrypt(const uint8_t *in, uint16_t in_len,
                   uint8_t *out, uint16_t *out_len);
+
+/**
+ * @brief 有界加密并尝试发送JSON；本接口不提供排队或对端送达确认。
+ * @param[in] json_str 调用期间稳定的零结尾输入，超过192字节或加密失败时不发送。
+ */
+void d_ble_send_json_response(const char *json_str);
 
 #endif /* D_BLE_NET_CFG_H */

@@ -1,0 +1,28 @@
+/** @file lv_conf.h @brief 主机 LVGL 固定配置：16 位颜色、内置 4 MB 池及单绘制单元，不修改原厂配置。 */
+#ifndef LV_CONF_H
+#define LV_CONF_H
+
+#define LV_COLOR_DEPTH 16
+#define LV_USE_OS LV_OS_NONE
+#define LV_USE_STDLIB_MALLOC LV_STDLIB_BUILTIN
+#define LV_USE_STDLIB_STRING LV_STDLIB_BUILTIN
+#define LV_USE_STDLIB_SPRINTF LV_STDLIB_BUILTIN
+#define LV_MEM_SIZE (4U * 1024U * 1024U)
+#define LV_USE_LOG 0
+#define LV_DRAW_SW_DRAW_UNIT_CNT 1
+#define LV_DRAW_SW_ASM LV_DRAW_SW_ASM_NONE
+#define LV_USE_DRAW_SW 1
+#define LV_DRAW_SW_COMPLEX 1
+#define LV_USE_FLEX 1
+#define LV_USE_GRID 1
+#define LV_FONT_MONTSERRAT_12 1
+#define LV_FONT_MONTSERRAT_10 1
+#define LV_FONT_MONTSERRAT_14 1
+#define LV_FONT_MONTSERRAT_18 1
+#define LV_FONT_MONTSERRAT_32 1
+#define LV_FONT_SIMSUN_16_CJK 1
+#define LV_FONT_EMOJI_16 1
+#define LV_BUILD_EXAMPLES 0
+#define LV_USE_DEMO_WIDGETS 0
+
+#endif

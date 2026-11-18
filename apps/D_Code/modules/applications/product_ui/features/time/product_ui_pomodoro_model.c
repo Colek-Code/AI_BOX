@@ -29,10 +29,14 @@ static uint32_t product_ui_pomodoro_add(uint32_t value, uint32_t increment)
  */
 uint8_t product_ui_pomodoro_settings_valid(const product_ui_pomodoro_settings_t *settings)
 {
-    return settings != NULL && settings->focus_minutes >= 1U && settings->focus_minutes <= 120U &&
-        settings->short_minutes >= 1U && settings->short_minutes <= 30U &&
-        settings->long_minutes >= 1U && settings->long_minutes <= 60U &&
-        settings->interval >= 1U && settings->interval <= 8U &&
+    return settings != NULL && settings->focus_minutes >= PRODUCT_UI_POMODORO_MIN_MINUTES &&
+        settings->focus_minutes <= PRODUCT_UI_POMODORO_FOCUS_MAX_MINUTES &&
+        settings->short_minutes >= PRODUCT_UI_POMODORO_MIN_MINUTES &&
+        settings->short_minutes <= PRODUCT_UI_POMODORO_SHORT_MAX_MINUTES &&
+        settings->long_minutes >= PRODUCT_UI_POMODORO_MIN_MINUTES &&
+        settings->long_minutes <= PRODUCT_UI_POMODORO_LONG_MAX_MINUTES &&
+        settings->interval >= PRODUCT_UI_POMODORO_MIN_INTERVAL &&
+        settings->interval <= PRODUCT_UI_POMODORO_MAX_INTERVAL &&
         settings->auto_focus <= 1U && settings->auto_break <= 1U && settings->sound <= 1U;
 }
 

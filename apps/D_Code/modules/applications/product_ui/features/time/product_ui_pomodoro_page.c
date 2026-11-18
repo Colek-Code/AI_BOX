@@ -95,12 +95,21 @@ static void product_ui_pomodoro_edit(product_ui_pomo_action_e action, uint8_t fi
     uint8_t *values[] = {&s_page.draft.focus_minutes, &s_page.draft.short_minutes,
         &s_page.draft.long_minutes, &s_page.draft.interval, &s_page.draft.auto_focus,
         &s_page.draft.auto_break, &s_page.draft.sound};
-    static const uint8_t maxima[] = {120,30,60,8};
+    static const uint8_t maxima[] = {
+        PRODUCT_UI_POMODORO_FOCUS_MAX_MINUTES,
+        PRODUCT_UI_POMODORO_SHORT_MAX_MINUTES,
+        PRODUCT_UI_POMODORO_LONG_MAX_MINUTES,
+        PRODUCT_UI_POMODORO_MAX_INTERVAL,
+    };
+    static const uint8_t minima[] = {
+        PRODUCT_UI_POMODORO_MIN_MINUTES, PRODUCT_UI_POMODORO_MIN_MINUTES,
+        PRODUCT_UI_POMODORO_MIN_MINUTES, PRODUCT_UI_POMODORO_MIN_INTERVAL,
+    };
     if (s_page.mode != PRODUCT_UI_POMO_SETTINGS || field >= 7U) return;
-    if (action == PRODUCT_UI_POMO_SET_DURATION && field < 3U && value >= 1U && value <= maxima[field])
+    if (action == PRODUCT_UI_POMO_SET_DURATION && field < 3U && value >= minima[field] && value <= maxima[field])
         *values[field] = value;
     else if (action == PRODUCT_UI_POMO_TOGGLE && field >= 4U) *values[field] ^= 1U;
-    else if (field < 4U && action == PRODUCT_UI_POMO_DECREASE && *values[field] > 1U) (*values[field])--;
+    else if (field < 4U && action == PRODUCT_UI_POMO_DECREASE && *values[field] > minima[field]) (*values[field])--;
     else if (field < 4U && action == PRODUCT_UI_POMO_INCREASE && *values[field] < maxima[field]) (*values[field])++;
 }
 

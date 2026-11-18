@@ -1,0 +1,87 @@
+{
+  "response_output_contract": {
+    "capacity": 192,
+    "direct_lengths": {
+      "min": 0,
+      "max": 193
+    },
+    "direct_capacities": {
+      "min": 0,
+      "max": 193
+    },
+    "send_lengths": {
+      "min": 0,
+      "max": 193,
+      "extra": [
+        65535,
+        65536,
+        65537
+      ]
+    },
+    "encryption_modes": [
+      "plain",
+      "failure",
+      "invalid_length",
+      "padded"
+    ],
+    "identity_lengths": {
+      "min": -1,
+      "max": 193
+    },
+    "rules": [
+      {
+        "id": "BLE-O-CAP",
+        "guard": "nonnull buffers and input_length <= supplied output capacity",
+        "result": "copy exact input, report its length; otherwise reject without writes"
+      },
+      {
+        "id": "BLE-O-LENGTH",
+        "guard": "JSON is null or longer than fixed capacity",
+        "result": "no encrypt and no ATT send"
+      },
+      {
+        "id": "BLE-O-ENCRYPT",
+        "guard": "encryption fails or reports oversized output",
+        "result": "no ATT send"
+      },
+      {
+        "id": "BLE-O-FORMAT",
+        "guard": "any snprintf fails or does not fit including NUL",
+        "result": "return -1, no partial ATT send"
+      },
+      {
+        "id": "BLE-O-SEND",
+        "guard": "all bounds hold",
+        "result": "one ATT attempt; no peer acknowledgement claim"
+      }
+    ],
+    "negative_controls": [
+      {
+        "id": "ignore-cipher-capacity",
+        "function": "default",
+        "before": "in_len > *out_len",
+        "after": "0"
+      },
+      {
+        "id": "send-after-encryption-failure",
+        "function": "send",
+        "before": "d_ble_encrypt((const u8 *)json_str, len, enc_buf, &enc_len) != 0",
+        "after": "d_ble_encrypt((const u8 *)json_str, len, enc_buf, &enc_len) == 999"
+      },
+      {
+        "id": "publish-truncated-identity",
+        "function": "notify",
+        "before": "if (added < 0 || (size_t)added >= sizeof(rsp_buf) - (size_t)len) return -1;",
+        "after": "if (added < 0) return -1;",
+        "count": 3
+      }
+    ],
+    "boundary": "Executes production weak encryption, JSON send and connected-notify builder. Radio queue and network state are substituted; no change to BLE acceptance or VM24/25 policy.",
+    "formatter_fail_calls": [
+      1,
+      2,
+      3,
+      4
+    ]
+  }
+}

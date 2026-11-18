@@ -31,13 +31,8 @@ uint8_t product_ui_alarm_notice_pending(void) { return s_notice.pending; }
  */
 static void product_ui_alarm_notice_reset_touch(void)
 {
-    lv_indev_t *input = NULL;
     s_notice.armed = 0U;
-    while ((input = lv_indev_get_next(input)) != NULL) {
-        uint8_t pressed = lv_indev_get_state(input) == LV_INDEV_STATE_PRESSED;
-        lv_indev_reset(input, NULL);
-        if (pressed) lv_indev_wait_release(input);
-    }
+    product_ui_control_reset_inputs();
 }
 
 /**

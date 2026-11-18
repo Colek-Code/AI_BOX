@@ -51,13 +51,8 @@ const char *product_ui_ota_state_text(unsigned state)
  */
 static void product_ui_ota_reset_input(void)
 {
-    lv_indev_t *input = NULL;
     s_notice.armed = 0U;
-    while ((input = lv_indev_get_next(input)) != NULL) {
-        uint8_t pressed = lv_indev_get_state(input) == LV_INDEV_STATE_PRESSED;
-        lv_indev_reset(input, NULL);
-        if (pressed) lv_indev_wait_release(input);
-    }
+    product_ui_control_reset_inputs();
 }
 
 /**

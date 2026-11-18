@@ -48,7 +48,7 @@ VS Code 提供同名任务：
 ## 接入与功能
 
 Qwen 普通编译直接链接 [libqwen_access.a](modules/integrations/qwen/lib/libqwen_access.a)。
-在 `qwen_config.h` 中选择全托管／半托管、激活码来源和设备名策略，配置须与云端设备模式匹配。
+体验开源版 AI 对话必须在 `qwen_config.h` 中选择半托管模式，并[联系销售开通资格](../../README.md#服务开通)。激活码来源和设备名策略须与出厂配置匹配。
 默认配置使用出厂身份，首次接入需写入有效记录，或按实际接入方式调整激活来源和设备名策略。
 接口说明见 [Qwen 接入](modules/integrations/qwen/README.md)。
 

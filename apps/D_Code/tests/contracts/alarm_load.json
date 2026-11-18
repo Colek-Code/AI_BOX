@@ -1,0 +1,49 @@
+{
+  "load_gate_contract": {
+    "slot_kinds": "nelcsiuvdox",
+    "incomplete_kinds": "siuox",
+    "valid_kinds": "el",
+    "rows": [
+      {
+        "id": "ALARM-L-VERSION",
+        "guard": "either slot is known future version",
+        "action": "reject mutation with version error, no repair write"
+      },
+      {
+        "id": "ALARM-L-INCOMPLETE",
+        "guard": "no future version and either slot was not obtained in full",
+        "action": "loaded=0, IO error, reject ordinary mutation until explicit reload"
+      },
+      {
+        "id": "ALARM-L-VALID",
+        "guard": "both reads conclusive and at least one decoded valid",
+        "action": "use latest valid record, no boot repair write"
+      },
+      {
+        "id": "ALARM-L-DAMAGED",
+        "guard": "conclusive reads but no decoded valid; not both absent",
+        "action": "no presets, preserve explicit repair semantics for fully read damaged data"
+      },
+      {
+        "id": "ALARM-L-ABSENT",
+        "guard": "both slots explicitly absent",
+        "action": "existing six disabled presets"
+      }
+    ],
+    "boundary": "No VM index, record format, save timing or automatic erase change. Complete CRC-invalid data can fall back to the other valid slot; an error/short return cannot prove unknown data safe to overwrite.",
+    "version_kinds": "vd",
+    "slot_classification_note": "d injects SDK VM_DATA_LEN_ERR=-511; the unchanged GC9307 port maps it to ALARM_ERR_VERSION, so it is a known version-protected class, not an incomplete service read.",
+    "negative_controls": [
+      {
+        "id": "ignore-incomplete-read",
+        "before": "length != PRODUCT_UI_ALARM_RECORD_SIZE",
+        "after": "length == D_ERR_NOT_READY"
+      },
+      {
+        "id": "hide-read-failure-behind-valid-slot",
+        "before": "unreadable ? D_ERR_IO : has_record ? D_OK : load_error",
+        "after": "has_record ? D_OK : load_error"
+      }
+    ]
+  }
+}

@@ -124,6 +124,7 @@ D_SOURCE("modules/integrations/qwen/qwen_audio.c")
 D_SOURCE("modules/integrations/qwen/qwen_cmd.c")
 D_SOURCE("modules/integrations/qwen/qwen_service.c")
 D_SOURCE("modules/integrations/qwen/qwen_hal.c")
+D_SOURCE("modules/integrations/qwen/qwen_full_credential.c")
 D_SOURCE("modules/integrations/qwen/qwen_access_port.c")
 #if D_QWEN_ACTIVATION_ENABLE
 #if D_QWEN_FACTORY_TEST_BUILD

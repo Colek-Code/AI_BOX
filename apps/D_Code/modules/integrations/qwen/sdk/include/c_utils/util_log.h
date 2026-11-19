@@ -5,7 +5,7 @@
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
 
- *     http: *www.apache.org/licenses/LICENSE-2.0
+ *     http://www.apache.org/licenses/LICENSE-2.0
 
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -34,7 +34,7 @@ int util_printf(const char* format, ...);
 #define ARRAY_SIZE(array) (sizeof(array)/sizeof(array[0]))
 #endif
 
-#if CONFIG_PLATFORM_AC7911 || CONFIG_PLATFORM_JL7014 || CONFIG_PLATFORM_LM620 || CONFIG_PLATFORM_RTL8711
+#if CONFIG_PLATFORM_AC7911 || CONFIG_PLATFORM_JL7014 || CONFIG_PLATFORM_LM620 || CONFIG_PLATFORM_RTL8711 || CONFIG_PLATFORM_ML307N
 #define PRI_SIZET "%d"
 #else
 #define PRI_SIZET "%zu"

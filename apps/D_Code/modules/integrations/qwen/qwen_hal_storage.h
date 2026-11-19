@@ -1,12 +1,12 @@
-/** @file qwen_hal_storage.h @brief 在 VM16 边界确认 SDK 凭据已完整持久化。 */
+/** @file qwen_hal_storage.h @brief 导出 SDK 注册凭据并核对对应存储边界。 */
 #ifndef QWEN_HAL_STORAGE_H
 #define QWEN_HAL_STORAGE_H
 #include "framework/d_error.h"
 
 /**
- * @brief 导出 SDK 自有格式，完整写入 VM16 并回读比较。
+ * @brief 原槽模式写入并回读物理 VM16；独立证书模式仅写入并回读 RAM 运行副本。
  * @return 完整写入及回读一致返回 D_OK；并发调用返回 D_ERR_BUSY；License 未启用返回 D_ERR_NOT_READY；其余返回 D_ERR_IO。
- * @note 由 Qwen 工作任务在 SDK 初始化后调用；不信任会丢失 HAL 错误的 SDK 保存返回值。失败不证明 VM 无副作用。
+ * @note 注册成功后由唯一工作任务调用。全托管独立存储的 Flash 写入与验证由 qwen_full_credential_commit 完成。
  */
 d_err_t qwen_hal_storage_save_checked(void);
 #endif

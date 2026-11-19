@@ -5,7 +5,7 @@
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
 
- *     http: *www.apache.org/licenses/LICENSE-2.0
+ *     http://www.apache.org/licenses/LICENSE-2.0
 
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -59,6 +59,7 @@ void util_list_destroy(util_list_t *list);
 void util_list_destroy_with_data(util_list_t *list, util_list_destory_data destory_func);
 void *util_list_get(util_list_t *list);
 int32_t util_list_add(util_list_t *list, void *data);
+int32_t util_list_add_head(util_list_t *list, void *data);
 int32_t util_list_remove(util_list_t *list, void *data);
 int32_t util_list_get_count(util_list_t *list);
 util_list_node_t *util_list_get_node_by_index(util_list_t *list, int32_t idx);

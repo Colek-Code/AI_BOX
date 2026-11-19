@@ -14,6 +14,7 @@
 #include "server/audio_server.h"
 #include "server/server_core.h"
 #include "generic/circular_buf.h"
+#include "qwen_sdk_audio_io.h"
 
 #include <stdint.h>
 #include <string.h>
@@ -70,9 +71,6 @@
 #define QWEN_AUDIO_VOLUME_MIN 0U
 #define QWEN_AUDIO_VOLUME_MAX 100U
 
-uint32_t c_mmi_put_recorder_data(uint8_t *data, uint32_t size);
-uint32_t c_mmi_get_player_data(uint8_t *data, uint32_t size);
-uint8_t c_mmi_audio_recv_all(void);
 bool is_audio_play_open(void);
 bool is_audio_play_stop_pending(void);
 

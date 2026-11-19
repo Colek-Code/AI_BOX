@@ -50,6 +50,7 @@ static uint8_t s_activation_command_active;
 #endif
 
 #include "sdk/include/c_mmi.h"
+#include "qwen_sdk_audio_io.h"
 
 #if D_QWEN_HAL_ACCEPT_TEST_ENABLE
 #include "sdk/include/qwen_test.h"
@@ -216,6 +217,14 @@ typedef struct {
 
 static qwen_context_t s_qwen_ctx;
 static qwen_session_policy_t s_session;
+/* 唯一工作任务持有；未知期限令牌只准许当前代次的一次新握手。 */
+static uint8_t s_wss_token_ready;
+static uint32_t s_wss_token_generation;
+/* MMI 中断与本地排空都在状态锁内登记；异步 STOP 尚未执行时也能拒绝旧排空。 */
+static struct {
+    uint32_t session, player;
+    uint8_t claimed, interrupted;
+} s_drain;
 #if D_FEATURE_OTA
 static uint8_t s_maintenance_hold;
 static uint8_t s_maintenance_saved_auto;
@@ -462,6 +471,7 @@ static d_err_t qwen_worker_cleanup(void)
     d_err_t transport_result;
     d_err_t result;
     uint8_t fatal = 0U;
+    s_wss_token_ready = 0U;
 #if D_FEATURE_AI_ALARM
     qwen_local_tool_session(qwen_session_generation(), 0U);
     qwen_local_tool_tick((uint32_t)timer_get_ms());
@@ -1436,8 +1446,8 @@ static const char *qwen_mmi_event_name(uint32_t event)
         return "SPEECH_PREPARE";
     case C_MMI_EVENT_SPEECH_START:
         return "SPEECH_START";
-    case C_MMI_EVENT_SPEECH_RESTART:
-        return "SPEECH_RESTART";
+    case C_MMI_EVENT_SPEECH_INTERRUPT:
+        return "SPEECH_INTERRUPT";
     case C_MMI_EVENT_ASR_START:
         return "ASR_START";
     case C_MMI_EVENT_ASR_INCOMPLETE:
@@ -1660,6 +1670,7 @@ static uint8_t qwen_cmd_is_general_change(const qwen_cmd_msg_t *msg)
 static void qwen_on_audio_event(const d_event_t *event, void *user_data)
 {
     uint32_t generation;
+    uint32_t session;
     (void)user_data;
     if ((event == NULL) || (event->id != EVT_QWEN_TTS_LOCAL_END) ||
         event->data == NULL || event->data_len != sizeof(generation)) {
@@ -1671,6 +1682,29 @@ static void qwen_on_audio_event(const d_event_t *event, void *user_data)
 
     qwen_ctx_lock();
     if (generation != qwen_audio_player_generation() || qwen_session_cleanup_pending()) {
+        qwen_ctx_unlock();
+        return;
+    }
+    session = qwen_session_generation();
+    if (((s_drain.claimed || s_drain.interrupted) && s_drain.session == session && s_drain.player == generation) ||
+        qwen_sdk_enter() != D_OK) {
+        qwen_ctx_unlock();
+        return;
+    }
+    s_drain.claimed = 1U;
+    s_drain.interrupted = 0U;
+    s_drain.session = session;
+    s_drain.player = generation;
+    qwen_ctx_unlock();
+    /* SDK 自有锁只在产品状态锁外取得，借用保证回调期间不能销毁 SDK。 */
+    if (session == qwen_session_generation() && generation == qwen_audio_player_generation() &&
+        !qwen_session_cleanup_pending() && !c_mmi_audio_recv_all())
+        LOGW(TAG, "SDK did not confirm local drain");
+    qwen_sdk_leave();
+    qwen_ctx_lock();
+    if (s_drain.interrupted || s_drain.session != session || s_drain.player != generation ||
+        session != qwen_session_generation() || generation != qwen_audio_player_generation() ||
+        qwen_session_cleanup_pending()) {
         qwen_ctx_unlock();
         return;
     }
@@ -1990,17 +2024,47 @@ static uint8_t qwen_request_mmi_cleanup_for_auth(void)
     return 1U;
 }
 
+/** @brief 注册与取票在准备和发送边界复核代次；支持原有的空闲预热。
+ * @param[in] generation 工作任务取得准备占用时的代次。
+ * @return 占用有效、网络可用且无竞争时返回非零。
+ */
+static int qwen_auth_admitted(uint32_t generation)
+{
+    int allowed;
+#if D_FEATURE_POWER_CONTROL
+    if (power_ctrl_is_shutting_down()) return 0;
+#endif
+#if D_LOCAL_PROMPT_ENABLE
+    if (d_local_prompt_alarm_requested()) return 0;
+#endif
+    spin_lock(&s_qwen_session_lock);
+    allowed = generation == s_session.generation && s_qwen_ctx.worker_prepare_active &&
+              !s_qwen_ctx.worker_exit && s_session.wifi_ready && s_session.runtime_allowed &&
+              !s_session.cleanup_pending && !s_session.fatal;
+#if D_FEATURE_OTA
+    allowed = allowed && !s_maintenance_hold;
+#endif
+#if D_LOCAL_PROMPT_ENABLE
+    allowed = allowed && !s_alarm_hold_token;
+#endif
+    spin_unlock(&s_qwen_session_lock);
+    return allowed;
+}
+
 /**
- * @brief 保留已准入的活动 WSS，会在下一次连接前按需注册或更新令牌。
+ * @brief 保留活动会话，按当前建连资格刷新令牌。
+ * @param[in] prepare_generation 开始准备时的会话代次。
  * @return 无需更新或认证成功返回 D_OK；需先清理或认证失败返回实际错误。
  * @note 本地令牌过期只限制下一次 Upgrade，不单独销毁已经建立的对话；服务端拒绝、停止和维护仍可撤销。
  */
-static d_err_t qwen_sync_auth_if_needed(void)
+static d_err_t qwen_sync_auth_if_needed(uint32_t prepare_generation)
 {
     d_err_t err;
     qwen_state_e auth_prev_state;
     uint8_t is_registered;
     uint8_t is_refresh_needed;
+    uint32_t generation;
+    uint8_t requested;
 
     is_registered = (uint8_t)qwen_net_is_registered();
     /* 令牌用于 HTTP Upgrade 认证，本地过期只限制下一次连接，不单独销毁已准入对话。
@@ -2010,6 +2074,15 @@ static d_err_t qwen_sync_auth_if_needed(void)
         return D_OK;
     }
     is_refresh_needed = (uint8_t)qwen_net_is_token_refresh_needed();
+    spin_lock(&s_qwen_session_lock);
+    generation = s_session.generation;
+    requested = qwen_session_policy_allows(&s_session);
+    spin_unlock(&s_qwen_session_lock);
+    if (generation != prepare_generation) return D_ERR_NOT_READY;
+    if (requested && qwen_net_is_token_expiry_unknown() &&
+        (!s_wss_token_ready || s_wss_token_generation != generation)) {
+        is_refresh_needed = 1U;
+    }
     LOGI(TAG, "auth gate: registered=%u token_valid=%u refresh=%u",
          (unsigned)is_registered,
          (unsigned)qwen_net_is_token_valid(),
@@ -2035,7 +2108,8 @@ static d_err_t qwen_sync_auth_if_needed(void)
         }
     }
 
-    err = qwen_net_sync_auth();
+    s_wss_token_ready = 0U;
+    err = qwen_net_sync_auth(prepare_generation, qwen_auth_admitted);
     if (err != D_OK) {
         LOGE(TAG, "Qwen auth failed: %d", err);
         qwen_set_state(QWEN_STATE_ERROR);
@@ -2043,6 +2117,14 @@ static d_err_t qwen_sync_auth_if_needed(void)
     }
 
     LOGI(TAG, "auth sync done");
+    if (requested && qwen_net_is_token_expiry_unknown()) {
+        spin_lock(&s_qwen_session_lock);
+        if (generation == s_session.generation && qwen_session_policy_allows(&s_session)) {
+            s_wss_token_generation = generation;
+            s_wss_token_ready = 1U;
+        }
+        spin_unlock(&s_qwen_session_lock);
+    }
     qwen_restore_state_after_auth_if_needed(auth_prev_state);
     return D_OK;
 }
@@ -2094,41 +2176,6 @@ static void qwen_prepare_mmi_reinit_if_needed(void)
 }
 
 /**
- * @brief 按 force_auth 选择按需或强制认证，并保留当前对话状态。
- * @param[in] force_auth 非零强制更新令牌，0 走按需路径。
- * @return 认证或清理准入的实际结果。
- */
-static d_err_t qwen_sync_auth_for_worker(uint8_t force_auth)
-{
-    d_err_t err;
-    qwen_state_e auth_prev_state;
-
-    if (force_auth == 0U) {
-        return qwen_sync_auth_if_needed();
-    }
-
-    if (qwen_request_mmi_cleanup_for_auth()) return D_ERR_NOT_READY;
-    auth_prev_state = s_qwen_ctx.state;
-    if (qwen_dialog_phase_is_active() == 0U) {
-        qwen_set_state(QWEN_STATE_TOKEN_REQ);
-    } else {
-        LOGI(TAG, "reauth background: state=%s phase=%s",
-             qwen_state_name(s_qwen_ctx.state),
-             qwen_dialog_phase_name(s_qwen_ctx.dialog_phase));
-    }
-    err = qwen_net_sync_auth();
-    if (err != D_OK) {
-        LOGE(TAG, "Qwen reauth failed: %d", err);
-        qwen_set_state(QWEN_STATE_ERROR);
-        return err;
-    }
-
-    LOGI(TAG, "reauth sync done");
-    qwen_restore_state_after_auth_if_needed(auth_prev_state);
-    return D_OK;
-}
-
-/**
  * @brief 非阻塞轮询产品音频同行，并在回调后再次核对会话代次。
  * @return 同行就绪且代次仍允许返回非零；无同行时仅检查会话准入。
  */
@@ -2172,6 +2219,23 @@ static d_err_t qwen_audio_peer_wait(uint32_t generation)
         os_time_dly(1);
     } while ((uint32_t)((uint32_t)timer_get_ms() - started) < QWEN_SESSION_HANDOFF_MS);
     return D_ERR_TIMEOUT;
+}
+
+/** @brief 在真实握手前消费同代次的令牌资格。
+ * @param[in] generation 媒体交接前捕获的会话代次。
+ * @return 业务仍允许，且未知期限令牌属于本次建连时返回非零。
+ */
+static uint8_t qwen_worker_authorize_wss(uint32_t generation)
+{
+    uint8_t allowed;
+    uint8_t unknown = qwen_net_is_token_expiry_unknown();
+    if (unknown && !qwen_net_is_token_valid()) return 0U;
+    spin_lock(&s_qwen_session_lock);
+    allowed = generation == s_session.generation && qwen_session_policy_allows(&s_session) &&
+              (!unknown || (s_wss_token_ready && s_wss_token_generation == generation));
+    if (allowed) s_wss_token_ready = 0U;
+    spin_unlock(&s_qwen_session_lock);
+    return allowed;
 }
 
 /**
@@ -2244,6 +2308,10 @@ static void qwen_connect_wss_if_needed(void)
 #if D_FEATURE_POWER_CONTROL
     if (power_ctrl_is_shutting_down()) return;
 #endif
+    if (!qwen_worker_authorize_wss(generation)) {
+        qwen_schedule_work("connect_wait_auth");
+        return;
+    }
     err = qwen_wss_connect();
     if (generation != qwen_session_generation() || !qwen_session_allows_business()) {
         /* 运输失败可能已经要求重连，不能清掉该请求。 */
@@ -2573,7 +2641,7 @@ static void qwen_service_task(void *priv)
         if (qwen_sdk_enter() == D_OK) {
             qwen_local_tool_tick((uint32_t)timer_get_ms());
             if (s_qwen_ctx.mmi_data_initialized) {
-                uint8_t sdk_state = c_mmi_get_state();
+                uint8_t sdk_state = c_mmi_get_major_state();
                 qwen_local_tool_sdk_ready(sdk_state == C_MMI_STATE_LISTENING &&
                     s_qwen_ctx.is_speech_active && qwen_can_use_live_session());
             } else qwen_local_tool_sdk_ready(0U);
@@ -2685,7 +2753,7 @@ static void qwen_service_task(void *priv)
             qwen_worker_prepare_end();
             continue;
         }
-        if (err == D_OK) err = qwen_sync_auth_for_worker(0U);
+        if (err == D_OK) err = qwen_sync_auth_if_needed(generation);
         qwen_worker_prepare_end();
         /* 3. 耗时步骤返回后核对代次，丢弃已取消或已断网请求的结果。 */
         if (generation != qwen_session_generation() ||
@@ -2695,8 +2763,12 @@ static void qwen_service_task(void *priv)
 #if D_FEATURE_POWER_CONTROL
         if (power_ctrl_is_shutting_down()) continue;
 #endif
+        spin_lock(&s_qwen_session_lock);
+        if (s_session.generation != generation || s_session.cleanup_pending || !s_session.wifi_ready) {
+            spin_unlock(&s_qwen_session_lock);
+            continue;
+        }
         if (err != D_OK) {
-            spin_lock(&s_qwen_session_lock);
             qwen_session_policy_failed(&s_session, err);
             spin_unlock(&s_qwen_session_lock);
             s_qwen_ctx.cleanup_retry = 1U;
@@ -2704,7 +2776,6 @@ static void qwen_service_task(void *priv)
             qwen_schedule_work("auth_failed");
             continue;
         }
-        spin_lock(&s_qwen_session_lock);
         qwen_session_policy_auth(&s_session, 1U);
         s_qwen_ctx.want_wss_connected = qwen_session_policy_allows(&s_session);
         spin_unlock(&s_qwen_session_lock);
@@ -2772,6 +2843,9 @@ static int32_t qwen_on_mmi_event(uint32_t event, void *param)
 {
     const char *text;
 
+    /* 这些可选通知的载荷仅在回调期间借用，产品无消费者。 */
+    if (event == C_MMI_EVENT_STATE_CHANGE || event == C_MMI_EVENT_LATENCY ||
+        event == C_MMI_EVENT_WORD_TIMESTAMP) return UTIL_SUCCESS;
     text = (const char *)param;
     qwen_ctx_lock();
     if (s_session.fatal ||
@@ -2802,6 +2876,11 @@ static int32_t qwen_on_mmi_event(uint32_t event, void *param)
 #endif
 
     switch (event) {
+    case C_MMI_EVENT_ERROR:
+        /* 现有工作任务负责清理，不留存错误对象或云端正文。 */
+        LOGE(TAG, "SDK error event");
+        qwen_request_cleanup("sdk_error", 0U);
+        break;
     case C_MMI_EVENT_USER_CONFIG:
         c_mmi_reset_dialog_id();
         break;
@@ -2869,8 +2948,21 @@ static int32_t qwen_on_mmi_event(uint32_t event, void *param)
         }
 #endif
         break;
+    case C_MMI_EVENT_SPEECH_INTERRUPT:
+        s_drain.session = qwen_session_generation();
+        s_drain.player = qwen_audio_player_generation();
+        s_drain.interrupted = 1U;
+        qwen_audio_stop_player();
+        if (s_qwen_ctx.is_idle_goodbye_pending) {
+            qwen_do_idle_disconnect("idle_goodbye_interrupted");
+        } else if (s_qwen_ctx.dialog_phase == QWEN_DIALOG_PHASE_WAIT_LOCAL_TTS_END ||
+                   s_qwen_ctx.dialog_phase == QWEN_DIALOG_PHASE_PLAYING) {
+            s_qwen_ctx.is_text_request_ready = 0U;
+            qwen_set_dialog_phase(QWEN_DIALOG_PHASE_IDLE, "playback_interrupted");
+            qwen_set_idle_network_state();
+        }
+        break;
     case C_MMI_EVENT_SPEECH_START:
-    case C_MMI_EVENT_SPEECH_RESTART:
 #if (D_QWEN_DIALOG_MODE == D_QWEN_DIALOG_MODE_DUPLEX)
         if ((s_qwen_ctx.is_idle_goodbye_pending == 0U) &&
             (s_qwen_ctx.ready_cue_pending != 0U) &&
@@ -2892,12 +2984,8 @@ static int32_t qwen_on_mmi_event(uint32_t event, void *param)
             LOGI(TAG, "speech start keep tts wait");
             break;
         }
-        if ((event == C_MMI_EVENT_SPEECH_RESTART) ||
-            (s_qwen_ctx.dialog_phase != QWEN_DIALOG_PHASE_LISTENING)) {
+        if (s_qwen_ctx.dialog_phase != QWEN_DIALOG_PHASE_LISTENING) {
             s_qwen_ctx.dialog_round_id++;
-        }
-        if (event == C_MMI_EVENT_SPEECH_RESTART) {
-            qwen_audio_stop_player();
         }
 #endif
         s_qwen_ctx.is_speech_active = 1U;

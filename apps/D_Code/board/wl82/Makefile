@@ -545,12 +545,15 @@ D_AGENT_LIBS += \
 	../../../../apps/D_Code/modules/integrations/qwen/sdk/libs/libc_license.a \
 	--no-whole-archive \
 	../../../../apps/D_Code/modules/integrations/qwen/sdk/libs/libqwen_sdk.a \
-	../../../../apps/D_Code/modules/integrations/qwen/sdk/libs/libqwen_test.a \
 	../../../../apps/D_Code/modules/integrations/qwen/sdk/libs/libc_mmi_cmd.a \
 	../../../../apps/D_Code/modules/integrations/qwen/sdk/libs/libc_mmi_cmd_application.a \
 	../../../../apps/D_Code/modules/integrations/qwen/sdk/libs/libc_mmi_cmd_voice_translate.a \
 	../../../../apps/D_Code/modules/integrations/qwen/sdk/libs/libc_mmi_cmd_volume.a \
 	../../../../apps/D_Code/modules/integrations/qwen/sdk/third_party/tinycrypt/libtinycrypt.a
+ifeq ($(D_BUILD_QWEN_HAL_ACCEPT_TEST),1)
+D_AGENT_LIBS += ../../../../apps/D_Code/modules/integrations/qwen/sdk/libs/libqwen_test.a
+endif
+D_QWEN_LINK_INPUTS := $(filter %.a,$(D_AGENT_LIBS))
 endif
 ifeq ($(D_BUILD_FEATURE_XIAOLE_WAKEUP),1)
 D_XIAOLE_LIB := ../../../../apps/D_Code/modules/integrations/xiaole_wakeup/sdk/liblx_aec.a
@@ -769,7 +772,7 @@ QWEN_ACCESS_UNITS := qwen_access qwen_factory_record qwen_auth_store qwen_auth_p
 QWEN_ACCESS_OBJECTS := $(addprefix $(QWEN_ACCESS_BUILD_DIR)/,$(addsuffix .o,$(QWEN_ACCESS_UNITS)))
 QWEN_ACCESS_DEPS := $(QWEN_ACCESS_OBJECTS:.o=.d)
 QWEN_ACCESS_HEADERS := $(wildcard ../../modules/integrations/qwen/*.h ../../modules/integrations/qwen/private/*.h)
-$(OUT_ELF): $(D_QWEN_ACCESS_LIB)
+$(OUT_ELF): $(D_QWEN_LINK_INPUTS)
 .PHONY: qwen_access_library
 qwen_access_library: $(QWEN_ACCESS_OBJECTS)
 	$(if $(filter 1,$(D_BUILD_FEATURE_QWEN)),,$(error Private library build requires Qwen enabled))

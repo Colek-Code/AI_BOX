@@ -7,6 +7,8 @@
 #include <stdint.h>
 
 typedef int32_t (*qwen_net_event_cb_t)(uint32_t event, void *param);
+/** @brief 工作任务在每次认证请求发出前核对代次和当前准入。非零可继续，可重复调用。 */
+typedef int (*qwen_net_admission_fn)(uint32_t generation);
 
 /**
  * @brief 在生命周期工作任务中初始化 SDK、预装身份凭据并应用用户配置。
@@ -20,7 +22,7 @@ d_err_t qwen_net_prepare(qwen_net_event_cb_t event_cb);
  * @return 认证完成返回 D_OK；未准备或清理故障返回 D_ERR_NOT_READY；其余为 SDK、HTTP 或存盘错误。
  * @note 由生命周期工作任务持有准入后调用，包含同步网络与 VM 操作。
  */
-d_err_t qwen_net_sync_auth(void);
+d_err_t qwen_net_sync_auth(uint32_t generation, qwen_net_admission_fn admission);
 /**
  * @brief 兼容入口尝试受检 SDK 清理并忽略返回值。
  * @note 需要确认清理时使用 deinit_checked。
@@ -54,5 +56,7 @@ int qwen_net_is_token_valid(void);
  */
 int qwen_net_is_token_refresh_needed(void);
 
+/** @brief 当前半托管响应只提供 SDK 可查询的加密期限；下次新建会话前需要重新取票。 */
+int qwen_net_is_token_expiry_unknown(void);
 
 #endif

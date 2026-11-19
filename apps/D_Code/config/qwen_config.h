@@ -18,6 +18,12 @@
 #error "D_QWEN_HAL_ACCEPT_TEST_ENABLE must be 0 or 1"
 #endif
 
+/* 全托管独立保存签发凭据。半托管仍使用原 VM16/31/32/33。 */
+#define D_QWEN_FULL_CREDENTIAL_STORE 1
+#if D_QWEN_FULL_CREDENTIAL_STORE != 0 && D_QWEN_FULL_CREDENTIAL_STORE != 1
+#error "D_QWEN_FULL_CREDENTIAL_STORE must be 0 or 1"
+#endif
+
 #define D_QWEN_AUTH_MODE_FULL_MANAGED       1U
 #define D_QWEN_AUTH_MODE_SEMI_MANAGED       2U
 #define D_QWEN_AUTH_MODE                    D_QWEN_AUTH_MODE_SEMI_MANAGED
@@ -73,12 +79,13 @@
 #error "Unverified HTTPS requires an explicit diagnostic opt-in"
 #endif
 
-#define D_QWEN_DEVICE_NAME                  "AC791N_DEVICE" // 固定设备号，多台设备分别填写。
-#define D_QWEN_DEVICE_NAME_USE_FACTORY      1 // 1: factory name; legacy single code retains old naming.
+#define D_QWEN_DEVICE_NAME                  "AC791N_DEVICE" // 未使用出厂名且关闭 MAC 命名时使用此固定名。
+/* 出厂命名启用后，合法旧版单码仍沿用MAC/固定名策略；读取、校验或格式错误会报错。 */
+#define D_QWEN_DEVICE_NAME_USE_FACTORY      1 // 1：使用出厂设备名；0：使用下方MAC/固定名策略。
 #if D_QWEN_DEVICE_NAME_USE_FACTORY != 0 && D_QWEN_DEVICE_NAME_USE_FACTORY != 1
 #error "D_QWEN_DEVICE_NAME_USE_FACTORY must be 0 or 1"
 #endif
-#define D_QWEN_DEVICE_NAME_USE_BT_MAC       1 // 0：使用固定设备号；1：根据本机 MAC 生成。
+#define D_QWEN_DEVICE_NAME_USE_BT_MAC       1 // 未启用出厂名或为合法旧版单码时：0用固定名，1由本机蓝牙MAC生成。
 #if D_QWEN_DEVICE_NAME_USE_BT_MAC != 0 && D_QWEN_DEVICE_NAME_USE_BT_MAC != 1
 #error "D_QWEN_DEVICE_NAME_USE_BT_MAC must be 0 or 1"
 #endif

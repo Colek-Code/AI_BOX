@@ -51,6 +51,19 @@ void util_free(void *ptr);
 
 void * util_realloc(void *ptr, int32_t size);
 
+/**
+ * util_malloc_aligned - 按指定对齐粒度分配 PSRAM 内存。
+ * @size:      需要分配的内存大小（字节）。
+ * @alignment: 对齐字节数，必须为 2 的幂且大于 0。
+ *
+ * 用于给 SPI DMA 等硬件直读场景分配 buffer：按 cache line 对齐后
+ * 硬件可直接访问 PSRAM，无需在内部 DRAM 里分配 bounce buffer，
+ * 避免峰值内存压力下因内部 DRAM 碎片化而分配失败。
+ *
+ * 返回值: 返回对齐后的指针，失败返回 NULL。
+ */
+void *util_malloc_aligned(int32_t size, int32_t alignment);
+
 #ifdef __cplusplus
 }
 #endif

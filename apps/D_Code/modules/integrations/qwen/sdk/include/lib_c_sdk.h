@@ -5,7 +5,7 @@
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
 
- *     http: *www.apache.org/licenses/LICENSE-2.0
+ *     http://www.apache.org/licenses/LICENSE-2.0
 
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -29,16 +29,16 @@ extern "C" {
 #define C_SDK_REQ_LEN_GET_TOKEN     500
 
 /********************** 下列接口将在2026-12-31弃用 **********************/
-// 推荐使用 c_license_gen_register_str 代替
+// 推荐使用 c_license_gen_register_str_v2 代替
 int32_t c_device_gen_register_req(char req_str[C_SDK_REQ_LEN_REGISTER], char *time_ms_str);
 
 // 推荐使用 c_license_analyze_register_rsp + c_mmi_storage_save 代替
 int32_t c_device_analyze_register_rsp(char *rsp_str);
 
-// 推荐使用 c_license_is_token_expire 代替
+// 推荐使用 c_license_is_token_expire_v2 代替
 uint8_t c_mmi_is_token_expire(void);
 
-// 推荐使用 c_license_gen_get_token_str 代替
+// 推荐使用 c_license_gen_get_token_str_v2 代替
 int32_t c_mmi_gen_get_token_req(char req_str[C_SDK_REQ_LEN_GET_TOKEN], char *time_ms_str);
 
 // 推荐使用 c_license_analyze_get_token_rsp 代替

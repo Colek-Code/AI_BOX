@@ -48,7 +48,7 @@ VS Code 提供同名任务：
 ## 接入与功能
 
 Qwen 普通编译直接链接 [libqwen_access.a](modules/integrations/qwen/lib/libqwen_access.a)。
-体验开源版 AI 对话必须在 `qwen_config.h` 中选择半托管模式，并[联系销售开通资格](../../README.md#服务开通)。激活码来源和设备名策略须与出厂配置匹配。
+在 `qwen_config.h` 选择接入模式，默认半托管。两种模式均须[联系销售开通 License 并确认应用配置](../../README.md#服务开通)。半托管使用匹配的出厂身份向拓达取票；全托管使用已完成云端配置的 AppId 和该设备的注册凭据直接向阿里取票。两种模式的固件均不携带长期模型 API Key。
 默认配置使用出厂身份，首次接入需写入有效记录，或按实际接入方式调整激活来源和设备名策略。
 接口说明见 [Qwen 接入](modules/integrations/qwen/README.md)。
 

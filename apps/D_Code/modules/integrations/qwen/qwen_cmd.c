@@ -18,9 +18,7 @@
 #include "framework/d_event_bus.h"
 #include "framework/d_log.h"
 #include "sdk/include/c_mmi.h"
-typedef int32_t(*c_mmi_cmd_event_callback)(uint32_t event, void *params);
-typedef int32_t(*c_mmi_cmd_func)(char *param);
-int32_t c_mm_cmd_register(char *domain_name, char *cmd, c_mmi_cmd_func func);
+#include "sdk/include/c_mmi_cmd/c_mmi_cmd.h"
 #include "sdk/include/c_mmi_cmd/c_mmi_cmd_application.h"
 #include "sdk/include/c_mmi_cmd/c_mmi_cmd_voice_translate.h"
 #include "sdk/include/c_mmi_cmd/c_mmi_cmd_volume.h"
@@ -319,19 +317,57 @@ int32_t qwen_cmd_handle_voice_translate(uint32_t event, void *params)
 
 /**
  * @brief 把 general_command/change 转换为待上层处理的未知域命令。
+ * @param[in] req_id SDK 借用的请求编号，此命令不留存。
  * @param[in] param SDK 兼容文本参数，本实现不使用。
  * @return 固定返回 UTIL_SUCCESS。
  */
-static int32_t qwen_cmd_handle_general_change(char *param)
+static int32_t qwen_cmd_handle_general_change(char *param, char *req_id)
 {
     qwen_cmd_msg_t msg;
 
     (void)param;
+    (void)req_id;
     memset(&msg, 0, sizeof(msg));
     msg.domain = QWEN_CMD_DOMAIN_UNKNOWN;
     qwen_cmd_copy_text(msg.text, sizeof(msg.text), s_qwen_cmd_general_change);
     qwen_cmd_publish(&msg, "deferred");
     return UTIL_SUCCESS;
+}
+
+/** @brief 转接 SDK 三参数回调；请求编号仅在回调期间借用。
+ * @param[in] event 命令事件。
+ * @param[in] req_id SDK 请求编号，此域不留存。
+ * @param[in] params SDK 命令数据。
+ * @return 原业务处理结果。
+ */
+static int32_t qwen_sdk_volume_event(uint32_t event, char *req_id, void *params)
+{
+    (void)req_id;
+    return qwen_cmd_handle_volume(event, params);
+}
+
+/** @brief 转接 SDK 三参数回调；请求编号仅在回调期间借用。
+ * @param[in] event 命令事件。
+ * @param[in] req_id SDK 请求编号，此域不留存。
+ * @param[in] params SDK 命令数据。
+ * @return 原业务处理结果。
+ */
+static int32_t qwen_sdk_application_event(uint32_t event, char *req_id, void *params)
+{
+    (void)req_id;
+    return qwen_cmd_handle_application(event, params);
+}
+
+/** @brief 转接 SDK 三参数回调；请求编号仅在回调期间借用。
+ * @param[in] event 命令事件。
+ * @param[in] req_id SDK 请求编号，此域不留存。
+ * @param[in] params SDK 命令数据。
+ * @return 原业务处理结果。
+ */
+static int32_t qwen_sdk_voice_translate_event(uint32_t event, char *req_id, void *params)
+{
+    (void)req_id;
+    return qwen_cmd_handle_voice_translate(event, params);
 }
 
 /**
@@ -345,14 +381,14 @@ d_err_t qwen_cmd_register_handlers(void)
 
     first_err = D_OK;
 
-    ret = c_mmi_cmd_volume_register(qwen_cmd_handle_volume);
+    ret = c_mmi_cmd_volume_register(qwen_sdk_volume_event);
     err = qwen_cmd_map_register_result(ret);
     if (err != D_OK) {
         LOGW(TAG, "volume cmd register failed: %d", ret);
         first_err = err;
     }
 
-    ret = c_mmi_cmd_application_register(qwen_cmd_handle_application);
+    ret = c_mmi_cmd_application_register(qwen_sdk_application_event);
     err = qwen_cmd_map_register_result(ret);
     if (err != D_OK) {
         LOGW(TAG, "application cmd register failed: %d", ret);
@@ -361,7 +397,7 @@ d_err_t qwen_cmd_register_handlers(void)
         }
     }
 
-    ret = c_mmi_cmd_voice_translate_register(qwen_cmd_handle_voice_translate);
+    ret = c_mmi_cmd_voice_translate_register(qwen_sdk_voice_translate_event);
     err = qwen_cmd_map_register_result(ret);
     if (err != D_OK) {
         LOGW(TAG, "voice translate cmd register failed: %d", ret);

@@ -1,6 +1,6 @@
 # Qwen 接入
 
-本模块使用 [libqwen_access.a](lib/libqwen_access.a)，适配 AC791N SDK 1.2.14、pi32v2/r3。
+本模块使用 [libqwen_access.a](lib/libqwen_access.a)，集成千问 RTOS C SDK v1.3.1，适配杰理 AC791N SDK 1.2.14、pi32v2/r3。
 普通编译直接链接；公开接口与归档由 [binding](lib/libqwen_access.binding.json) 绑定。
 
 ## 配置
@@ -10,8 +10,8 @@
 
 | 选项 | 用途 |
 | --- | --- |
-| 全托管 | 保留配置选项。公开库不提供百炼 API Key。 |
-| 半托管 | **体验开源版 AI 对话必须选择此模式。** [联系销售开通 Qwen 会话 License](../../../../../README.md#服务开通) 后，设备使用出厂身份激活，通过拓达获取会话令牌。 |
+| 全托管 | [联系销售确认 AppId 的云端模型配置与 License 资格](../../../../../README.md#服务开通)。设备以唯一名称注册或恢复本机证书，直接向阿里申请 Token，无需设备端模型 Key。 |
+| 半托管 | 默认模式。[联系销售开通会话资格](../../../../../README.md#服务开通) 后，设备按出厂身份激活，经拓达获取会话 Token。 |
 | UI / FACTORY / STATIC / PROGRAMMER | 分别为界面输入、厂测 VM、库内常量、烧录 Flash 记录，不会自动替换来源 |
 | 出厂名 / MAC / 固定名 | 选择设备身份，须与云端注册模式匹配 |
 

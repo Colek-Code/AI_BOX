@@ -1,7 +1,9 @@
 {
   "abi": 1,
   "target": "AC79NN-1.2.14/pi32v2-r3",
-  "sha256": "9a62182168e9f39f91ca02eac5cadfd5de3267403372757ed377cd233608df16",
+  "sha256": "908dda4ff292b41cd465d244dbb506fe2055fa786aa8c3438a2dfe9329ac944b",
+  "sdk_version": "1.3.1",
+  "sdk_manifest_sha256": "9328523f2e159100a3b0e2ccebaf8e4d13e9f6c24a6c93821daa54a0f890daaa",
   "compiler_sha256": "d4bc97cf421c1ccc373dd8924ce88720ff7457b3f1478d15df4aeda6ae923bce",
   "public_header_sha256": "07ba75f1125a859f6fd123b583e1ce3b549ea5ccac6aae742cd57823c08813ac"
 }

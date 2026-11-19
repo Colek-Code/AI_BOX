@@ -17,6 +17,7 @@
 #include "syscfg_id.h"
 #include "system/spinlock.h"
 #include "qwen_hal_storage.h"
+#include "qwen_full_credential.h"
 #include "sdk/include/lib_c_license.h"
 
 #include <stdarg.h>
@@ -26,14 +27,13 @@
 #define QWEN_MS_PER_SECOND   1000U
 #define QWEN_RANDOM_LCG_A    1664525U
 #define QWEN_RANDOM_LCG_C    1013904223U
-/* 当前固定 License 序列化结果为 176 字节，保留有界余量；
- * 将来格式无法容纳时，公开序列化器返回零。 */
-#define QWEN_STORAGE_VERIFY_CAPACITY 512U
+/* 官方 1.3.1 单 License 序列化长度；升级为未知格式时拒绝提交。 */
+#define QWEN_STORAGE_VERIFY_CAPACITY 200U
 
 static DEFINE_SPINLOCK(s_qwen_storage_lock);
 static uint8_t s_qwen_storage_busy;
 static uint8_t s_qwen_storage_expected[QWEN_STORAGE_VERIFY_CAPACITY];
-static uint8_t s_qwen_storage_observed[QWEN_STORAGE_VERIFY_CAPACITY];
+static uint8_t s_qwen_storage_observed[QWEN_STORAGE_VERIFY_CAPACITY + 1U];
 
 #if D_QWEN_HAL_ACCEPT_TEST_ENABLE
 #define QWEN_HAL_TRACE(...)  printf("[QWEN_HAL] " __VA_ARGS__)
@@ -158,7 +158,9 @@ static int32_t qwen_hal_storage_write_slot(uint16_t storage_id, const uint8_t *s
         return UTIL_ERR_INVALID_PARAM;
     }
 
-    write_len = syscfg_write(storage_id, (void *)storage_data, (u16)size);
+    write_len = qwen_full_credential_enabled() ?
+        qwen_full_credential_write(storage_id, (void *)storage_data, (u16)size) :
+        syscfg_write(storage_id, (void *)storage_data, (u16)size);
     if (write_len != (int32_t)size) {
         printf("[QWEN_HAL] storage write fail id=%u size=%u ret=%d\n",
                (unsigned)storage_id,
@@ -171,12 +173,11 @@ static int32_t qwen_hal_storage_write_slot(uint16_t storage_id, const uint8_t *s
 }
 
 /**
- * @brief 从指定 VM 槽读取至 SDK 缓冲。
+ * @brief 从 SDK 初始化前准备的运行副本读取。来源可以是旧物理槽或独立证书。
  * @param[in] storage_id VM 槽编号。
  * @param[out] storage_data 读取缓冲。
  * @param[in] size 1～65535 的容量。
- * @return 读取返回正数时为 UTIL_SUCCESS；无记录或读取失败映射 UTIL_ERR_NOT_FOUND；参数无效返回 UTIL_ERR_INVALID_PARAM。
- * @note 该兼容入口不要求返回长度恰好为 size；受检保存入口另行核对精确长度。
+ * @return 精确匹配当前 SDK 请求长度返回 UTIL_SUCCESS，否则返回错误。
  */
 static int32_t qwen_hal_storage_read_slot(uint16_t storage_id, uint8_t *storage_data, uint32_t size)
 {
@@ -186,8 +187,8 @@ static int32_t qwen_hal_storage_read_slot(uint16_t storage_id, uint8_t *storage_
         return UTIL_ERR_INVALID_PARAM;
     }
 
-    read_len = syscfg_read(storage_id, storage_data, (u16)size);
-    if (read_len <= 0) {
+    read_len = qwen_full_credential_read(storage_id, storage_data, (u16)size);
+    if (read_len != (int32_t)size) {
         printf("[QWEN_HAL] storage read miss id=%u size=%u ret=%d\n",
                (unsigned)storage_id,
                (unsigned)size,
@@ -222,11 +223,15 @@ d_err_t qwen_hal_storage_save_checked(void)
     /* 当前 SDK 的 c_mmi_storage_save 丢弃 util_storage_storage 错误；
      * 使用相同公开序列化器与 HAL 槽，独立核对真实结果。 */
     size = c_license_get_storage_data(s_qwen_storage_expected, sizeof(s_qwen_storage_expected));
-    if (size == 0U || size > sizeof(s_qwen_storage_expected)) goto done;
+    if (size != sizeof(s_qwen_storage_expected)) goto done;
     if (qwen_hal_storage_write_slot(QWEN_VM_STORAGE_ID, s_qwen_storage_expected, size) != UTIL_SUCCESS)
         goto done;
-    read_size = syscfg_read(QWEN_VM_STORAGE_ID, s_qwen_storage_observed, (u16)size);
-    if (read_size == (int)size && memcmp(s_qwen_storage_expected, s_qwen_storage_observed, size) == 0)
+    read_size = qwen_full_credential_enabled() ?
+        qwen_full_credential_read(QWEN_VM_STORAGE_ID, s_qwen_storage_observed, (u16)size) :
+        syscfg_read(QWEN_VM_STORAGE_ID, s_qwen_storage_observed, sizeof(s_qwen_storage_observed));
+    if (read_size == (int)size && memcmp(s_qwen_storage_expected, s_qwen_storage_observed, size) == 0 &&
+        (qwen_full_credential_enabled() ||
+         qwen_full_credential_write(QWEN_VM_STORAGE_ID, s_qwen_storage_expected, (u16)size) == (int)size))
         result = D_OK;
 done:
     memset(s_qwen_storage_expected, 0, sizeof(s_qwen_storage_expected));
@@ -594,16 +599,15 @@ uint8_t util_timestamp_inited(void)
 }
 
 /**
- * @brief 向 SDK VM16 写一个零字节以失效原记录。
- * @return syscfg 返回正数时 UTIL_SUCCESS，否则 UTIL_ERR_IO。
- * @note 不是整个 VM 区擦除；不提供物理擦除完成证明。
+ * @brief SDK 自动重置仅改变运行副本，物理记录由注册成功后的受检路径提交。
+ * @return 成功清除运行副本返回 UTIL_SUCCESS。
  */
 int32_t util_storage_erase(void)
 {
     uint8_t empty = 0U;
     int32_t write_len;
 
-    write_len = syscfg_write(QWEN_VM_STORAGE_ID, &empty, sizeof(empty));
+    write_len = qwen_full_credential_write(QWEN_VM_STORAGE_ID, &empty, sizeof(empty));
     if (write_len <= 0) {
         return UTIL_ERR_IO;
     }
@@ -612,7 +616,7 @@ int32_t util_storage_erase(void)
 }
 
 /**
- * @brief 实现 SDK VM16 凭据写入回调。
+ * @brief SDK 普通保存只更新当前运行副本，包括初始化失败时 SDK 自行执行的保存。
  * @param[in] data SDK 原格式记录输入。
  * @param[in] size 非零且不超过 65535 的长度。
  * @return 完整写入返回 UTIL_SUCCESS；参数或短写返回对应错误。
@@ -623,7 +627,8 @@ int32_t util_storage_storage(uint8_t *data, uint32_t size)
         return UTIL_ERR_INVALID_PARAM;
     }
 
-    return qwen_hal_storage_write_slot(QWEN_VM_STORAGE_ID, data, size);
+    return qwen_full_credential_write(QWEN_VM_STORAGE_ID, data, (u16)size) == (int)size ?
+           UTIL_SUCCESS : UTIL_ERR_IO;
 }
 
 /**

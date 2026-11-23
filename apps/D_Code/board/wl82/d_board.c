@@ -201,6 +201,20 @@ SD_PLATFORM_DATA_END()
 
 #if TCFG_ADKEY_ENABLE
 
+#if D_BOARD_BOX_ADKEY
+/* BOX 图纸 R1 为 22 kΩ 上拉，按键电阻为 0/15/24/33 kΩ。 */
+#define BOX_ADKEY_ADC_MAX                 0x3ffU
+#define BOX_ADKEY_PULL_UP_KOHM            22U
+#define BOX_ADKEY_ADC_LEVEL(resistance_kohm) \
+    (BOX_ADKEY_ADC_MAX * (resistance_kohm) / (BOX_ADKEY_PULL_UP_KOHM + (resistance_kohm)))
+#define BOX_ADKEY_ADC_POWER               BOX_ADKEY_ADC_LEVEL(0U)
+#define BOX_ADKEY_ADC_TALK                BOX_ADKEY_ADC_LEVEL(15U)
+#define BOX_ADKEY_ADC_UP                  BOX_ADKEY_ADC_LEVEL(24U)
+#define BOX_ADKEY_ADC_DOWN                BOX_ADKEY_ADC_LEVEL(33U)
+
+/* SDK 用 bit 7 缩短短按等待并在通知前清掉它，LONG/HOLD/UP 仍按常规扫描产生。 */
+#define BOX_ADKEY_CLICK_ON_RELEASE        BIT(7)
+#else
 #define ADKEY_UPLOAD_R  22
 
 #define ADC_VDDIO (0x3FF)
@@ -225,12 +239,31 @@ SD_PLATFORM_DATA_END()
 #define ADKEY_V_2 		((ADC_02 + ADC_03)/2)
 #define ADKEY_V_1 		((ADC_01 + ADC_02)/2)
 #define ADKEY_V_0 		((ADC_00 + ADC_01)/2)
+#endif
 
 const struct adkey_platform_data adkey_data = {
     .enable     = 1,
 	.adkey_pin  = IO_PORTB_01,
     .extern_up_en = 1,
 	.ad_channel = 3,
+#if D_BOARD_BOX_ADKEY
+    /* 相邻标称 ADC 读数的中点为各档上限，空闲及未占用档返回 NO_KEY。 */
+    .ad_value = {
+        (BOX_ADKEY_ADC_POWER + BOX_ADKEY_ADC_TALK) / 2U,
+        (BOX_ADKEY_ADC_TALK + BOX_ADKEY_ADC_UP) / 2U,
+        (BOX_ADKEY_ADC_UP + BOX_ADKEY_ADC_DOWN) / 2U,
+        (BOX_ADKEY_ADC_DOWN + BOX_ADKEY_ADC_MAX) / 2U,
+        BOX_ADKEY_ADC_MAX, BOX_ADKEY_ADC_MAX, BOX_ADKEY_ADC_MAX,
+        BOX_ADKEY_ADC_MAX, BOX_ADKEY_ADC_MAX, BOX_ADKEY_ADC_MAX,
+    },
+    .key_value = {
+        D_KEY_POWER_KEY,
+        D_KEY_PTT,
+        D_KEY_VOL_UP | BOX_ADKEY_CLICK_ON_RELEASE,
+        D_KEY_VOL_DOWN | BOX_ADKEY_CLICK_ON_RELEASE,
+        NO_KEY, NO_KEY, NO_KEY, NO_KEY, NO_KEY, NO_KEY,
+    },
+#else
     .ad_value = {
         ADKEY_V_0,
         ADKEY_V_1,
@@ -255,6 +288,7 @@ const struct adkey_platform_data adkey_data = {
         NO_KEY,
         NO_KEY,
     },
+#endif
 };
 
 #ifdef D_BOARD_ADKEY_DEBUG_ENABLE

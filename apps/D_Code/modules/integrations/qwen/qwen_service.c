@@ -1850,9 +1850,11 @@ static uint8_t qwen_service_can_reconfig_wifi_by_key(void)
     switch (s_qwen_ctx.state) {
     case QWEN_STATE_IDLE:
     case QWEN_STATE_READY:
+#if !D_BOARD_BOX_ADKEY
     case QWEN_STATE_LISTENING:
     case QWEN_STATE_THINKING:
     case QWEN_STATE_PLAYING:
+#endif
     case QWEN_STATE_ERROR:
         return 1U;
     default:
@@ -1875,6 +1877,14 @@ static int qwen_service_handle_wifi_reconfig_key(void)
     /* 整个调用含等待回调状态都保留事务占用；forget_saved 尚在执行时，维护与反初始化不能报告完成。 */
     spin_lock(&s_qwen_session_lock);
     if (!s_qwen_ctx.service_ready || s_qwen_ctx.wifi_reconfig_active
+#if D_BOARD_BOX_ADKEY
+        /* UI 状态可能仍显示就绪，启动意图和后台占用须在会话锁下判定。 */
+        || s_session.requested || s_session.connected || s_session.cleanup_pending
+        || s_qwen_ctx.worker_prepare_active || s_qwen_ctx.cleanup_active
+#if D_QWEN_ACTIVATION_ENABLE
+        || s_activation_command_active
+#endif
+#endif
 #if D_FEATURE_OTA
         || s_maintenance_hold
 #endif
@@ -2526,6 +2536,9 @@ static uint8_t qwen_worker_prepare_begin(void)
     uint8_t allowed;
     spin_lock(&s_qwen_session_lock);
     allowed = !s_session.cleanup_pending && !s_session.fatal && !s_qwen_ctx.worker_exit;
+#if D_BOARD_BOX_ADKEY && D_FEATURE_BLE_PROVISION && (D_QWEN_DIALOG_MODE == D_QWEN_DIALOG_MODE_DUPLEX)
+    allowed = allowed && !s_qwen_ctx.wifi_reconfig_active;
+#endif
 #if D_QWEN_ACTIVATION_ENABLE
     allowed = allowed && !s_activation_command_active;
 #endif
@@ -3806,6 +3819,10 @@ static d_err_t qwen_session_start_checked(const uint32_t *expected_generation)
 #endif
     if (!qwen_reconcile_wifi()) return D_ERR_BUSY;
     spin_lock(&s_qwen_session_lock);
+#if D_BOARD_BOX_ADKEY && D_FEATURE_BLE_PROVISION && (D_QWEN_DIALOG_MODE == D_QWEN_DIALOG_MODE_DUPLEX)
+    /* 重配已在同一锁下取得占用，等凭据事务完成后再受理会话。 */
+    if (s_qwen_ctx.wifi_reconfig_active) { spin_unlock(&s_qwen_session_lock); return D_ERR_BUSY; }
+#endif
 #if D_QWEN_ACTIVATION_ENABLE
     if (s_activation_command_active) { spin_unlock(&s_qwen_session_lock); return D_ERR_BUSY; }
 #endif
@@ -3889,6 +3906,9 @@ d_err_t qwen_service_activation_request(const char *code)
     spin_lock(&s_qwen_session_lock);
     if (s_activation_command_active || s_qwen_ctx.worker_prepare_active ||
         s_session.requested || s_session.connected || s_session.cleanup_pending || s_session.fatal
+#if D_BOARD_BOX_ADKEY && D_FEATURE_BLE_PROVISION && (D_QWEN_DIALOG_MODE == D_QWEN_DIALOG_MODE_DUPLEX)
+        || s_qwen_ctx.wifi_reconfig_active
+#endif
 #if D_FEATURE_OTA
         || s_maintenance_hold
 #endif

@@ -360,6 +360,10 @@ int power_ctrl_handle_key_action(uint8_t key_action)
             request_shutdown = 1U;
         }
     } else {
+#if D_BOARD_BOX_ADKEY
+        /* 交叠按压可能在 PB1 上直接切到另一档，漏掉上一次 UP。新的 SDK LONG 重新计时。 */
+        if (key_action == KEY_EVENT_LONG) power_ctrl_reset_key_tracking();
+#endif
         const uint8_t was_pending = s_power_ctrl_ctx.is_shutdown_pending;
         result = power_ctrl_handle_key_hold(key_action);
         became_pending = !was_pending && s_power_ctrl_ctx.is_shutdown_pending;

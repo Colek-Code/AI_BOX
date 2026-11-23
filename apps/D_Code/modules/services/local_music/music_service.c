@@ -93,7 +93,7 @@ d_err_t music_service_request(music_command_e command, uint32_t generation,
                              uint16_t index, uint32_t *request_id)
 {
     d_err_t result = D_OK;
-    if (command < MUSIC_SELECT || command > MUSIC_RESCAN || request_id == NULL) return D_ERR_INVALID_ARG;
+    if (command < MUSIC_SELECT || command > MUSIC_PLAY_PAUSE || request_id == NULL) return D_ERR_INVALID_ARG;
     spin_lock(&s_music_lock);
     if (!s_music.state.ready || !s_music.state.online ||
         (command != MUSIC_RESCAN && !s_music.state.mounted) || generation != s_music.state.media_generation)
@@ -101,8 +101,9 @@ d_err_t music_service_request(music_command_e command, uint32_t generation,
     else if (s_music.state.held || s_music.state.busy || s_music.stop_pending ||
              s_music.state.request_id != s_music.state.completed_id) result = D_ERR_BUSY;
     else if (command == MUSIC_SELECT && index >= s_music.state.count) result = D_ERR_INVALID_ARG;
-    else if (command != MUSIC_SELECT && command != MUSIC_RESCAN && s_music.state.current_index == MUSIC_INDEX_NONE)
-        result = D_ERR_NOT_READY;
+    else if ((command == MUSIC_PLAY_PAUSE && s_music.state.count == 0U) ||
+             ((command == MUSIC_TOGGLE || command == MUSIC_NEXT || command == MUSIC_PREVIOUS) &&
+              s_music.state.current_index == MUSIC_INDEX_NONE)) result = D_ERR_NOT_READY;
     if (result == D_OK) {
         s_music.command = command;
         s_music.command_generation = generation;
@@ -563,9 +564,16 @@ static void music_command_process(void)
     result = generation != state.media_generation || state.held ? D_ERR_BUSY : D_OK;
     if (result == D_OK) {
         if (command == MUSIC_SELECT) result = music_play(index, 0U);
-        else if (command == MUSIC_TOGGLE) {
-            result = state.state == MUSIC_PLAYING ? music_stop(1U) :
-                state.can_resume ? music_play(state.current_index, 1U) : D_ERR_NOT_READY;
+        else if (command == MUSIC_TOGGLE || command == MUSIC_PLAY_PAUSE) {
+            if (state.state == MUSIC_PLAYING) {
+                result = music_stop(1U);
+            } else if (state.can_resume && state.current_index != MUSIC_INDEX_NONE) {
+                result = music_play(state.current_index, 1U);
+            } else if (command == MUSIC_PLAY_PAUSE) {
+                result = music_play(state.current_index == MUSIC_INDEX_NONE ? 0U : state.current_index, 0U);
+            } else {
+                result = D_ERR_NOT_READY;
+            }
         } else if (command == MUSIC_NEXT || command == MUSIC_PREVIOUS) result = music_step(command == MUSIC_NEXT ? 1 : -1);
         else {
             result = music_stop(0U);

@@ -28,6 +28,9 @@
 
 #define D_BOARD_TARGET  D_BOARD_COPY_GC9307_HYN
 
+/* 本工程 GC9307/HYN 成品板使用 BOX 四键电阻梯。 */
+#define D_BOARD_BOX_ADKEY (D_BOARD_TARGET == D_BOARD_COPY_GC9307_HYN)
+
 /* 产品默认方向：0 = 当前正常方向，180 = 上下翻转；用户保存值优先。 */
 #define D_SCREEN_DEFAULT_ROTATION_DEGREES  0
 

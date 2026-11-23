@@ -6,13 +6,22 @@
 #ifndef D_RUNTIME_CONFIG_H
 #define D_RUNTIME_CONFIG_H
 
-/* SDK 按键名在消费者包含 key_event.h 后展开。
- * 此处 KEY_VOLUME_DEC 对应 36k 的按住说话键，不绑定实体音量减动作。 */
-#define D_KEY_PTT                         KEY_VOLUME_DEC
-#define D_KEY_VOL_UP                      KEY_VOLUME_INC /* Reserved; unbound. */
+/* SDK 按键名在消费者包含 key_event.h 后展开。 */
+#if D_BOARD_BOX_ADKEY
+#define D_KEY_PTT                         KEY_F1
+#define D_KEY_VOL_DOWN                    KEY_VOLUME_DEC
+#else
+#define D_KEY_PTT                         KEY_VOLUME_DEC /* 原开发板 36 kΩ 语音键。 */
+#endif
+#define D_KEY_VOL_UP                      KEY_VOLUME_INC
 #define D_KEY_POWER_KEY                   KEY_POWER
 
-#define D_QWEN_WIFI_RECONFIG_KEY          D_KEY_PTT
+#if D_BOARD_BOX_ADKEY
+#define D_QWEN_DUPLEX_KEY                 D_KEY_POWER_KEY
+#else
+#define D_QWEN_DUPLEX_KEY                 D_KEY_PTT
+#endif
+#define D_QWEN_WIFI_RECONFIG_KEY          D_QWEN_DUPLEX_KEY
 #define D_QWEN_WIFI_RECONFIG_ACTION       KEY_EVENT_TRIPLE_CLICK
 
 #define D_POWER_CTRL_KEY                  D_KEY_POWER_KEY

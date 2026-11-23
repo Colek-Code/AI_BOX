@@ -15,7 +15,14 @@
 #define MUSIC_HOLD_VOLUME 16U
 typedef enum { MUSIC_ABSENT, MUSIC_SCANNING, MUSIC_READY, MUSIC_PLAYING,
     MUSIC_PAUSED, MUSIC_STOPPING, MUSIC_ERROR } music_state_e;
-typedef enum { MUSIC_SELECT, MUSIC_TOGGLE, MUSIC_NEXT, MUSIC_PREVIOUS, MUSIC_RESCAN } music_command_e;
+typedef enum {
+    MUSIC_SELECT,
+    MUSIC_TOGGLE, /* 暂停或按现有断点继续。 */
+    MUSIC_NEXT,
+    MUSIC_PREVIOUS,
+    MUSIC_RESCAN,
+    MUSIC_PLAY_PAUSE, /* 暂停、续播或从当前曲目开头播放，未选曲时播放第一首。 */
+} music_command_e;
 typedef struct { uint16_t index; char title[MUSIC_TITLE_CAPACITY]; } music_item_t;
 typedef struct {
     uint32_t revision, media_generation, request_id, completed_id;
@@ -54,12 +61,12 @@ d_err_t music_service_configure(const music_config_t *config);
 d_err_t music_service_init(void);
 /**
  * @brief 受理当前媒体代次的一条播放命令。
- * @param[in] command 选曲、播放切换、上下曲或重新扫描命令。
+ * @param[in] command 选曲、播放切换、上下曲或重新扫描命令。MUSIC_PLAY_PAUSE 允许无断点时起播。
  * @param[in] generation 快照中的当前媒体代次。
  * @param[in] index 选曲命令使用的零起始索引，其他命令忽略。
  * @param[out] request_id 非空请求编号输出；仅受理成功写入。
  * @return 受理返回 D_OK；无效命令或选曲索引返回 D_ERR_INVALID_ARG；媒体不匹配或未就绪返回 D_ERR_NOT_READY；占用或在途命令返回 D_ERR_BUSY。
- * @note completed_id 与 command_result 才证明执行终态。
+ * @note 工作任务按执行时的当前曲目及断点处理 MUSIC_PLAY_PAUSE。completed_id 与 command_result 证明执行终态。
  */
 d_err_t music_service_request(music_command_e command, uint32_t generation,
                              uint16_t index, uint32_t *request_id);
